@@ -1,0 +1,3882 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Motion Transmission</title>
+<style>
+  :root {
+    --bg: #111418;
+    --panel: #1b1f25;
+    --panel2: #232932;
+    --ink: #e6e9ef;
+    --muted: #8a93a3;
+    --accent: #4ea1ff;
+    --good: #66bb6a;
+    --grid: #2a313c;
+    --cP: #ef5350;
+    --cI: #f6c945;
+    --cD: #26c6da;
+    --cU: #ffffff;
+    --cW: #f6a623;
+    --cRef: #66bb6a;
+    --cX: #4ea1ff;
+    --cY: #ab47bc;
+    /* per-wheel palette (cycles for index>=8) */
+    --w0: #4ea1ff;
+    --w1: #66bb6a;
+    --w2: #ef5350;
+    --w3: #f6c945;
+    --w4: #26c6da;
+    --w5: #ab47bc;
+    --w6: #ff9f43;
+    --w7: #c0c9d8;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    font: 13px/1.35 ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial;
+  }
+  /* iOS Safari refuses to scroll an iframe document itself, but it WILL scroll
+     an explicitly-sized overflow container inside the iframe. Lock body to the
+     iframe box, then let .scroll-host be the actual scroll surface. */
+  .scroll-host {
+    position: absolute; inset: 0;
+    overflow-y: auto; overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg);
+  }
+  /* Viewport-fit when there's room, page-scroll when there isn't. The
+     min-height + flex chain (without min-height:0) means: flex children
+     happily expand into spare viewport, but never shrink below their content,
+     so on a short viewport the body grows past 100dvh and scrolls naturally. */
+  .app {
+    display: flex; flex-direction: column;
+    gap: 10px; padding: 10px;
+    min-height: 100vh;     /* fallback: pre-Safari 15.4 / pre-Chrome 108 */
+    min-height: 100dvh;    /* dynamic viewport — accounts for mobile chrome */
+  }
+  .lesson {
+    flex: 1;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .lesson > .sub-tabs { flex: 0 0 auto; }
+  .lesson > .stage    { flex: 1; }
+  .lesson > .stub     { flex: 1; }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 10px; background: var(--panel); border-radius: 8px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
+  header .sp { flex: 1; }
+  header button, .ex-tabs button {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid #2e3642; border-radius: 6px;
+    padding: 5px 10px; cursor: pointer; font-size: 12px;
+  }
+  header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
+  .ex-tabs { display: flex; gap: 4px; }
+  .ex-tabs button.active { border-color: var(--accent); color: var(--accent); }
+
+  .lesson[hidden] { display: none; }
+
+  .sub-tabs {
+    display: flex; gap: 2px;
+    border-bottom: 1px solid #2a313c;
+    padding: 0 4px;
+    background: var(--panel); border-radius: 8px 8px 0 0;
+  }
+  .sub-tabs button {
+    background: transparent; color: var(--muted);
+    border: 0; border-bottom: 2px solid transparent;
+    padding: 7px 12px; cursor: pointer; font: inherit;
+    text-transform: uppercase; letter-spacing: 0.8px; font-size: 11px; font-weight: 600;
+  }
+  .sub-tabs button:hover { color: var(--ink); }
+  .sub-tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+  .stage {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+    grid-template-rows: minmax(280px, 1fr) auto auto;
+    gap: 10px;
+  }
+  .cv-box {
+    background: var(--panel); border-radius: 8px; padding: 8px;
+    display: flex; position: relative;
+    grid-column: 1; grid-row: 1; min-height: 280px;
+  }
+  .cv-box canvas {
+    width: 100%; height: 100%; display: block; border-radius: 6px;
+    background: #0d1013;
+    touch-action: none; cursor: default;
+  }
+  .cv-box canvas.grabbing { cursor: grabbing; }
+
+  /* Right pane: plots + stats merged. Fills the viewport when room allows;
+     when the viewport is too short, the readout's inner overflow scrolls the
+     stats while the page-level scroll handles the rest of the chrome. */
+  .right-pane {
+    grid-column: 2; grid-row: 1 / span 3;
+    display: flex; flex-direction: column; gap: 0;
+    background: var(--panel); border-radius: 8px;
+    overflow: hidden; min-height: 280px;
+  }
+  .plot-box {
+    flex: 1 1 0; min-height: 200px;
+    padding: 0; display: flex; position: relative;
+  }
+  .plot-box canvas {
+    width: 100%; height: 100%; display: block;
+    border-radius: 8px 8px 0 0;
+    background: var(--panel);
+  }
+  #box-wheels { grid-column: 1; grid-row: 2; }
+
+  .drive-row {
+    background: var(--panel); border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .readout {
+    flex: 0 1 auto;
+    border-top: 2px solid var(--bg);
+    padding: 10px;
+    display: flex; flex-direction: column; gap: 4px;
+    font-variant-numeric: tabular-nums;
+    overflow: auto; max-height: 40vh;
+    font-size: 14px;
+  }
+  .readout h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px;
+    margin: 8px 0 4px 0; color: var(--muted); font-weight: 600;
+  }
+  .readout h2:first-child { margin-top: 0; }
+  .readout .ln { display: flex; justify-content: space-between; color: var(--muted); }
+  .readout .ln b { color: var(--ink); font-weight: 600; }
+  .readout .swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 6px; vertical-align: middle;
+  }
+
+  .sub-panels {
+    grid-column: 1; grid-row: 3;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .box {
+    background: var(--panel); border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .box h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px;
+    margin: 0; color: var(--muted); font-weight: 600;
+  }
+  .box h3 {
+    font-size: 13px; margin: 6px 0 0 0; color: var(--muted); font-weight: 600;
+    border-top: 1px solid #2a313c; padding-top: 6px;
+  }
+
+  .row {
+    display: grid;
+    grid-template-columns: 64px 1fr 80px;
+    align-items: center; gap: 8px;
+  }
+  .row label { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; }
+  .row label[title] { cursor: help; border-bottom: 1px dotted var(--muted); }
+  .row input[type=range] { width: 100%; accent-color: var(--accent); }
+  .row input[type=number] {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid #2e3642; border-radius: 4px;
+    padding: 3px 5px; width: 100%;
+    font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  .row input[type=number]:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+  .pair { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .pair button {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid #2e3642; border-radius: 4px;
+    padding: 3px 8px; cursor: pointer; font-size: 12px;
+  }
+  .pair button:hover { border-color: var(--accent); }
+
+  .wheel-card {
+    border: 1px solid #2a313c; border-radius: 6px;
+    padding: 6px 8px; display: flex; flex-direction: column; gap: 4px;
+    background: #161a20;
+  }
+  .wheel-card .head {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--ink); font-weight: 600; font-size: 14px;
+    margin-bottom: 2px;
+  }
+  .wheel-card .head .swatch {
+    width: 12px; height: 12px; border-radius: 3px; display: inline-block;
+  }
+  .wheel-card .head .tag {
+    font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.6px;
+  }
+  .wheel-card .close {
+    margin-left: auto;
+    background: transparent; color: var(--muted);
+    border: 0; font-size: 18px; line-height: 1;
+    cursor: pointer; padding: 0 6px;
+    font-weight: 600;
+  }
+  .wheel-card .close:hover { color: var(--cP); }
+  .wheel-card .close:disabled { opacity: 0.25; cursor: default; }
+  #wheel-rows {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+
+  .stub {
+    padding: 30px; text-align: center; color: var(--muted);
+    background: var(--panel); border-radius: 8px;
+  }
+  .stub h2 { color: var(--ink); margin: 0 0 8px 0; }
+
+  footer { text-align: center; color: var(--muted); font-size: 11px; padding: 4px; }
+</style>
+</head>
+<body>
+<div class="scroll-host">
+<div class="app">
+  <header>
+    <h1>Motion Transmission</h1>
+    <span class="sp"></span>
+    <div class="ex-tabs" id="lesson-tabs">
+      <button type="button" data-lesson="rotational" class="active">Rotational</button>
+      <button type="button" data-lesson="linear">Linear</button>
+    </div>
+    <button id="btn-reset">Reset</button>
+    <button id="btn-pause">Pause</button>
+    <button id="btn-drive-on">Drive: OFF</button>
+    <button id="btn-zero-w">Zero ω</button>
+  </header>
+
+  <!-- ========================= ROTATIONAL ========================= -->
+  <section class="lesson" data-lesson="rotational">
+    <div class="sub-tabs" id="rot-tabs">
+      <button type="button" data-mode="single"   class="active">single-radius</button>
+      <button type="button" data-mode="double"  >double-radius</button>
+      <button type="button" data-mode="belt"    >belts</button>
+      <button type="button" data-mode="backlash">backlash</button>
+      <button type="button" data-mode="whole"   >whole-system</button>
+    </div>
+
+    <section class="stage">
+      <div class="cv-box"><canvas id="cv"></canvas></div>
+      <div class="right-pane">
+        <div class="plot-box"><canvas id="plot"></canvas></div>
+        <div class="readout" id="readout">
+          <h2>Drive</h2>
+          <div class="ln"><span>τ applied</span><b><span id="r-T">0.00</span> N·m</b></div>
+          <div class="ln"><span>Power</span><b><span id="r-P">0.00</span> W</b></div>
+          <div class="ln"><span>J<sub>eff</sub> @ drive</span><b><span id="r-Jeff">0.00</span> kg·m²</b></div>
+          <div class="ln"><span>sim t</span><b><span id="r-t">0.00</span> s</b></div>
+          <div class="ln"><span>fps</span><b><span id="r-fps">--</span></b></div>
+          <h2>Wheels</h2>
+          <div id="r-wheel-list"></div>
+        </div>
+      </div>
+
+      <div class="box" id="box-wheels">
+        <h2>Wheels</h2>
+        <div class="pair">
+          <button id="btn-add">+ Add wheel</button>
+          <span id="wheel-count" style="color:var(--muted);font-size:11px;margin-left:auto;">N = 2</span>
+        </div>
+        <div id="wheel-rows"></div>
+      </div>
+
+      <div class="sub-panels">
+        <div class="drive-row" id="drive-row">
+          <h2 style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:var(--muted);font-weight:600;">Drive (left-most wheel)</h2>
+          <div id="drive-sliders"></div>
+          <div class="pair">
+            <span style="color:var(--muted);font-size:11px;">Click &amp; drag any wheel's rim to rotate it manually.</span>
+          </div>
+        </div>
+        <div class="box" id="box-physics">
+          <h2>Physics</h2>
+          <div id="phys-sliders"></div>
+          <h3>Mode notes</h3>
+          <div id="mode-notes" style="color:var(--muted);font-size:11px;line-height:1.5;"></div>
+        </div>
+      </div>
+    </section>
+  </section>
+
+  <!-- ========================= LINEAR ========================= -->
+  <section class="lesson" data-lesson="linear" hidden>
+    <div class="sub-tabs" id="lin-tabs">
+      <button type="button" data-lmode="lead" class="active">lead-screw</button>
+      <button type="button" data-lmode="ball" >ball-screw</button>
+      <button type="button" data-lmode="conv" >conveyor-belt</button>
+      <button type="button" data-lmode="whole">whole-system</button>
+    </div>
+
+    <section class="stage">
+      <div class="cv-box"><canvas id="cv-lin"></canvas></div>
+      <div class="right-pane">
+        <div class="plot-box"><canvas id="plot-lin"></canvas></div>
+        <div class="readout" id="readout-lin">
+          <h2>Drive</h2>
+          <div class="ln"><span>τ applied</span><b><span id="lr-T">0.00</span> N·m</b></div>
+          <div class="ln"><span>F at load</span><b><span id="lr-F">0.00</span> N</b></div>
+          <div class="ln"><span>x (load)</span><b><span id="lr-x">0.00</span> m</b></div>
+          <div class="ln"><span>v (load)</span><b><span id="lr-v">0.00</span> m/s</b></div>
+          <div class="ln"><span>J<sub>load,refl</sub></span><b><span id="lr-Jrefl">0.00</span> kg·m²</b></div>
+          <div class="ln"><span>J<sub>eff</sub> @ motor</span><b><span id="lr-Jeff">0.00</span> kg·m²</b></div>
+          <div class="ln"><span>Motor T</span><b><span id="lr-thE">25</span> °C</b></div>
+          <div class="ln"><span>sim t</span><b><span id="lr-t">0.00</span> s</b></div>
+          <div class="ln"><span>fps</span><b><span id="lr-fps">--</span></b></div>
+          <h2 id="lr-wheel-hdr" style="display:none;">Wheels</h2>
+          <div id="lr-wheel-list"></div>
+        </div>
+      </div>
+
+      <div class="box" id="lin-wheels-box" style="display:none;">
+        <h2>Drivetrain wheels</h2>
+        <div class="pair">
+          <button id="btn-add-lin">+ Add wheel</button>
+          <span id="lin-wheel-count" style="color:var(--muted);font-size:11px;margin-left:auto;">N = 2</span>
+        </div>
+        <div id="lin-wheel-rows"></div>
+      </div>
+
+      <div class="sub-panels">
+        <div class="drive-row" id="lin-drive-row">
+          <h2 style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:var(--muted);font-weight:600;">Motor / Drive</h2>
+          <div id="lin-drive-sliders"></div>
+          <div class="pair" id="lin-pid-pair" style="display:none;">
+            <span style="color:var(--muted);font-size:11px;">Position PID drives the motor toward the target marker.</span>
+          </div>
+        </div>
+        <div class="box" id="lin-mech-box">
+          <h2 id="lin-mech-h2">Mechanism</h2>
+          <div id="lin-mech-sliders"></div>
+          <h3>Mode notes</h3>
+          <div id="lin-notes" style="color:var(--muted);font-size:11px;line-height:1.5;"></div>
+        </div>
+      </div>
+    </section>
+  </section>
+
+</div>
+</div>
+
+<script>
+"use strict";
+
+// =============================================================================
+//  PARAMETER REGISTRY (shared mkRow helper, log-scale support)
+// =============================================================================
+const P = {
+  // drive
+  Tmax:   { label: "τ_max",  min: 0.01, max: 50,   step: 0.01, value: 2.0,  log: true,
+            tip: "Peak torque the drive can apply on the left-most wheel (N·m)." },
+  wTarget:{ label: "ω_tgt",  min: -30,  max: 30,   step: 0.01, value: 6.0,
+            tip: "Target angular velocity (rad/s). The drive applies torque proportional to (ω_tgt − ω) capped at τ_max." },
+  Kp:     { label: "K_p",    min: 0.01, max: 200,  step: 0.01, value: 5.0, log: true,
+            tip: "Drive controller stiffness (N·m·s/rad). Higher = sharper response, but more chatter against τ_max." },
+  // physics
+  drag:   { label: "c",      min: 0,    max: 2,    step: 0.001, value: 0.02,
+            tip: "Viscous damping at each wheel (N·m·s/rad)." },
+  beltGap:{ label: "belt d", min: 0.1,  max: 4,    step: 0.01, value: 1.0,
+            tip: "Free space between adjacent pulleys, measured rim-to-rim at the outer radii (m). Stays constant when you resize a pulley — the other pulleys reposition to preserve it." },
+  lash:   { label: "lash",   min: 0,    max: 0.30, step: 0.001, value: 0.04,
+            tip: "Free-play gap between meshing teeth, measured around the contact circle (m). On a direction reversal the wheel rotates through this much slack before the opposite flank picks up motion again." },
+};
+
+function mkRow(parent, key, onChange) {
+  const cfg = P[key];
+  const row = document.createElement("div");
+  row.className = "row";
+  const lab = document.createElement("label");
+  lab.textContent = cfg.label;
+  if (cfg.tip) lab.title = cfg.tip;
+  const rng = document.createElement("input");
+  rng.type = "range";
+  const num = document.createElement("input");
+  num.type = "number";
+  num.min = cfg.min; num.max = cfg.max; num.step = cfg.step;
+  num.value = cfg.value;
+
+  const logMode = !!cfg.log && cfg.min > 0 && cfg.max > cfg.min;
+  const lmin = logMode ? Math.log(cfg.min) : 0;
+  const lmax = logMode ? Math.log(cfg.max) : 0;
+  const sliderFromValue = (v) => {
+    if (logMode) {
+      const c = Math.max(cfg.min, Math.min(cfg.max, v));
+      return (Math.log(c) - lmin) / (lmax - lmin);
+    }
+    return Math.max(cfg.min, Math.min(cfg.max, v));
+  };
+  const valueFromSlider = (s) => logMode ? Math.exp(lmin + s * (lmax - lmin)) : s;
+
+  if (logMode) { rng.min = 0; rng.max = 1; rng.step = 0.0005; }
+  else        { rng.min = cfg.min; rng.max = cfg.max; rng.step = cfg.step; }
+  rng.value = sliderFromValue(cfg.value);
+
+  const commit = (raw, src) => {
+    let v;
+    if (src === "rng") v = valueFromSlider(Number(raw));
+    else               v = Number(raw);
+    if (!Number.isFinite(v)) return;
+    cfg.value = v;
+    if (src !== "rng") rng.value = sliderFromValue(v);
+    if (src !== "num") num.value = logMode ? Number(v.toPrecision(4)) : v;
+    if (onChange) onChange(v);
+  };
+  rng.addEventListener("input", () => commit(rng.value, "rng"));
+  num.addEventListener("input", () => commit(num.value, "num"));
+  row.append(lab, rng, num);
+  parent.appendChild(row);
+  cfg._row = row;
+  cfg._sliderFromValue = sliderFromValue;
+}
+
+function syncSlider(key) {
+  const cfg = P[key];
+  if (!cfg || !cfg._row) return;
+  const rng = cfg._row.querySelector('input[type=range]');
+  const num = cfg._row.querySelector('input[type=number]');
+  if (rng) rng.value = cfg._sliderFromValue ? cfg._sliderFromValue(cfg.value) : cfg.value;
+  if (num) num.value = cfg.value;
+}
+
+// =============================================================================
+//  WHEEL STATE
+// =============================================================================
+// Each wheel: r (single-radius / belt / backlash), r1 / r2 (double-radius),
+//             J (inertia kg·m²), theta (rad), omega (rad/s).
+// Backlash state lives on each MESH (psiOffset[]) instead of per-wheel, so the
+// formulation is symmetric — pulling either side of a mesh is equivalent.
+function makeWheel(i) {
+  return {
+    r: 0.5, r1: 0.5, r2: 0.5,
+    J: 0.05,
+    theta: 0, omega: 0,
+    // Latest torque transmitted INTO this wheel through its upstream contact,
+    // signed and reflected to its own shaft. For wheel 0 this equals the drive
+    // torque (or, when dragging, the torque required to enforce the dragged
+    // motion against the chain).
+    lastTau: 0,
+  };
+}
+
+const wheels = [makeWheel(0), makeWheel(1)];
+
+// Per-mesh backlash state. psiOffset[i] is chosen so that the mesh coordinate
+// ψ_i = θ_i·r_i + θ_{i+1}·r_{i+1} − psiOffset[i] = 0 at re-init (mid-lash).
+// ψ_i is symmetric: pulling either gear of mesh i pushes ψ_i identically.
+const psiOffset = [];
+
+const sim = {
+  lesson: "rotational",
+  mode: "single",            // single | double | belt | backlash | whole
+  paused: false,
+  t: 0,
+  driveOn: false,
+  drag: null,                // { i, initWheelTheta, initPointerAngle, lashSnap[] }
+  // Whole-system motor thermal model. dE/dt = k_h·(τ/τmax)² − k_c·E.
+  // Explodes when E reaches 1; we draw wheel 0 yellow→red as E rises.
+  thermal: 0,
+  exploded: false,
+  explosionT: 0,
+  // Whole-system PID integral on rightmost-wheel ω error.
+  pidI: 0,
+};
+
+// Geometry cache (set during render, read by hit-test)
+const view = {
+  W: 1, H: 1, scale: 1, originX: 0, originY: 0,
+  centers: [], // [{cx,cy,rPx,r1Px,r2Px}]
+};
+
+// =============================================================================
+//  RADIUS HELPERS
+//  In "double" and "belt" modes, wheels 1..N may be compound (two concentric
+//  radii r1 / r2). r1 mates with the wheel on the left, r2 with the wheel on
+//  the right. Wheel 0 only ever has a single r (no left mate).
+// =============================================================================
+function isDoubleMode(i) {
+  return (sim.mode === "double" || sim.mode === "belt") && i > 0;
+}
+function leftR(i) {
+  const w = wheels[i];
+  return isDoubleMode(i) ? w.r1 : w.r;
+}
+function rightR(i) {
+  const w = wheels[i];
+  return isDoubleMode(i) ? w.r2 : w.r;
+}
+function outerR(i) {
+  const w = wheels[i];
+  return isDoubleMode(i) ? Math.max(w.r1, w.r2) : w.r;
+}
+
+// =============================================================================
+//  GEAR RATIOS
+//  R_i = cumulative ratio from drive (wheel 0) to wheel i, signed.
+// =============================================================================
+function pairRatio(i, mode) {
+  // ratio between wheel i and wheel i+1: omega_{i+1} = ratio * omega_i
+  if (i >= wheels.length - 1) return 0;
+  const a_out = rightR(i);
+  const b_in  = leftR(i + 1);
+  // open belt couples in the same direction; gear/backlash chains reverse
+  const sign = (mode === "belt") ? +1 : -1;
+  return sign * a_out / Math.max(1e-6, b_in);
+}
+
+function cumRatios() {
+  const R = new Array(wheels.length);
+  R[0] = 1;
+  for (let i = 0; i < wheels.length - 1; i++) {
+    R[i + 1] = R[i] * pairRatio(i, sim.mode);
+  }
+  return R;
+}
+
+// J reflected to the drive shaft (wheel 0)
+function reflectedJ() {
+  const R = cumRatios();
+  let J = 0;
+  for (let i = 0; i < wheels.length; i++) J += wheels[i].J * R[i] * R[i];
+  return J;
+}
+
+// Effective viscous damping reflected to drive
+function reflectedDrag() {
+  const R = cumRatios();
+  let c = 0;
+  for (let i = 0; i < wheels.length; i++) c += P.drag.value * R[i] * R[i];
+  return c;
+}
+
+// =============================================================================
+//  POSITIONING (world units = meters; centres laid out left-to-right)
+// =============================================================================
+function layoutCenters() {
+  const out = [];
+  for (let i = 0; i < wheels.length; i++) {
+    let x;
+    if (i === 0) {
+      // first wheel's outer-left edge at world x=0 in belt mode (so the
+      // outer-rim gap to neighbours stays the same regardless of compound
+      // step), or its contact-left edge at x=0 for gear modes (tangent).
+      x = (sim.mode === "belt") ? outerR(0) : leftR(0);
+    } else if (sim.mode === "belt") {
+      // Centre spacing = outer(prev) + fixed rim-to-rim gap + outer(this).
+      // Resizing one pulley shifts later pulleys but always preserves the
+      // outer-radius gap; the belt path itself uses the contact radii.
+      x = out[i - 1].cx + outerR(i - 1) + P.beltGap.value + outerR(i);
+    } else {
+      // gears: tangent contact at the meshing radii (gap=0)
+      x = out[i - 1].cx + rightR(i - 1) + leftR(i);
+    }
+    out.push({ cx: x, cy: 0 });
+  }
+  return out;
+}
+
+// Z-order for double-radius rendering. If a wheel's outer (visual) ring
+// extends past the contact radius with its neighbour, the neighbour is
+// "contacting the inner radius" and should be drawn ON TOP of this wheel.
+function computeDrawOrder() {
+  const N = wheels.length;
+  const depth = new Array(N).fill(0);
+  for (let iter = 0; iter < N; iter++) {
+    let changed = false;
+    for (let m = 0; m < N - 1; m++) {
+      const aRight = rightR(m), aOuter = outerR(m);
+      const bLeft  = leftR(m + 1), bOuter = outerR(m + 1);
+      // b's outer covers contact ⇒ a is contacting b's inner ⇒ a drawn after b
+      if (bOuter > bLeft + 1e-9 && depth[m] <= depth[m + 1]) {
+        depth[m] = depth[m + 1] + 1;
+        changed = true;
+      }
+      // a's outer covers contact ⇒ b is contacting a's inner ⇒ b drawn after a
+      if (aOuter > aRight + 1e-9 && depth[m + 1] <= depth[m]) {
+        depth[m + 1] = depth[m] + 1;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  const order = wheels.map((_, i) => i);
+  order.sort((i, j) => depth[i] - depth[j]);
+  return order;
+}
+
+// =============================================================================
+//  PHYSICS
+// =============================================================================
+const PHYS_HZ = 240;
+const PHYS_DT = 1 / PHYS_HZ;
+let accumulator = 0;
+let lastMs = performance.now();
+
+let lastT = 0; // torque applied to drive (N·m), for readout/plot
+
+function driveTorqueRaw(omega0) {
+  if (!sim.driveOn || sim.exploded) return 0;
+  let e;
+  if (sim.mode === "whole") {
+    // PID on rightmost-wheel ω. The cumulative ratio R[N-1] can be
+    // negative (odd number of gear stages reverses direction), so we
+    // refer the target back into MOTOR frame instead of using the raw
+    // (target − R·ω0) error. e_motor = (target/R) − ω0 has the correct
+    // sign regardless of R's sign, and the implicit-Euler stiffness
+    // term in physicsCoupled stays plain Kp.
+    const Rcum = cumRatios();
+    const Rend = Rcum[wheels.length - 1];
+    const safeR = Math.abs(Rend) > 1e-9 ? Rend : (Rend >= 0 ? 1e-9 : -1e-9);
+    const omega0Target = P.wTarget.value / safeR;
+    e = omega0Target - omega0;
+    let T = P.Kp.value * e + sim.pidI;
+    if (T >  P.Tmax.value) T =  P.Tmax.value;
+    if (T < -P.Tmax.value) T = -P.Tmax.value;
+    return T;
+  }
+  e = P.wTarget.value - omega0;
+  let T = P.Kp.value * e;
+  if (T >  P.Tmax.value) T =  P.Tmax.value;
+  if (T < -P.Tmax.value) T = -P.Tmax.value;
+  return T;
+}
+
+// Newton-cooling thermal model for the motor. Ambient is a 25 °C room;
+// the rotor settles toward steady-state with thermal time constant τ_th.
+// Heat input rises with τ² (in a DC motor τ ∝ I and P_loss = I²·R, so
+// dissipation scales with τ²). The motor blows at a fixed temperature
+// T_blow = 180 °C. The steady-state rise at full torque ΔT_max is
+// pinned so that 5 s of continuous τ_max from a cold start exactly
+// reaches T_blow:
+//     T(t) − T_amb = ΔT_max · (1 − e^(−t/τ_th))
+//   ⇒ ΔT_max = (T_blow − T_amb) / (1 − e^(−5/τ_th))
+// Below τ_max the time-to-blow scales like a fuse equation against
+// current (τ ≈ I), and torques small enough that ΔT_inf · (τ/τ_max)²
+// never reaches T_blow − T_amb run cool forever — the motor's steady-
+// state thermal limit, exactly as on a real datasheet.
+//
+// State is stored as the normalised excursion E = (T − T_amb)/(T_blow − T_amb)
+// so existing renderers (halo, tint, gauge) keep working: E=0 ⇔ ambient,
+// E=1 ⇔ blow. Conversion to °C is purely cosmetic.
+const THERM_T_AMBIENT = 25;
+const THERM_T_BLOW    = 180;
+const THERM_TAU_S     = 12;
+const THERM_E_INF_MAX = 1 / (1 - Math.exp(-5 / THERM_TAU_S));
+function tempFromE(E) {
+  return THERM_T_AMBIENT + E * (THERM_T_BLOW - THERM_T_AMBIENT);
+}
+function stepThermal(dt, tauApplied, tauMax) {
+  if (sim.mode !== "whole") return;
+  const tn = tauApplied / Math.max(1e-3, tauMax);
+  const Einf = THERM_E_INF_MAX * tn * tn;
+  sim.thermal += dt * (Einf - sim.thermal) / THERM_TAU_S;
+  if (sim.thermal < 0) sim.thermal = 0;
+  if (!sim.exploded && sim.thermal >= 1.0) {
+    sim.exploded = true;
+    sim.explosionT = sim.t;
+  }
+}
+
+function physicsStep(dt) {
+  if (sim.drag) {
+    // Pointer is pinning the dragged wheel's angle (already updated by pointermove).
+    // Propagate the delta-since-last-step through the chain by ratio. Per-wheel theta
+    // integration means radius changes don't snap absolute angles.
+    const R = cumRatios();
+    const dragI = sim.drag.i;
+    const newTheta = wheels[dragI].theta;
+    const lastDragTheta = (sim.drag.lastDragTheta !== undefined) ? sim.drag.lastDragTheta : newTheta;
+    const delta = newTheta - lastDragTheta;
+    sim.drag.lastDragTheta = newTheta;
+
+    if (sim.mode === "backlash") {
+      // Symmetric ψ-propagation. Each mesh has free-play arc 2H = lash where
+      // ψ = θ_a·r_a + θ_b·r_b − psiOffset is in [-H, +H]. Drag updated θ at dragI
+      // already; ψ values now reflect that. For each mesh whose ψ has overflowed
+      // ±H, project ψ back to the boundary by pushing the OTHER gear of the
+      // mesh, and cascade the residual motion further along the chain.
+      const H = P.lash.value / 2;
+      for (let m = dragI; m < wheels.length - 1; m++) {
+        const psi = meshPsi(m);
+        if (psi <= H && psi >= -H) break;
+        const target = (psi > 0) ? H : -H;
+        const overflow = psi - target;
+        wheels[m + 1].theta -= overflow / Math.max(1e-6, wheels[m + 1].r);
+      }
+      for (let m = dragI - 1; m >= 0; m--) {
+        const psi = meshPsi(m);
+        if (psi <= H && psi >= -H) break;
+        const target = (psi > 0) ? H : -H;
+        const overflow = psi - target;
+        wheels[m].theta -= overflow / Math.max(1e-6, wheels[m].r);
+      }
+    } else {
+      const Rd = R[dragI];
+      if (Math.abs(Rd) > 1e-12) {
+        for (let i = 0; i < wheels.length; i++) {
+          if (i === dragI) continue;
+          wheels[i].theta += delta * (R[i] / Rd);
+        }
+      }
+    }
+
+    // ω and τ tracking during drag. Pointer events fire at ~60Hz while physics
+    // runs at 240Hz, so per-step Δθ is bursty. Two cascaded windows damp this:
+    //   - 80ms window for ω: average pointer rate, hides per-frame jitter.
+    //   - 150ms window for α: differentiate ω across a wide baseline so a
+    //     steady drag reads α≈0 (τ collapses to drag damping) and only real
+    //     pointer accelerations spike τ.
+    // Without the wider α baseline, even a smoothed ω jumps in chunks of
+    // (1 pointer event)/(window) per physics step → α and τ diverge wildly.
+    if (!sim.drag.tHist) sim.drag.tHist = [];
+    sim.drag.tHist.push({ dt, dtheta: delta });
+    const WINDOW = 0.08;
+    let sumDt = 0, sumDth = 0, sliceFrom = 0;
+    for (let k = sim.drag.tHist.length - 1; k >= 0; k--) {
+      sumDt += sim.drag.tHist[k].dt;
+      sumDth += sim.drag.tHist[k].dtheta;
+      if (sumDt >= WINDOW) { sliceFrom = k; break; }
+    }
+    if (sliceFrom > 0) sim.drag.tHist.splice(0, sliceFrom);
+    const wDrag = sumDt > 1e-9 ? sumDth / sumDt : 0;
+    if (sim.mode === "backlash") {
+      // Re-derive blocks from current ψ state so ω is only propagated within
+      // engaged blocks. Wheels in disengaged blocks keep their previous ω
+      // (in practice ≈ 0, since drag also damps them).
+      for (let i = 0; i < wheels.length; i++) wheels[i].omega = 0;
+      const N = wheels.length;
+      const inBlock = new Array(N).fill(false);
+      inBlock[dragI] = true;
+      // Cascade right while consecutive meshes are at a flank.
+      const H = P.lash.value / 2;
+      const eps = Math.max(1e-7, H * 1e-3);
+      for (let m = dragI; m < N - 1; m++) {
+        const psi = meshPsi(m);
+        if (psi >= H - eps || psi <= -H + eps) inBlock[m + 1] = true; else break;
+      }
+      for (let m = dragI - 1; m >= 0; m--) {
+        const psi = meshPsi(m);
+        if (psi >= H - eps || psi <= -H + eps) inBlock[m] = true; else break;
+      }
+      // Build local ratio inside the engaged span centred on dragI.
+      let r = 1;
+      for (let i = dragI; i < N && inBlock[i]; i++) {
+        if (i > dragI) r *= -wheels[i - 1].r / Math.max(1e-6, wheels[i].r);
+        wheels[i].omega = wDrag * r;
+      }
+      r = 1;
+      for (let i = dragI - 1; i >= 0 && inBlock[i]; i--) {
+        r *= -wheels[i + 1].r / Math.max(1e-6, wheels[i].r);
+        wheels[i].omega = wDrag * r;
+      }
+    } else {
+      const Rd = R[dragI];
+      if (Math.abs(Rd) > 1e-12) {
+        for (let i = 0; i < wheels.length; i++) {
+          wheels[i].omega = wDrag * R[i] / Rd;
+        }
+      } else {
+        for (const w of wheels) w.omega = 0;
+      }
+    }
+
+    // Wide-baseline α: differentiate ω across ~150ms so steady drags read
+    // α≈0 → τ ≈ c·ω only. Without this baseline, α = (ω_now − ω_prev_step)/PHYS_DT
+    // amplifies single-step ω jitter (chunks of (one pointer event)/window) into
+    // huge spurious accelerations and τ swings dominated entirely by noise.
+    if (!sim.drag.wHist) sim.drag.wHist = [];
+    sim.drag.wHist.push({ t: sim.t, omegas: wheels.map(w => w.omega) });
+    const ALPHA_WINDOW = 0.15;
+    while (sim.drag.wHist.length > 1
+           && (sim.t - sim.drag.wHist[0].t) > ALPHA_WINDOW) {
+      sim.drag.wHist.shift();
+    }
+    const oldest = sim.drag.wHist[0];
+    const wideDt = (sim.t - oldest.t) > 1e-3 ? (sim.t - oldest.t) : dt;
+    // Pad oldest.omegas with current values if wheel set has changed mid-drag
+    // (defensive — wheels can be added/removed; we cancel drag on delete though).
+    const oldestOm = wheels.map((w, i) =>
+      (oldest.omegas && oldest.omegas[i] !== undefined) ? oldest.omegas[i] : w.omega);
+    computePerWheelTorque(oldestOm, wideDt);
+    lastT = wheels[0].lastTau;
+    return;
+  }
+
+  if (sim.mode === "backlash") {
+    physicsBacklash(dt);
+  } else {
+    physicsCoupled(dt);
+  }
+}
+
+// Per-wheel input torque (signed, reflected to that wheel's own shaft).
+//   τ_in[i] = Σ_{k>=i, k in same engaged block as i} (J_k·α_k + c·ω_k) · R[k] / R[i]
+// For non-backlash modes the entire chain is one block.
+function computePerWheelTorque(prevOmegas, dt) {
+  const N = wheels.length;
+  const tauSelf = new Array(N);
+  for (let i = 0; i < N; i++) {
+    const alpha = dt > 0 ? (wheels[i].omega - prevOmegas[i]) / dt : 0;
+    tauSelf[i] = wheels[i].J * alpha + P.drag.value * wheels[i].omega;
+  }
+
+  if (sim.mode !== "backlash") {
+    const R = cumRatios();
+    for (let i = 0; i < N; i++) {
+      const Ri = R[i] || 1e-9;
+      let s = 0;
+      for (let k = i; k < N; k++) s += tauSelf[k] * R[k] / Ri;
+      wheels[i].lastTau = s;
+    }
+    return;
+  }
+
+  // Backlash: per engaged block. Disengaged meshes break the sum.
+  const engaged = new Array(N - 1).fill(0);
+  for (let i = 0; i < N - 1; i++) engaged[i] = meshEngagement(i);
+  const blockOf = new Array(N).fill(-1);
+  let nB = 0;
+  for (let i = 0; i < N; i++) {
+    if (i === 0 || engaged[i - 1] === 0) nB++;
+    blockOf[i] = nB - 1;
+  }
+  const RinB = new Array(N).fill(1);
+  let curR = 1, curB = -1;
+  for (let i = 0; i < N; i++) {
+    const b = blockOf[i];
+    if (b !== curB) { curR = 1; curB = b; }
+    else            { curR *= -wheels[i - 1].r / Math.max(1e-6, wheels[i].r); }
+    RinB[i] = curR;
+  }
+  for (let i = 0; i < N; i++) {
+    const Ri = RinB[i] || 1e-9;
+    const myB = blockOf[i];
+    let s = 0;
+    for (let k = i; k < N; k++) {
+      if (blockOf[k] !== myB) break;
+      s += tauSelf[k] * RinB[k] / Ri;
+    }
+    wheels[i].lastTau = s;
+  }
+}
+
+// Single-DoF rigid coupling: wheel 0 carries everything via reflected J/c.
+function physicsCoupled(dt) {
+  const prevOmegas = wheels.map(w => w.omega);
+  const R = cumRatios();
+  const Jeff = reflectedJ();
+  const ceff = reflectedDrag();
+
+  // Whole-system mode tracks ω on the rightmost wheel via a PID. We
+  // refer the target into motor frame (ω0_target = target/R) so the
+  // controller works regardless of the sign of R, and the implicit-Euler
+  // stiffness term reduces to plain Kp.
+  let omega0Target = P.wTarget.value;
+  if (sim.mode === "whole") {
+    const Rend = R[wheels.length - 1];
+    const safeR = Math.abs(Rend) > 1e-9 ? Rend : (Rend >= 0 ? 1e-9 : -1e-9);
+    omega0Target = P.wTarget.value / safeR;
+    if (sim.driveOn && !sim.exploded) {
+      const errMotor = omega0Target - wheels[0].omega;
+      const Ki = 0.6;
+      sim.pidI += Ki * errMotor * dt;
+      // Anti-windup: clamp to ±τ_max so the integrator can't run away
+      // while saturated.
+      const lim = P.Tmax.value;
+      if (sim.pidI >  lim) sim.pidI =  lim;
+      if (sim.pidI < -lim) sim.pidI = -lim;
+    }
+  }
+
+  // Implicit-Euler on omega for stability against stiff drag/Kp:
+  //   J·dω/dt = T(ω) − c·ω
+  //   T(ω) ≈ T(ω_n) − Kp·(ω − ω_n)·driveOn
+  // → ω_{n+1} = (J·ω_n + dt·T0) / (J + dt·(c + Kp·driveOn))
+  const w0 = wheels[0].omega;
+  const T0 = driveTorqueRaw(w0);
+  const KpEff = (sim.driveOn && !sim.exploded) ? P.Kp.value : 0;
+  const denom = Jeff + dt * (ceff + KpEff);
+  let w0new = (Jeff * w0 + dt * (T0 + KpEff * w0)) / Math.max(1e-9, denom);
+  // saturation against Tmax: if controller wanted more than Tmax, fall back to explicit clamp
+  const TwantUnclamped = (sim.driveOn && !sim.exploded)
+    ? (sim.mode === "whole"
+        ? P.Kp.value * (omega0Target - w0new) + sim.pidI
+        : P.Kp.value * (P.wTarget.value - w0new))
+    : 0;
+  if (Math.abs(TwantUnclamped) > P.Tmax.value) {
+    const Tsat = Math.sign(TwantUnclamped) * P.Tmax.value;
+    w0new = w0 + dt * (Tsat - ceff * w0) / Math.max(1e-9, Jeff);
+  }
+  const Tapplied = (sim.driveOn && !sim.exploded)
+    ? Math.max(-P.Tmax.value, Math.min(P.Tmax.value,
+        sim.mode === "whole"
+          ? P.Kp.value * (omega0Target - w0new) + sim.pidI
+          : P.Kp.value * (P.wTarget.value - w0new)))
+    : 0;
+
+  // Per-wheel theta integration so changing a radius slider doesn't snap absolute angles.
+  for (let i = 0; i < wheels.length; i++) {
+    wheels[i].omega = w0new * R[i];
+    wheels[i].theta += wheels[i].omega * dt;
+  }
+  lastT = Tapplied;
+  computePerWheelTorque(prevOmegas, dt);
+  if (sim.mode === "whole") stepThermal(dt, Tapplied, P.Tmax.value);
+}
+
+// Backlash: collision-driven mesh dynamics in mesh-coordinate ψ.
+//
+//   ψ_i = θ_i·r_i + θ_{i+1}·r_{i+1} − psiOffset[i]
+//
+// Rolling-without-slip at the pitch point gives  ω_i·r_i + ω_{i+1}·r_{i+1} = 0,
+// i.e. dψ/dt = 0. With backlash arc B = P.lash.value at the pitch circle, ψ is
+// free to vary in [-H, +H] with H = B/2. Inside the window the mesh is
+// disengaged (each gear coasts independently). At the boundary, tooth flanks
+// collide and torque transmits via the rolling constraint. The formulation is
+// fully symmetric — pulling either gear in a mesh advances ψ identically.
+
+function recomputePsiOffsets() {
+  psiOffset.length = Math.max(0, wheels.length - 1);
+  for (let i = 0; i < wheels.length - 1; i++) {
+    psiOffset[i] = wheels[i].theta * wheels[i].r + wheels[i + 1].theta * wheels[i + 1].r;
+  }
+}
+
+function meshPsi(i) {
+  const off = psiOffset[i] || 0;
+  return wheels[i].theta * wheels[i].r + wheels[i + 1].theta * wheels[i + 1].r - off;
+}
+
+function meshPsiDot(i) {
+  return wheels[i].omega * wheels[i].r + wheels[i + 1].omega * wheels[i + 1].r;
+}
+
+// Engagement state of mesh i:
+//   +1: positive flank engaged (ψ at +H, contact COMPRESSIVE in + direction)
+//   -1: negative flank engaged (ψ at -H, contact compressive in − direction)
+//    0: free-flight inside the lash window
+//
+// Tooth flanks only push, never pull. When the block solver has the mesh
+// engaged, dψ = 0 by construction — so we can't read disengagement from dψ
+// alone. Instead we compute the unconstrained ψ-acceleration from external
+// torques (drive + drag): if it would push surfaces AWAY from the boundary,
+// the contact would have to go tensile, so we release.
+function meshEngagement(i) {
+  const H = P.lash.value / 2;
+  const psi = meshPsi(i);
+  const dpsi = meshPsiDot(i);
+  if (H <= 1e-9) {
+    // Zero-lash → constraint is permanent; pick a sign so the block solver couples.
+    return (dpsi >= 0) ? +1 : -1;
+  }
+  const eps = Math.max(1e-7, H * 1e-3);
+  const atPos = psi >=  H - eps;
+  const atNeg = psi <= -H + eps;
+  if (!atPos && !atNeg) return 0;
+
+  const wA = wheels[i], wB = wheels[i + 1];
+  let T_A = -P.drag.value * wA.omega;
+  let T_B = -P.drag.value * wB.omega;
+  if (i === 0) T_A += driveTorqueRaw(wA.omega);
+  const ddpsi_free = T_A * wA.r / Math.max(1e-9, wA.J)
+                   + T_B * wB.r / Math.max(1e-9, wB.J);
+
+  if (atPos && (dpsi >  1e-6 || ddpsi_free > -1e-9)) return +1;
+  if (atNeg && (dpsi < -1e-6 || ddpsi_free <  1e-9)) return -1;
+  return 0;
+}
+
+function physicsBacklash(dt) {
+  const N = wheels.length;
+  if (N < 1) return;
+  const prevOmegas = wheels.map(w => w.omega);
+  const H = P.lash.value / 2;
+
+  // 1. Engagement state per mesh.
+  const engaged = new Array(N - 1).fill(0);
+  for (let i = 0; i < N - 1; i++) engaged[i] = meshEngagement(i);
+
+  // 2. Group wheels into rigid blocks (consecutive engaged meshes ⇒ same block).
+  const blockOf = new Array(N).fill(-1);
+  let nB = 0;
+  for (let i = 0; i < N; i++) {
+    if (i === 0 || engaged[i - 1] === 0) nB++;
+    blockOf[i] = nB - 1;
+  }
+
+  // 3. Per-block reflected J, c, ratio table.
+  const Jb = new Array(nB).fill(0);
+  const cb = new Array(nB).fill(0);
+  const RinB = new Array(N).fill(1);
+  const blockHead = new Array(nB).fill(-1);
+  let curR = 1, curB = -1;
+  for (let i = 0; i < N; i++) {
+    const b = blockOf[i];
+    if (b !== curB) { curR = 1; curB = b; blockHead[b] = i; }
+    else            { curR *= -wheels[i - 1].r / Math.max(1e-6, wheels[i].r); }
+    RinB[i] = curR;
+    Jb[b] += wheels[i].J * curR * curR;
+    cb[b] += P.drag.value * curR * curR;
+  }
+
+  // 4. Per-block ω update (implicit Euler against c + Kp). Drive torque only on
+  //    the block containing wheel 0.
+  const newHeadOmega = new Array(nB);
+  for (let b = 0; b < nB; b++) {
+    const w = wheels[blockHead[b]].omega;
+    const T0 = (b === 0) ? driveTorqueRaw(w) : 0;
+    const KpEff = (b === 0 && sim.driveOn) ? P.Kp.value : 0;
+    const denom = Jb[b] + dt * (cb[b] + KpEff);
+    let wn = (Jb[b] * w + dt * (T0 + KpEff * w)) / Math.max(1e-9, denom);
+    if (b === 0) {
+      const Tunc = sim.driveOn ? P.Kp.value * (P.wTarget.value - wn) : 0;
+      if (Math.abs(Tunc) > P.Tmax.value) {
+        const Tsat = Math.sign(Tunc) * P.Tmax.value;
+        wn = w + dt * (Tsat - cb[b] * w) / Math.max(1e-9, Jb[b]);
+      }
+    }
+    newHeadOmega[b] = wn;
+  }
+  lastT = sim.driveOn
+    ? Math.max(-P.Tmax.value, Math.min(P.Tmax.value, P.Kp.value * (P.wTarget.value - newHeadOmega[0])))
+    : 0;
+
+  // 5. Apply ω, integrate θ.
+  for (let i = 0; i < N; i++) {
+    const b = blockOf[i];
+    wheels[i].omega = newHeadOmega[b] * RinB[i];
+    wheels[i].theta += wheels[i].omega * dt;
+  }
+
+  // 6. Boundary correction. Engaged-block kinematics keep dψ=0 by construction,
+  //    so engaged meshes don't need correction. Disengaged meshes whose ψ has
+  //    crossed ±H during this step trigger an impact: project ψ back to ±H
+  //    (positionally) and apply a perfectly-plastic impulse to set dψ = 0.
+  for (let i = 0; i < N - 1; i++) {
+    if (engaged[i] !== 0) continue;
+    const psi = meshPsi(i);
+    if (psi > H || psi < -H) {
+      const target = psi > 0 ? +H : -H;
+      const dPsi = target - psi;
+      wheels[i + 1].theta += dPsi / Math.max(1e-6, wheels[i + 1].r);
+      const dpsidot = meshPsiDot(i);
+      if ((target > 0 && dpsidot > 0) || (target < 0 && dpsidot < 0)) {
+        const wA = wheels[i], wB = wheels[i + 1];
+        const denom = (wA.r * wA.r) / Math.max(1e-9, wA.J)
+                    + (wB.r * wB.r) / Math.max(1e-9, wB.J);
+        const j = -dpsidot / Math.max(1e-9, denom);
+        wA.omega += j * wA.r / Math.max(1e-9, wA.J);
+        wB.omega += j * wB.r / Math.max(1e-9, wB.J);
+      }
+    }
+  }
+  computePerWheelTorque(prevOmegas, dt);
+}
+
+// =============================================================================
+//  RENDER — animation canvas
+// =============================================================================
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const plot = document.getElementById("plot");
+const pctx = plot.getContext("2d");
+
+function fitCanvas(c, cx) {
+  const dpr = window.devicePixelRatio || 1;
+  const r = c.getBoundingClientRect();
+  c.width  = Math.max(1, Math.round(r.width * dpr));
+  c.height = Math.max(1, Math.round(r.height * dpr));
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { w: r.width, h: r.height };
+}
+
+function getVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#fff";
+}
+
+function wheelColor(i) {
+  return getVar(`--w${i % 8}`);
+}
+
+// Lerp between two colors expressed as #rrggbb. Used to tint the motor
+// (wheel 0 in whole-system mode) yellow→red as the leaky-integrator climbs
+// past 0.4 of the explosion threshold.
+function hexToRgb(hx) {
+  const m = hx.replace("#", "");
+  const v = parseInt(m.length === 3 ? m.split("").map(c => c + c).join("") : m, 16);
+  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+}
+function rgbToHex(r, g, b) {
+  const h = (n) => Math.round(Math.max(0, Math.min(255, n))).toString(16).padStart(2, "0");
+  return "#" + h(r) + h(g) + h(b);
+}
+function lerpColor(a, b, t) {
+  const A = hexToRgb(a), B = hexToRgb(b);
+  return rgbToHex(A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t);
+}
+// Map thermal E∈[0,1] to a stroke color. Stays the original wheel color
+// until E=0.4, then ramps through yellow at 0.7, then red as it nears the
+// explosion threshold.
+function thermalTint(baseHex, E) {
+  if (E <= 0.4) return baseHex;
+  if (E <= 0.7) return lerpColor(baseHex, "#f6c945", (E - 0.4) / 0.3);
+  return lerpColor("#f6c945", "#ef5350", Math.min(1, (E - 0.7) / 0.3));
+}
+function thermalFillTint(E) {
+  if (E <= 0.4) return "#1a2030";
+  if (E <= 0.7) return lerpColor("#1a2030", "#3a2d10", (E - 0.4) / 0.3);
+  return lerpColor("#3a2d10", "#3a1212", Math.min(1, (E - 0.7) / 0.3));
+}
+
+function render() {
+  const sz = fitCanvas(cv, ctx);
+  const W = sz.w, H = sz.h;
+  ctx.fillStyle = "#0d1013";
+  ctx.fillRect(0, 0, W, H);
+
+  // ---- Compute world layout + scaling
+  const layout = layoutCenters();
+  let xMin = +Infinity, xMax = -Infinity, rMax = 0;
+  for (let i = 0; i < wheels.length; i++) {
+    const oR = outerR(i);
+    if (oR > rMax) rMax = oR;
+    xMin = Math.min(xMin, layout[i].cx - oR);
+    xMax = Math.max(xMax, layout[i].cx + oR);
+  }
+
+  const padPx = 24;
+  const usableW = W - padPx * 2;
+  const usableH = H - padPx * 2;
+  const worldW = (xMax - xMin) || 1;
+  const worldH = (2 * rMax) || 1;
+  const scale  = Math.min(usableW / worldW, usableH / worldH);
+  const originX = padPx + (usableW - worldW * scale) / 2 - xMin * scale;
+  const originY = H / 2;
+
+  const w2sX = (xm) => originX + xm * scale;
+  const w2sY = (ym) => originY - ym * scale;
+  const w2sR = (rm) => rm * scale;
+
+  view.W = W; view.H = H; view.scale = scale;
+  view.originX = originX; view.originY = originY;
+  view.centers = layout.map((c, i) => ({
+    cx: w2sX(c.cx),
+    cy: w2sY(c.cy),
+    rPx:  w2sR(wheels[i].r),
+    r1Px: w2sR(wheels[i].r1),
+    r2Px: w2sR(wheels[i].r2),
+  }));
+
+  // ---- Draw connections
+  // Belts that wrap an inner radius are drawn AFTER the wheels (so the belt
+  // sits in front of the larger compound step); belts entirely on outer radii
+  // are drawn BEFORE the wheels so the rim covers the band naturally.
+  const beltsInFront = [];
+  if (sim.mode === "belt") {
+    for (let i = 0; i < wheels.length - 1; i++) {
+      const aInner = rightR(i)     < outerR(i)     - 1e-9;
+      const bInner = leftR(i + 1)  < outerR(i + 1) - 1e-9;
+      if (aInner || bInner) {
+        beltsInFront.push(i);
+      } else {
+        drawBelt(view.centers[i], view.centers[i + 1], rightR(i), leftR(i + 1), scale, i);
+      }
+    }
+  } else if (sim.mode === "backlash") {
+    // Gear teeth are drawn as part of each gear's own draw call (drawWheel handles it via mode).
+  } else if (sim.mode === "single") {
+    for (let i = 0; i < wheels.length - 1; i++) {
+      const a = view.centers[i], b = view.centers[i + 1];
+      ctx.strokeStyle = "#3a4453";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      // tangent contact line (vertical)
+      const cx = (a.cx + b.cx) / 2;
+      ctx.moveTo(cx, a.cy - Math.max(a.rPx, b.rPx) - 14);
+      ctx.lineTo(cx, a.cy + Math.max(a.rPx, b.rPx) + 14);
+      ctx.stroke();
+    }
+  } else if (sim.mode === "double") {
+    // No external connection drawn — the two radii are concentric on the same wheel.
+  }
+
+  // ---- Draw wheels (z-ordered so wheels meshing at an inner radius render on top)
+  const phases = (sim.mode === "backlash") ? gearPhases() : null;
+  const order = (sim.mode === "double" || sim.mode === "belt")
+    ? computeDrawOrder()
+    : wheels.map((_, i) => i);
+  for (const i of order) {
+    drawWheel(i, view.centers[i], phases ? phases[i] : 0);
+  }
+
+  // ---- Belts that touch an inner radius are drawn on top of the wheels
+  for (const i of beltsInFront) {
+    drawBelt(view.centers[i], view.centers[i + 1], rightR(i), leftR(i + 1), scale, i);
+  }
+
+  // ---- Drive arrow on wheel 0
+  if (sim.driveOn && !sim.exploded) {
+    drawDriveArrow(view.centers[0]);
+  }
+
+  // ---- Whole-system thermal halo + explosion. Halo intensity tracks the
+  //      leaky integrator; once past the threshold we draw a freeze-frame
+  //      explosion sprite centred on the motor.
+  if (sim.mode === "whole" && view.centers.length > 0) {
+    const c0 = view.centers[0];
+    const E = sim.thermal;
+    const r0 = (sim.mode === "backlash" ? wheels[0].r * view.scale
+                : (isDoubleMode(0) ? Math.max(c0.r1Px, c0.r2Px) : c0.rPx));
+    if (E > 0.4 && !sim.exploded) {
+      const t = Math.min(1, (E - 0.4) / 0.6);
+      const haloColor = E > 0.7 ? "#ef5350" : "#f6c945";
+      ctx.save();
+      ctx.globalAlpha = 0.18 + 0.45 * t;
+      ctx.fillStyle = haloColor;
+      ctx.beginPath();
+      ctx.arc(c0.cx, c0.cy, r0 + 8 + 14 * t, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    if (sim.exploded) drawExplosion(c0, r0);
+    drawThermalGauge(c0, r0, E);
+  }
+}
+
+function drawExplosion(c, r) {
+  const tSince = sim.t - sim.explosionT;
+  const expand = Math.min(1, tSince * 1.2);
+  const flash = Math.max(0, 1 - tSince * 0.6);
+  // Jagged starburst — alternates inner/outer radii around the wheel,
+  // hand-jittered each frame so the explosion looks alive.
+  ctx.save();
+  ctx.translate(c.cx, c.cy);
+  const N = 14;
+  ctx.beginPath();
+  for (let k = 0; k <= N * 2; k++) {
+    const a = (k / (N * 2)) * Math.PI * 2;
+    const isOuter = (k % 2) === 0;
+    const j = 0.85 + 0.3 * Math.sin(k * 13.37 + sim.t * 9);
+    const rr = (isOuter ? r * 1.85 : r * 0.95) * expand * j;
+    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+    if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = "#ff6b1a";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#ffd460";
+  ctx.stroke();
+  // Inner core
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.75 * expand, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffe98a";
+  ctx.fill();
+  if (flash > 0) {
+    ctx.globalAlpha = flash;
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.5 * expand, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.font = "bold 14px ui-sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = "#2a1500";
+  ctx.fillText("BOOM", 0, 0);
+  ctx.restore();
+}
+
+// Small thermal gauge under the motor. Dwarfed by the wheel callout, but
+// gives a numeric anchor for the colour you're seeing.
+function drawThermalGauge(c, r, E) {
+  const w = Math.max(40, r * 1.4);
+  const h = 6;
+  const x = c.cx - w / 2;
+  const y = c.cy + r + 18;
+  ctx.fillStyle = "#0d1013";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "#3a4453";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  const fillW = Math.max(0, Math.min(1, E)) * (w - 2);
+  const col = E > 0.7 ? "#ef5350" : (E > 0.4 ? "#f6c945" : "#66bb6a");
+  ctx.fillStyle = col;
+  ctx.fillRect(x + 1, y + 1, fillW, h - 2);
+  ctx.fillStyle = "#8a93a3";
+  ctx.font = "10px ui-sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillText(`T ${tempFromE(E).toFixed(0)} °C / ${THERM_T_BLOW} °C`, c.cx, y + h + 2);
+}
+
+// Gear-tooth pitch arc-length (m) along the pitch circle. Constant across all gears so
+// adjacent meshes share the same module. Number of teeth per gear is rounded to integer,
+// which means meshing alignment is exact at startup but drifts very slowly with rotation.
+const PITCH_ARC = 0.30;
+function teethCount(r) {
+  return Math.max(6, Math.round((2 * Math.PI * r) / PITCH_ARC));
+}
+
+// Compute initial tooth phase per gear so that adjacent gears interlock at the
+// mesh point. The convention alternates tooth↔gap along the chain — gear 0
+// presents a tooth toward gear 1, so gear 1 must present a gap toward gear 0.
+// Gear 1's right side then shows EITHER a tooth or a gap depending on N₁'s
+// parity (because the chord from one mesh angle to its diametric opposite
+// spans π = (N/2)·pitchAng, which is integer-pitch when N even and half-pitch
+// when N odd). Gear 2's left side must oppose gear 1's right, and so on.
+//
+// This guarantees that AT EVERY MESH the tooth-into-gap interlock is exact at
+// mid-lash (ψ=0), regardless of tooth-count combinations along the chain.
+function gearPhases() {
+  const phases = new Array(wheels.length).fill(0);
+  // Track what gear i exposes on its RIGHT side (toward gear i+1):
+  // true ⇒ tooth centred there, false ⇒ gap centred there.
+  let rightIsTooth = true; // gear 0 presents a tooth to its right, by convention.
+  for (let i = 0; i < wheels.length; i++) {
+    const ci = view.centers[i];
+    if (!ci) continue;
+    const N = teethCount(wheels[i].r);
+    const pitchAng = (2 * Math.PI) / N;
+    const halfPitch = pitchAng / 2;
+
+    if (i === 0) {
+      if (wheels.length > 1) {
+        const cR = view.centers[1];
+        if (cR) {
+          // tooth #0 centred on the math angle from gear 0 to gear 1.
+          phases[i] = Math.atan2(-(cR.cy - ci.cy), cR.cx - ci.cx);
+        }
+      }
+      rightIsTooth = true;
+    } else {
+      const cL = view.centers[i - 1];
+      const angLeft = cL ? Math.atan2(-(cL.cy - ci.cy), cL.cx - ci.cx) : 0;
+      // Left side of gear i must be the OPPOSITE of gear (i-1)'s right side.
+      const leftIsTooth = !rightIsTooth;
+      // Phase such that tooth #0 lands on the requested left feature:
+      //   leftIsTooth → tooth at angLeft  → phase = angLeft
+      //   leftIsGap   → gap  at angLeft  → tooth #0 at angLeft + halfPitch
+      phases[i] = leftIsTooth ? angLeft : (angLeft + halfPitch);
+      // Update what the RIGHT side now exposes. The opposite side (math angle
+      // = angLeft + π) is at integer pitch from tooth #0 iff the offset
+      // (π − phaseShift) is a whole multiple of pitchAng.
+      // After working it out:
+      //   leftIsTooth, N even → tooth at right
+      //   leftIsTooth, N odd  → gap   at right
+      //   leftIsGap,   N even → gap   at right
+      //   leftIsGap,   N odd  → tooth at right
+      const Neven = (N % 2 === 0);
+      rightIsTooth = (leftIsTooth === Neven);
+    }
+  }
+  return phases;
+}
+
+// Textbook involute spur-gear profile.
+//   • Module     m  = 2·r_pitch / N  (shared across all gears in the chain).
+//   • Pressure   φ  = 20°            (standard).
+//   • Base       r_b = r_pitch · cos(φ).
+//   • Addendum   r_a = r_pitch + m.
+//   • Dedendum   r_d = r_pitch − 1.25·m.
+//
+// The flank IS the involute of the base circle. Half-thickness at any radius
+// r ≥ r_b is  h(r) = h_pitch + inv(φ_pitch) − inv(φ_r),  where inv(α)=tan α−α
+// is the involute function and φ_r = acos(r_b/r). Tooth thickness at the pitch
+// circle = (pitchAng − lashAng)/2; the lash slider literally widens the visible
+// gap between meshing flanks. Below the base circle (where no involute exists)
+// the flank drops radially to the root circle.
+const PRESSURE_ANGLE = 20 * Math.PI / 180;
+const ADDENDUM_FRAC  = 1.0;   // addendum = ADDENDUM_FRAC × module
+const DEDENDUM_FRAC  = 1.25;  // dedendum = DEDENDUM_FRAC × module (clearance)
+
+function drawGearShape(c, w, color, isDragging, phase) {
+  const sx = view.scale;
+  const cx = c.cx, cy = c.cy;
+  const rPitch = w.r;
+  const N = teethCount(rPitch);
+  const pitchAng = (2 * Math.PI) / N;
+  const lashAng = P.lash.value / Math.max(1e-3, rPitch);
+  // Half-thickness at the pitch circle (angular). Floor avoids degenerate teeth
+  // when lash exceeds half the circular pitch.
+  const halfAtPitch = Math.max(pitchAng * 0.02, (pitchAng - lashAng) / 4);
+
+  const module_ = (2 * rPitch) / N;
+  const rTip  = rPitch + module_ * ADDENDUM_FRAC;
+  const rRoot = Math.max(0.2 * rPitch, rPitch - module_ * DEDENDUM_FRAC);
+  const rBase = rPitch * Math.cos(PRESSURE_ANGLE);
+
+  // Involute function inv(α) = tan(α) − α.
+  const invFn = (a) => Math.tan(a) - a;
+  const invAtPitch = invFn(PRESSURE_ANGLE);
+
+  // Angular half-thickness of the tooth at any radius, derived from the
+  // involute property of the flank. Below the base circle there is no
+  // involute — the flank sits radially at the base-circle anchor angle.
+  const halfAtBase = halfAtPitch + invAtPitch;
+  function halfThickAt(r) {
+    if (r <= rBase) return halfAtBase;
+    const cosPhi = Math.min(1, Math.max(-1, rBase / r));
+    const phi = Math.acos(cosPhi);
+    return halfAtPitch + invAtPitch - invFn(phi);
+  }
+
+  function vertex(angle, rWorld) {
+    return { x: cx + Math.cos(angle) * rWorld * sx,
+             y: cy - Math.sin(angle) * rWorld * sx };
+  }
+
+  const FLANK_SAMPLES = 8;  // along each involute flank
+  const TIP_SAMPLES   = 4;  // across the tip arc
+  const ROOT_SAMPLES  = 4;  // along the root arc between adjacent teeth
+  const rFlankStart = Math.max(rRoot, rBase);
+
+  // If the involute flanks meet before the addendum circle (large lash, low N),
+  // the tooth is "pointed" — terminate at the apex instead of letting the
+  // flanks cross past each other into an X. Apex radius solves halfThickAt = 0.
+  let rEnd = rTip;
+  if (halfThickAt(rTip) <= 0) {
+    let lo = rFlankStart, hi = rTip;
+    for (let it = 0; it < 24; it++) {
+      const mid = 0.5 * (lo + hi);
+      if (halfThickAt(mid) > 0) lo = mid; else hi = mid;
+    }
+    rEnd = lo;
+  }
+  const halfAtTip = Math.max(0, halfThickAt(rEnd));
+
+  ctx.fillStyle = "#1a2030";
+  ctx.beginPath();
+  for (let k = 0; k < N; k++) {
+    const tc = w.theta + phase + k * pitchAng;
+
+    // Root-left corner — radial line below the base anchor.
+    const aRootL = tc - halfAtBase;
+    const aRootR = tc + halfAtBase;
+    const aRootNextL = tc + pitchAng - halfAtBase;
+
+    const v0 = vertex(aRootL, rRoot);
+    if (k === 0) ctx.moveTo(v0.x, v0.y);
+    else         ctx.lineTo(v0.x, v0.y);
+
+    // Radial rise to the base circle (skipped if the root is at/above the base).
+    if (rRoot < rBase) {
+      const v = vertex(aRootL, rBase);
+      ctx.lineTo(v.x, v.y);
+    }
+
+    // Up the LEFT involute flank from r_flank_start to the tooth top.
+    for (let s = 1; s <= FLANK_SAMPLES; s++) {
+      const r = rFlankStart + (s / FLANK_SAMPLES) * (rEnd - rFlankStart);
+      const v = vertex(tc - Math.max(0, halfThickAt(r)), r);
+      ctx.lineTo(v.x, v.y);
+    }
+
+    // Tip arc — collapses to a single apex when halfAtTip = 0 (pointed tooth).
+    for (let s = 1; s <= TIP_SAMPLES; s++) {
+      const a = (tc - halfAtTip) + (s / TIP_SAMPLES) * (2 * halfAtTip);
+      const v = vertex(a, rEnd);
+      ctx.lineTo(v.x, v.y);
+    }
+
+    // Down the RIGHT involute flank from the tooth top back to r_flank_start.
+    for (let s = 1; s <= FLANK_SAMPLES; s++) {
+      const r = rEnd - (s / FLANK_SAMPLES) * (rEnd - rFlankStart);
+      const v = vertex(tc + Math.max(0, halfThickAt(r)), r);
+      ctx.lineTo(v.x, v.y);
+    }
+
+    // Radial drop back to the root.
+    if (rRoot < rBase) {
+      const v = vertex(aRootR, rRoot);
+      ctx.lineTo(v.x, v.y);
+    }
+
+    // Root arc to the next tooth's root-left.
+    for (let s = 1; s <= ROOT_SAMPLES; s++) {
+      const a = aRootR + (s / ROOT_SAMPLES) * (aRootNextL - aRootR);
+      const v = vertex(a, rRoot);
+      ctx.lineTo(v.x, v.y);
+    }
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = isDragging ? "#fff" : color;
+  ctx.lineWidth = isDragging ? 2.5 : 1.4;
+  ctx.stroke();
+
+  // Pitch circle — where rolling actually happens.
+  ctx.setLineDash([3, 4]);
+  ctx.strokeStyle = color + "55";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, rPitch * sx, 0, 2 * Math.PI);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawWheel(i, c, phase) {
+  const w = wheels[i];
+  const baseColor = wheelColor(i);
+  const isDrive = (i === 0);
+  // In whole-system rotational mode the motor (wheel 0) shows its thermal
+  // state by tinting the rim and fill. Other wheels stay their assigned hue.
+  const tintActive = (sim.mode === "whole" && isDrive);
+  const E = tintActive ? Math.min(1.2, sim.thermal) : 0;
+  const color = tintActive ? thermalTint(baseColor, E) : baseColor;
+  const isDragging = sim.drag && sim.drag.i === i;
+
+  if (sim.mode === "backlash") {
+    drawGearShape(c, w, color, isDragging, phase || 0);
+  } else if (isDoubleMode(i)) {
+    // Two concentric radii on one shaft. Both rims are real contact surfaces,
+    // both drawn as solid outlines. The render order puts any wheel meshing
+    // at this wheel's smaller radius on top, so the larger ring shows the
+    // overlap with that neighbour as a stepped compound assembly.
+    const rOuter = Math.max(c.r1Px, c.r2Px);
+    const rInner = Math.min(c.r1Px, c.r2Px);
+    // outer disk + solid outline
+    ctx.fillStyle = "#1a2030";
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, rOuter, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = isDragging ? "#fff" : color;
+    ctx.lineWidth = isDragging ? 3 : 2;
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, rOuter, 0, Math.PI * 2); ctx.stroke();
+    // inner disk (slightly brighter for stepped look) + solid outline
+    ctx.fillStyle = "#222a3a";
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, rInner, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = isDragging ? "#fff" : color;
+    ctx.lineWidth = isDragging ? 3 : 2;
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, rInner, 0, Math.PI * 2); ctx.stroke();
+    // labels for r1/r2
+    ctx.fillStyle = color + "cc";
+    ctx.font = "10px ui-sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(`r1=${w.r1.toFixed(2)}`, c.cx + rInner + 4, c.cy - rInner * 0.5);
+    ctx.fillText(`r2=${w.r2.toFixed(2)}`, c.cx + rInner + 4, c.cy + rInner * 0.5);
+  } else {
+    const r = c.rPx;
+    ctx.fillStyle = "#1a2030";
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = isDragging ? "#fff" : color;
+    ctx.lineWidth = isDragging ? 3 : 2;
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, r, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  // fixed centre dot
+  ctx.fillStyle = "#6a7384";
+  ctx.beginPath(); ctx.arc(c.cx, c.cy, 3, 0, Math.PI * 2); ctx.fill();
+
+  // angular indicator: line from centre to a point near the rim, plus a coloured dot.
+  // For double-radius wheels the indicator sits on the smaller rim so it stays
+  // visible even when a contacting neighbour is drawn on top of the larger ring.
+  let rIndicator;
+  if (isDoubleMode(i)) rIndicator = Math.min(c.r1Px, c.r2Px);
+  else                 rIndicator = c.rPx;
+  const dotR = Math.max(3, rIndicator * 0.08);
+  // canvas y is inverted, so use -sin for "math" orientation.
+  const dx = Math.cos(w.theta) * (rIndicator - dotR - 2);
+  const dy = -Math.sin(w.theta) * (rIndicator - dotR - 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(c.cx, c.cy); ctx.lineTo(c.cx + dx, c.cy + dy); ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(c.cx + dx, c.cy + dy, dotR, 0, Math.PI * 2); ctx.fill();
+
+  // Wheel annotation — three lines centred on the hub. Sits over the wheel so
+  // wide aspect ratios don't clip it under the rim, and is sized to read at a
+  // glance during lecture demos. Each line gets its own colour so the ID and
+  // numbers are visually distinct.
+  const titleFs = 19;
+  const valFs   = 17;
+  const lineH   = 22;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const yMid = c.cy;
+  ctx.font = `700 ${titleFs}px ui-sans-serif`;
+  ctx.fillStyle = isDrive ? "#fff" : color;
+  ctx.fillText(isDrive ? `#${i} (drive)` : `#${i}`, c.cx, yMid - lineH);
+  ctx.font = `600 ${valFs}px ui-sans-serif`;
+  ctx.fillStyle = "#e6e9ef";
+  ctx.fillText(`ω=${w.omega.toFixed(2)} rad/s`, c.cx, yMid + 2);
+  ctx.fillStyle = "#c0c9d8";
+  ctx.fillText(`τ=${(w.lastTau || 0).toFixed(2)} N·m`, c.cx, yMid + 2 + lineH);
+}
+
+function drawDriveArrow(c) {
+  // Curved arrow showing T direction relative to wheel 0
+  const sign = lastT >= 0 ? 1 : -1;
+  if (Math.abs(lastT) < 1e-3) return;
+  const r = c.rPx + 10;
+  ctx.strokeStyle = "#ff9f43";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  // arc CCW for positive, CW for negative
+  if (sign > 0) ctx.arc(c.cx, c.cy, r, -Math.PI * 0.7, -Math.PI * 0.1);
+  else          ctx.arc(c.cx, c.cy, r, -Math.PI * 0.9, -Math.PI * 0.3, true);
+  ctx.stroke();
+  // small arrow tip
+  ctx.fillStyle = "#ff9f43";
+  const tipAngle = sign > 0 ? -Math.PI * 0.1 : -Math.PI * 0.3;
+  const tipX = c.cx + Math.cos(tipAngle) * r;
+  const tipY = c.cy + Math.sin(tipAngle) * r;
+  ctx.beginPath();
+  ctx.arc(tipX, tipY, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Belt geometry: returns a parameterization of the closed belt loop around two pulleys,
+// plus a draw() that strokes the belt as a thick band.
+//
+// Belt path is split into 4 segments:
+//   1) tangent on side1 (aSide1 → bSide1)
+//   2) wrap around B (bSide1 → bSide2 around the side facing AWAY from A)
+//   3) tangent on side2 (bSide2 → aSide2)
+//   4) wrap around A (aSide2 → aSide1 around the side facing AWAY from B)
+function makeBeltPath(a, b, raPx, rbPx) {
+  const dx = b.cx - a.cx, dy = b.cy - a.cy;
+  const L = Math.hypot(dx, dy);
+  const ux = dx / L, uy = dy / L;
+  const v1x = -uy,   v1y = ux;        // 90° CCW of u (in canvas frame)
+
+  const sinA = (raPx - rbPx) / L;
+  const alpha = Math.asin(Math.max(-1, Math.min(1, sinA)));
+  const cosA = Math.cos(alpha);
+
+  // Tangent points (canvas frame). For an OPEN external belt the tangent points lie on
+  // the FRONT side of each pulley (toward the other pulley), at math angle ±(π/2 − α).
+  const aS1 = { x: a.cx + raPx * (sinA * ux + cosA * v1x),
+                y: a.cy + raPx * (sinA * uy + cosA * v1y) };
+  const bS1 = { x: b.cx + rbPx * (sinA * ux + cosA * v1x),
+                y: b.cy + rbPx * (sinA * uy + cosA * v1y) };
+  const aS2 = { x: a.cx + raPx * (sinA * ux - cosA * v1x),
+                y: a.cy + raPx * (sinA * uy - cosA * v1y) };
+  const bS2 = { x: b.cx + rbPx * (sinA * ux - cosA * v1x),
+                y: b.cy + rbPx * (sinA * uy - cosA * v1y) };
+
+  const Ltan = Math.hypot(bS1.x - aS1.x, bS1.y - aS1.y);
+  const psiA = Math.PI + 2 * alpha;
+  const psiB = Math.PI - 2 * alpha;
+  const arcA = raPx * psiA;
+  const arcB = rbPx * psiB;
+  const total = 2 * Ltan + arcA + arcB;
+
+  // Canvas-frame tangent-point angles
+  const angA1 = Math.atan2(aS1.y - a.cy, aS1.x - a.cx);
+  const angA2 = Math.atan2(aS2.y - a.cy, aS2.x - a.cx);
+  const angB1 = Math.atan2(bS1.y - b.cy, bS1.x - b.cx);
+  const angB2 = Math.atan2(bS2.y - b.cy, bS2.x - b.cx);
+
+  // Wrap directions: choose the arc that passes through the far side
+  // (B's far side from A is along +u from b; A's far side from B is along -u from a).
+  function arcDir(start, end, mid) {
+    const TAU = 2 * Math.PI;
+    const norm = (a) => ((a % TAU) + TAU) % TAU;
+    const sweepCCW = norm(end - start);
+    const midCCW = norm(mid - start);
+    return midCCW < sweepCCW ? +1 : -1;
+  }
+  const farFromA_atB = Math.atan2(uy,  ux);   // direction +u (away from A) from B
+  const farFromB_atA = Math.atan2(-uy, -ux);  // direction -u (away from B) from A
+  const dirB = arcDir(angB1, angB2, farFromA_atB);
+  const dirA = arcDir(angA2, angA1, farFromB_atA);
+
+  function at(s) {
+    s = ((s % total) + total) % total;
+    if (s < Ltan) {
+      const t = s / Ltan;
+      return { x: aS1.x + (bS1.x - aS1.x) * t, y: aS1.y + (bS1.y - aS1.y) * t };
+    }
+    s -= Ltan;
+    if (s < arcB) {
+      const t = s / arcB;
+      const ang = angB1 + dirB * t * psiB;
+      return { x: b.cx + rbPx * Math.cos(ang), y: b.cy + rbPx * Math.sin(ang) };
+    }
+    s -= arcB;
+    if (s < Ltan) {
+      const t = s / Ltan;
+      return { x: bS2.x + (aS2.x - bS2.x) * t, y: bS2.y + (aS2.y - bS2.y) * t };
+    }
+    s -= Ltan;
+    const t = s / arcA;
+    const ang = angA2 + dirA * t * psiA;
+    return { x: a.cx + raPx * Math.cos(ang), y: a.cy + raPx * Math.sin(ang) };
+  }
+
+  function draw() {
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    // outer outline (slightly darker, thicker)
+    ctx.strokeStyle = "#202833";
+    ctx.lineWidth = 9;
+    ctx.beginPath();
+    ctx.moveTo(aS1.x, aS1.y);
+    ctx.lineTo(bS1.x, bS1.y);
+    if (dirB > 0) ctx.arc(b.cx, b.cy, rbPx, angB1, angB1 + psiB, false);
+    else          ctx.arc(b.cx, b.cy, rbPx, angB1, angB1 - psiB, true);
+    ctx.lineTo(aS2.x, aS2.y);
+    if (dirA > 0) ctx.arc(a.cx, a.cy, raPx, angA2, angA2 + psiA, false);
+    else          ctx.arc(a.cx, a.cy, raPx, angA2, angA2 - psiA, true);
+    ctx.closePath();
+    ctx.stroke();
+    // belt body
+    ctx.strokeStyle = "#4a5460";
+    ctx.lineWidth = 6;
+    ctx.stroke();
+    // inner pinstripe for visual depth
+    ctx.strokeStyle = "#6a7384";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  return { at, total, draw };
+}
+
+function drawBelt(a, b, ra, rb, scale, wheelIdxA) {
+  const raPx = ra * scale, rbPx = rb * scale;
+  const path = makeBeltPath(a, b, raPx, rbPx);
+  path.draw();
+
+  // Belt phase: rim tangential displacement of pulley A (m) → pixels along belt.
+  // Sign chosen so dots advance in the direction implied by ω_A.
+  // theta increases CCW (math); on canvas-bottom (where side1 sits for horizontal pulleys)
+  // the surface point moves toward +u, so s advances positively along our parameterization.
+  const beltOffsetPx = wheels[wheelIdxA].theta * raPx;
+
+  // Distribute marks evenly around the loop. Spacing ~ 70 px.
+  const N = Math.max(4, Math.round(path.total / 70));
+  for (let k = 0; k < N; k++) {
+    const s = (k / N) * path.total + beltOffsetPx;
+    const p = path.at(s);
+    // outline + fill so it's visible against any belt section
+    ctx.fillStyle = "#0d1013";
+    ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#f6c945";
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// Simple gear-teeth visualization: draw short tooth strokes around each rim,
+// and at the contact point show a small "lash gap" between meshing teeth.
+function drawGearTeeth(a, b, wA, wB, scale) {
+  // Just draw teeth on each pulley rim (already drawn as outline) with hash strokes.
+  function drawTeeth(c, w, ratioInverted) {
+    const rPx = w.r * scale;
+    const teeth = Math.max(8, Math.round(2 * Math.PI * rPx / 12));
+    const offset = ratioInverted ? Math.PI / teeth : 0;
+    ctx.strokeStyle = "#7a8493";
+    ctx.lineWidth = 1;
+    for (let k = 0; k < teeth; k++) {
+      const ang = (k / teeth) * 2 * Math.PI + w.theta + offset;
+      const x0 = c.cx + Math.cos(ang) * (rPx - 1);
+      const y0 = c.cy - Math.sin(ang) * (rPx - 1);
+      const x1 = c.cx + Math.cos(ang) * (rPx + 4);
+      const y1 = c.cy - Math.sin(ang) * (rPx + 4);
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    }
+  }
+  drawTeeth(a, wA, false);
+  drawTeeth(b, wB, true);
+}
+
+// =============================================================================
+//  PLOT — ω(t) per wheel + α(t) per wheel
+// =============================================================================
+const HIST_WINDOW_S = 8;
+const HIST_RATE_HZ = 60;
+const HIST_MAX = HIST_WINDOW_S * HIST_RATE_HZ + 4;
+const hist = []; // {t, omegas:[...], taus:[...]}
+let lastHistT = -Infinity;
+
+function pushHist() {
+  const dt = sim.t - lastHistT;
+  if (dt < 1 / HIST_RATE_HZ) return;
+  lastHistT = sim.t;
+  const omegas = wheels.map(w => w.omega);
+  const taus = wheels.map(w => w.lastTau || 0);
+  hist.push({ t: sim.t, omegas, taus });
+  while (hist.length > HIST_MAX) hist.shift();
+}
+
+function drawPlotGrid(px, py, pw, ph, yMin, yMax, tMin, tMax, title, fsize) {
+  pctx.fillStyle = "#0d1013";
+  pctx.fillRect(px, py, pw, ph);
+  pctx.strokeStyle = "#2a313c";
+  pctx.lineWidth = 1;
+  pctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+  pctx.fillStyle = "#55606f";
+  pctx.font = `${fsize}px ui-sans-serif`;
+  pctx.textBaseline = "middle";
+  pctx.textAlign = "right";
+  const yTicks = 4;
+  for (let i = 0; i <= yTicks; i++) {
+    const frac = i / yTicks;
+    const yv = yMax - frac * (yMax - yMin);
+    const yy = py + frac * ph;
+    pctx.strokeStyle = "#1e252f";
+    pctx.beginPath(); pctx.moveTo(px + 36, yy); pctx.lineTo(px + pw, yy); pctx.stroke();
+    pctx.fillStyle = "#55606f";
+    pctx.fillText(yv.toFixed(1), px + 34, yy);
+  }
+  // zero line emphasis
+  if (yMin < 0 && yMax > 0) {
+    const yy = py + (yMax / (yMax - yMin)) * ph;
+    pctx.strokeStyle = "#3a4453";
+    pctx.beginPath(); pctx.moveTo(px + 36, yy); pctx.lineTo(px + pw, yy); pctx.stroke();
+  }
+  pctx.textAlign = "center";
+  pctx.textBaseline = "top";
+  const xTicks = 4;
+  for (let i = 0; i <= xTicks; i++) {
+    const frac = i / xTicks;
+    const tv = tMin + frac * (tMax - tMin);
+    const xx = px + 36 + frac * (pw - 40);
+    pctx.strokeStyle = "#1e252f";
+    pctx.beginPath(); pctx.moveTo(xx, py); pctx.lineTo(xx, py + ph - 14); pctx.stroke();
+    pctx.fillStyle = "#55606f";
+    pctx.fillText(tv.toFixed(1) + "s", xx, py + ph - 12);
+  }
+  pctx.fillStyle = "#8a93a3";
+  pctx.font = `${fsize}px ui-sans-serif`;
+  pctx.textAlign = "left"; pctx.textBaseline = "top";
+  pctx.fillText(title, px + 6, py + 4);
+}
+
+function plotLine(px, py, pw, ph, yMin, yMax, tMin, tMax, pts, color, lw) {
+  if (!pts || pts.length < 2) return;
+  pctx.strokeStyle = color;
+  pctx.lineWidth = lw || 1.4;
+  pctx.beginPath();
+  const x0 = px + 36;
+  const usableW = pw - 40;
+  const yRange = (yMax - yMin) || 1;
+  const tRange = (tMax - tMin) || 1;
+  let started = false;
+  for (const p of pts) {
+    if (!Number.isFinite(p.y)) { started = false; continue; }
+    const xx = x0 + ((p.t - tMin) / tRange) * usableW;
+    const yy = py + (1 - (p.y - yMin) / yRange) * ph;
+    if (!started) { pctx.moveTo(xx, yy); started = true; }
+    else pctx.lineTo(xx, yy);
+  }
+  pctx.stroke();
+}
+
+function drawLegend(rightX, topY, fsize, entries) {
+  pctx.font = `${fsize}px ui-sans-serif`;
+  pctx.textAlign = "right"; pctx.textBaseline = "top";
+  let y = topY;
+  for (const e of entries) {
+    pctx.fillStyle = e.color;
+    pctx.fillText("■ " + e.label, rightX, y);
+    y += fsize + 2;
+  }
+}
+
+function renderPlots() {
+  const sz = fitCanvas(plot, pctx);
+  const W = sz.w, H = sz.h;
+  // Background = panel colour so the gap between subplots reads as a frame.
+  pctx.fillStyle = getVar("--panel");
+  pctx.fillRect(0, 0, W, H);
+
+  const fsize = Math.max(12, Math.min(W, H) * 0.038);
+  const pad = 8;
+  // Two stacked subplots, equal height: ω per wheel above, τ per wheel below.
+  const totalH = H - pad * 3;
+  const upperH = Math.floor(totalH * 0.5);
+  const lowerH = totalH - upperH;
+
+  const tMax = Math.max(sim.t, HIST_WINDOW_S);
+  const tMin = tMax - HIST_WINDOW_S;
+  const winHist = hist.filter(h => h.t >= tMin);
+
+  let oAbs = 1;
+  for (const h of winHist) for (const v of h.omegas) {
+    const a = Math.abs(v); if (Number.isFinite(a) && a > oAbs) oAbs = a;
+  }
+  const oHi = Math.ceil(oAbs / 1) * 1, oLo = -oHi;
+
+  let tAbs = 0.5;
+  for (const h of winHist) for (const v of h.taus) {
+    const a = Math.abs(v); if (Number.isFinite(a) && a > tAbs) tAbs = a;
+  }
+  const tauHi = Math.ceil(tAbs * 2) / 2, tauLo = -tauHi;
+
+  const px = pad, pw = W - pad * 2;
+
+  let py = pad;
+  drawPlotGrid(px, py, pw, upperH, oLo, oHi, tMin, tMax, "ω per wheel (rad/s)", fsize);
+  drawLegend(px + pw - 6, py + 4, fsize,
+    wheels.map((_, i) => ({ color: wheelColor(i), label: i === 0 ? `#${i} drive` : `#${i}` })));
+  for (let i = 0; i < wheels.length; i++) {
+    const pts = winHist.map(h => ({ t: h.t, y: h.omegas[i] }));
+    plotLine(px, py, pw, upperH, oLo, oHi, tMin, tMax, pts, wheelColor(i), i === 0 ? 2.4 : 1.6);
+  }
+
+  py += upperH + pad;
+  drawPlotGrid(px, py, pw, lowerH, tauLo, tauHi, tMin, tMax, "τ per wheel (N·m)", fsize);
+  drawLegend(px + pw - 6, py + 4, fsize,
+    wheels.map((_, i) => ({ color: wheelColor(i), label: `#${i}` })));
+  for (let i = 0; i < wheels.length; i++) {
+    const pts = winHist.map(h => ({ t: h.t, y: h.taus[i] }));
+    plotLine(px, py, pw, lowerH, tauLo, tauHi, tMin, tMax, pts, wheelColor(i), i === 0 ? 2.4 : 1.6);
+  }
+}
+
+// =============================================================================
+//  POINTER INTERACTION (drag a wheel's rim to rotate it)
+// =============================================================================
+function clientToCanvas(ev) {
+  const r = cv.getBoundingClientRect();
+  return { mx: ev.clientX - r.left, my: ev.clientY - r.top };
+}
+
+function hitTestWheel(mx, my) {
+  // Returns wheel index whose disk the pointer is over (and not too near centre), else -1.
+  for (let i = 0; i < wheels.length; i++) {
+    const c = view.centers[i];
+    if (!c) continue;
+    const dx = mx - c.cx, dy = my - c.cy;
+    const d = Math.hypot(dx, dy);
+    const outerPx = isDoubleMode(i) ? Math.max(c.r1Px, c.r2Px) : c.rPx;
+    const minR = 6; // ignore clicks very close to centre
+    if (d <= outerPx + 6 && d >= minR) return i;
+  }
+  return -1;
+}
+
+function pointerAngleFor(i, mx, my) {
+  const c = view.centers[i];
+  // canvas y inverted vs math; theta increases CCW in math coords.
+  return Math.atan2(-(my - c.cy), mx - c.cx);
+}
+
+cv.addEventListener("pointerdown", (ev) => {
+  const { mx, my } = clientToCanvas(ev);
+  const i = hitTestWheel(mx, my);
+  if (i < 0) return;
+  sim.drag = {
+    i,
+    initWheelTheta: wheels[i].theta,
+    initPointerAngle: pointerAngleFor(i, mx, my),
+    lastDragTheta: wheels[i].theta,
+  };
+  // freeze velocities
+  for (const w of wheels) w.omega = 0;
+  cv.setPointerCapture(ev.pointerId);
+  cv.classList.add("grabbing");
+  ev.preventDefault();
+});
+cv.addEventListener("pointermove", (ev) => {
+  const { mx, my } = clientToCanvas(ev);
+  if (!sim.drag) {
+    const i = hitTestWheel(mx, my);
+    cv.style.cursor = i >= 0 ? "grab" : "default";
+    return;
+  }
+  const ang = pointerAngleFor(sim.drag.i, mx, my);
+  let dTheta = ang - sim.drag.initPointerAngle;
+  // unwrap so we can drag past ±π
+  while (dTheta >  Math.PI) dTheta -= 2 * Math.PI;
+  while (dTheta < -Math.PI) dTheta += 2 * Math.PI;
+  // accumulate via "init" reset each move beyond half-turn:
+  // simpler: reset init angle each move to support continuous winding
+  wheels[sim.drag.i].theta = sim.drag.initWheelTheta + dTheta;
+  // re-anchor for next move so we can wind past 2π
+  if (Math.abs(dTheta) > Math.PI / 2) {
+    sim.drag.initWheelTheta = wheels[sim.drag.i].theta;
+    sim.drag.initPointerAngle = ang;
+  }
+  ev.preventDefault();
+});
+function endDrag(ev) {
+  if (!sim.drag) return;
+  sim.drag = null;
+  try { cv.releasePointerCapture(ev.pointerId); } catch {}
+  cv.classList.remove("grabbing");
+  cv.style.cursor = "default";
+}
+cv.addEventListener("pointerup", endDrag);
+cv.addEventListener("pointercancel", endDrag);
+cv.addEventListener("pointerleave", (ev) => { if (sim.drag) endDrag(ev); });
+
+// =============================================================================
+//  UI BUILD — panels & sliders
+// =============================================================================
+const driveBox = document.getElementById("drive-sliders");
+mkRow(driveBox, "wTarget");
+mkRow(driveBox, "Tmax");
+// Kp is fixed (no slider) so the lesson focuses on τ_max and ω_target — controller
+// stiffness is a separate concept and would distract from transmission ratios.
+P.Kp.value = 5;
+
+const physBox = document.getElementById("phys-sliders");
+mkRow(physBox, "drag");
+const beltRow = document.createElement("div"); physBox.appendChild(beltRow);
+mkRow(beltRow, "beltGap");
+const lashRow = document.createElement("div"); physBox.appendChild(lashRow);
+mkRow(lashRow, "lash");
+
+function updateModeNotes() {
+  const el = document.getElementById("mode-notes");
+  let html = "";
+  if (sim.mode === "single") {
+    html = "<b>single-radius</b> — wheels in a line touch at their rims and roll without slipping. Each contact reverses direction, so adjacent wheels spin opposite ways. The speed ratio across one stage is −r<sub>i</sub>/r<sub>i+1</sub>: a big wheel driving a small one speeds up the chain (and divides the torque); a small driving a big one slows it down (and multiplies the torque).";
+  } else if (sim.mode === "double") {
+    html = "<b>double-radius</b> — wheels 1..N are <i>compound gears</i>: two gears of radii r<sub>1</sub> and r<sub>2</sub> rigidly fixed to the same shaft, so they always turn at the same speed. r<sub>1</sub> meshes with the wheel on its left, r<sub>2</sub> with the wheel on its right, and these radii can differ. Each stage's speed ratio is −r2<sub>i</sub>/r1<sub>i+1</sub>, and the full chain multiplies stage ratios — a few compound stages can produce very large speed reductions (and torque multiplications) that would need many single gears to match. This is how gearboxes work.";
+  } else if (sim.mode === "belt") {
+    html = "<b>belts</b> — adjacent wheels are coupled by a flexible belt instead of meshing teeth. The belt does not flip direction at the contact, so both pulleys spin the same way. Wheels 1..N can be <i>stepped (compound) pulleys</i>: r<sub>1</sub> takes the belt from the left, r<sub>2</sub> drives the belt to the right, both rigidly on one shaft. Stage speed ratio is +r2<sub>i</sub>/r1<sub>i+1</sub> — cascading stepped pulleys is how drills, lathes and old machine tools select different output speeds. Set r<sub>1</sub>=r<sub>2</sub> for a plain pulley. The <code>belt d</code> slider sets the gap between pulley centres.";
+  } else if (sim.mode === "backlash") {
+    html = "<b>backlash</b> — real gear teeth never mesh perfectly: there's always a small gap between the trailing flank of one tooth and the leading flank of the next. While the drive is pushing one way the loaded flanks stay in contact and the chain transmits torque rigidly, but on a direction reversal each mesh has to cross its own gap before the opposite flank picks up motion. Drag any wheel and reverse — you can feel the slack absorb at every mesh along the chain before the far end starts moving. This is why backlash is critical in positioning systems: every reversal loses position by the cumulative lash.";
+  } else if (sim.mode === "whole") {
+    html = "<b>whole-system rotational</b> — a PID drives the motor (wheel 0) so that the <i>rightmost</i> wheel's ω matches the target. The reflected inertia of the entire chain shows up in the motor's effective J. Crank the gear ratio so the motor must spin much faster than the load — torque demand drops but if the motor can't keep up, the controller saturates against τ<sub>max</sub>. The motor sits in a 25 °C room and dumps copper losses (∝ τ²) into a Newton-cooling lump with thermal time constant τ<sub>th</sub>=12 s; sustained τ<sub>max</sub> from a cold start cooks it to 180 °C in 5 s and it explodes. Below saturation the time-to-blow scales like a fuse equation against current, and a torque demand whose steady-state temperature stays under 180 °C runs cool indefinitely. Hit Reset to bring it back. Pedagogical takeaway: gearing is a thermal-budget choice, not just a kinematic one.";
+  }
+  el.innerHTML = html;
+  // hide irrelevant sliders per mode
+  beltRow.style.display = (sim.mode === "belt")     ? "" : "none";
+  lashRow.style.display = (sim.mode === "backlash") ? "" : "none";
+}
+
+// ---- Wheel rows -----------------------------------------------------
+const wheelRows = document.getElementById("wheel-rows");
+const wheelCount = document.getElementById("wheel-count");
+
+function buildWheelRows() {
+  wheelRows.innerHTML = "";
+  for (let i = 0; i < wheels.length; i++) {
+    const card = document.createElement("div");
+    card.className = "wheel-card";
+    const head = document.createElement("div");
+    head.className = "head";
+    const sw = document.createElement("span");
+    sw.className = "swatch"; sw.style.background = wheelColor(i);
+    head.appendChild(sw);
+    const title = document.createElement("span");
+    title.textContent = i === 0 ? `Wheel #${i} (drive)` : `Wheel #${i}`;
+    head.appendChild(title);
+    if (i === 0) {
+      const tag = document.createElement("span");
+      tag.className = "tag"; tag.textContent = "τ_max applies here";
+      head.appendChild(tag);
+    }
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "close";
+    closeBtn.textContent = "×";
+    closeBtn.title = "Remove this wheel";
+    closeBtn.disabled = wheels.length <= 1;
+    closeBtn.addEventListener("click", () => deleteWheel(i));
+    head.appendChild(closeBtn);
+    card.appendChild(head);
+
+    // Radius / teeth row(s)
+    if (sim.mode === "backlash") {
+      // Tooth count is the primary parameter — radius is derived as r = N·pitchArc/(2π).
+      // This guarantees every gear shares the same module so meshes are exact.
+      mkTeethRow(card, wheels[i]);
+    } else if (isDoubleMode(i)) {
+      const leftLabel  = sim.mode === "belt" ? "r₁ (left pulley)"  : "r₁ (left mate)";
+      const rightLabel = sim.mode === "belt" ? "r₂ (right pulley)" : "r₂ (right mate)";
+      mkLocalRow(card, `r1`, wheels[i], "r1", 0.05, 3.0, 0.005, leftLabel);
+      mkLocalRow(card, `r2`, wheels[i], "r2", 0.05, 3.0, 0.005, rightLabel);
+    } else {
+      mkLocalRow(card, `r`, wheels[i], "r", 0.05, 3.0, 0.005, "r");
+    }
+    mkLocalRow(card, `J`, wheels[i], "J", 0.001, 5.0, 0.001, "J", true);
+
+    wheelRows.appendChild(card);
+  }
+  wheelCount.textContent = `N = ${wheels.length}`;
+}
+
+// Backlash teeth-count row: integer slider for N. Radius is derived from N so every
+// gear in the chain shares the same tooth size (module).
+function mkTeethRow(parent, w) {
+  const NMIN = 6, NMAX = 60;
+  const row = document.createElement("div");
+  row.className = "row";
+  const lab = document.createElement("label");
+  lab.textContent = "teeth";
+  lab.title = "Number of teeth on this gear. The radius is set automatically so that all gears in the chain share the same tooth size — a real pair of gears can only mesh if their teeth are the same size.";
+  const rng = document.createElement("input"); rng.type = "range";
+  rng.min = NMIN; rng.max = NMAX; rng.step = 1;
+  const num = document.createElement("input"); num.type = "number";
+  num.min = NMIN; num.max = NMAX; num.step = 1;
+
+  // Snap radius to integer N at row build, then write back so we display matched values.
+  const initialN = Math.max(NMIN, Math.min(NMAX, teethCount(w.r)));
+  w.r = (initialN * PITCH_ARC) / (2 * Math.PI);
+  rng.value = initialN; num.value = initialN;
+
+  function commit(raw, src) {
+    let n = Math.round(Number(raw));
+    if (!Number.isFinite(n)) return;
+    n = Math.max(NMIN, Math.min(NMAX, n));
+    w.r = (n * PITCH_ARC) / (2 * Math.PI);
+    if (src !== "rng") rng.value = n;
+    if (src !== "num") num.value = n;
+    // Tooth-count change is a structural redefinition. The gear's phase is
+    // parity-dependent, so changing N shifts every tooth on this gear by a
+    // fraction of a pitch — meaning interlock with the (unchanged) neighbour
+    // would no longer be aligned. Reset state to re-enter at clean mid-lash.
+    if (sim.mode === "backlash") {
+      for (const wh of wheels) { wh.theta = 0; wh.omega = 0; }
+      recomputePsiOffsets();
+      resetHistory();
+    }
+  }
+  rng.addEventListener("input", () => commit(rng.value, "rng"));
+  num.addEventListener("input", () => commit(num.value, "num"));
+  row.append(lab, rng, num);
+  parent.appendChild(row);
+}
+
+// Snap each wheel's radius to the closest integer-tooth value when entering backlash mode,
+// so all gears share an identical module.
+function snapWheelsToTeeth() {
+  for (const w of wheels) {
+    const n = Math.max(6, Math.min(60, teethCount(w.r)));
+    w.r = (n * PITCH_ARC) / (2 * Math.PI);
+  }
+}
+
+// Local row builder bound to a given object/property (no shared P entry).
+function mkLocalRow(parent, key, obj, prop, min, max, step, label, log) {
+  const row = document.createElement("div");
+  row.className = "row";
+  const lab = document.createElement("label");
+  lab.textContent = label;
+  const rng = document.createElement("input"); rng.type = "range";
+  const num = document.createElement("input"); num.type = "number";
+  num.min = min; num.max = max; num.step = step; num.value = obj[prop];
+
+  const logMode = !!log && min > 0;
+  const lmin = logMode ? Math.log(min) : 0;
+  const lmax = logMode ? Math.log(max) : 0;
+  const sFromV = (v) => logMode ? (Math.log(Math.max(min, Math.min(max, v))) - lmin) / (lmax - lmin)
+                                : Math.max(min, Math.min(max, v));
+  const vFromS = (s) => logMode ? Math.exp(lmin + s * (lmax - lmin)) : s;
+  if (logMode) { rng.min = 0; rng.max = 1; rng.step = 0.0005; }
+  else        { rng.min = min; rng.max = max; rng.step = step; }
+  rng.value = sFromV(obj[prop]);
+
+  const commit = (raw, src) => {
+    let v = (src === "rng") ? vFromS(Number(raw)) : Number(raw);
+    if (!Number.isFinite(v)) return;
+    v = Math.max(min, Math.min(max, v));
+    obj[prop] = v;
+    if (src !== "rng") rng.value = sFromV(v);
+    if (src !== "num") num.value = logMode ? Number(v.toPrecision(4)) : v;
+  };
+  rng.addEventListener("input", () => commit(rng.value, "rng"));
+  num.addEventListener("input", () => commit(num.value, "num"));
+  row.append(lab, rng, num);
+  parent.appendChild(row);
+}
+
+document.getElementById("btn-add").addEventListener("click", () => {
+  if (wheels.length >= 8) return;
+  wheels.push(makeWheel(wheels.length));
+  if (sim.mode === "backlash") {
+    snapWheelsToTeeth();
+    recomputePsiOffsets();
+  }
+  buildWheelRows();
+  resetHistory();
+});
+function deleteWheel(i) {
+  if (wheels.length <= 1) return;
+  if (i < 0 || i >= wheels.length) return;
+  wheels.splice(i, 1);
+  // Cancel any in-progress drag on the deleted (or shifted-out) wheel.
+  if (sim.drag) {
+    if (sim.drag.i === i) sim.drag = null;
+    else if (sim.drag.i > i) sim.drag.i -= 1;
+  }
+  if (sim.mode === "backlash") {
+    snapWheelsToTeeth();
+    recomputePsiOffsets();
+  }
+  buildWheelRows();
+  resetHistory();
+}
+
+document.getElementById("btn-reset").addEventListener("click", () => {
+  for (const w of wheels) { w.theta = 0; w.omega = 0; }
+  sim.t = 0;
+  sim.thermal = 0;
+  sim.exploded = false;
+  sim.pidI = 0;
+  if (sim.mode === "backlash") recomputePsiOffsets();
+  // Linear lesson lives off shared sim.t but owns its own thermal/PID state.
+  if (typeof linearReset === "function") linearReset();
+  resetHistory();
+});
+document.getElementById("btn-zero-w").addEventListener("click", () => {
+  for (const w of wheels) w.omega = 0;
+});
+const btnPause = document.getElementById("btn-pause");
+btnPause.addEventListener("click", () => {
+  sim.paused = !sim.paused;
+  btnPause.textContent = sim.paused ? "Resume" : "Pause";
+});
+const btnDriveOn = document.getElementById("btn-drive-on");
+btnDriveOn.addEventListener("click", () => {
+  sim.driveOn = !sim.driveOn;
+  btnDriveOn.textContent = "Drive: " + (sim.driveOn ? "ON" : "OFF");
+  btnDriveOn.style.borderColor = sim.driveOn ? getVar("--good") : "#2e3642";
+  btnDriveOn.style.color        = sim.driveOn ? getVar("--good") : getVar("--ink");
+});
+
+function resetHistory() {
+  hist.length = 0;
+  lastHistT = -Infinity;
+}
+
+// First-entry-per-session starter configuration. Lets each tab open with a
+// layout that immediately demonstrates the concept (e.g. double-radius needs a
+// compound wheel to be visible) without overwriting the user's edits if they
+// flip back to the tab later.
+const modesEntered = new Set([sim.mode]);
+
+function loadDoubleRadiusDemo() {
+  while (wheels.length < 3) wheels.push(makeWheel(wheels.length));
+  while (wheels.length > 3) wheels.pop();
+  wheels[0].r = 0.5;
+  wheels[1].r1 = 0.8; wheels[1].r2 = 0.3;
+  wheels[2].r = 0.5; wheels[2].r1 = 0.5; wheels[2].r2 = 0.5;
+  for (const w of wheels) { w.theta = 0; w.omega = 0; }
+}
+
+// Whole-system rotational starts as a 3-stage compound reduction with a
+// lumpy load on the output shaft, so the lesson "find a ratio that lets
+// the motor breathe" is visible the moment you click the tab.
+function loadWholeSystemDemo() {
+  while (wheels.length < 3) wheels.push(makeWheel(wheels.length));
+  while (wheels.length > 3) wheels.pop();
+  wheels[0].r = 0.4; wheels[0].r1 = 0.4; wheels[0].r2 = 0.4; wheels[0].J = 0.02;
+  wheels[1].r1 = 0.7; wheels[1].r2 = 0.25; wheels[1].r = 0.5; wheels[1].J = 0.05;
+  wheels[2].r1 = 0.9; wheels[2].r2 = 0.4; wheels[2].r = 0.5; wheels[2].J = 0.6;
+  for (const w of wheels) { w.theta = 0; w.omega = 0; }
+  // Whole-system reads compound ratios to push the inertia at the end of
+  // the chain through the chain — switch to compound geometry by default.
+  sim.thermal = 0;
+  sim.exploded = false;
+  sim.pidI = 0;
+  P.Tmax.value = 1.5; syncSlider("Tmax");
+  P.wTarget.value = 4.0; syncSlider("wTarget");
+}
+
+// ---- Sub-tabs (rotational mode) ----
+document.querySelectorAll("#rot-tabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#rot-tabs button").forEach(b => b.classList.toggle("active", b === btn));
+    sim.mode = btn.dataset.mode;
+    if (!modesEntered.has(sim.mode)) {
+      modesEntered.add(sim.mode);
+      if (sim.mode === "double") loadDoubleRadiusDemo();
+      if (sim.mode === "whole")  loadWholeSystemDemo();
+    }
+    if (sim.mode === "backlash") {
+      // Snap radii to integer-tooth values + zero state so the chain enters
+      // backlash at a clean mid-lash configuration with all teeth aligned.
+      snapWheelsToTeeth();
+      for (const w of wheels) { w.theta = 0; w.omega = 0; }
+      recomputePsiOffsets();
+    }
+    if (sim.mode === "whole") {
+      sim.thermal = 0;
+      sim.exploded = false;
+      sim.pidI = 0;
+    }
+    buildWheelRows();
+    updateModeNotes();
+    resetHistory();
+  });
+});
+
+// ---- Top-level lesson tabs ----
+document.querySelectorAll("#lesson-tabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#lesson-tabs button").forEach(b => b.classList.toggle("active", b === btn));
+    sim.lesson = btn.dataset.lesson;
+    document.querySelectorAll(".lesson").forEach(sec => {
+      sec.hidden = (sec.dataset.lesson !== sim.lesson);
+    });
+  });
+});
+
+// =============================================================================
+//  READOUT
+// =============================================================================
+const R = {
+  T:    document.getElementById("r-T"),
+  Pw:   document.getElementById("r-P"),
+  Jeff: document.getElementById("r-Jeff"),
+  t:    document.getElementById("r-t"),
+  fps:  document.getElementById("r-fps"),
+  list: document.getElementById("r-wheel-list"),
+};
+
+function updateReadout() {
+  R.T.textContent    = lastT.toFixed(3);
+  R.Pw.textContent   = (lastT * wheels[0].omega).toFixed(3);
+  R.Jeff.textContent = reflectedJ().toFixed(4);
+  R.t.textContent    = sim.t.toFixed(2);
+  R.fps.textContent  = fpsVal || "--";
+
+  // Build per-wheel rows
+  const Rcum = cumRatios();
+  let html = "";
+  for (let i = 0; i < wheels.length; i++) {
+    const w = wheels[i];
+    const color = wheelColor(i);
+    html += `<div class="ln"><span><i class="swatch" style="background:${color}"></i>#${i}` +
+            ` <span style="color:#5a6575">R=${Rcum[i].toFixed(3)}</span></span>` +
+            `<b>ω=${w.omega.toFixed(2)} τ=${(w.lastTau||0).toFixed(2)}</b></div>`;
+  }
+  R.list.innerHTML = html;
+}
+
+// =============================================================================
+//  MAIN LOOP
+// =============================================================================
+let fpsFrames = 0, fpsT = performance.now(), fpsVal = 0;
+
+function step(nowMs) {
+  const dt = Math.min(0.1, (nowMs - lastMs) / 1000);
+  lastMs = nowMs;
+  if (!sim.paused && sim.lesson === "rotational") {
+    accumulator += dt;
+    if (accumulator > 0.25) accumulator = 0.25;
+    while (accumulator >= PHYS_DT) {
+      physicsStep(PHYS_DT);
+      sim.t += PHYS_DT;
+      accumulator -= PHYS_DT;
+    }
+    pushHist();
+  }
+  if (sim.lesson === "rotational") {
+    render();
+    renderPlots();
+    updateReadout();
+  }
+  if (!sim.paused && sim.lesson === "linear" && typeof physicsLinearStep === "function") {
+    let acc = dt;
+    if (acc > 0.25) acc = 0.25;
+    while (acc >= PHYS_DT) {
+      physicsLinearStep(PHYS_DT);
+      linear.t += PHYS_DT;
+      acc -= PHYS_DT;
+    }
+    linHistPush();
+  }
+  if (sim.lesson === "linear" && typeof renderLinear === "function") {
+    renderLinear();
+    renderLinearPlots();
+    updateLinearReadout();
+  }
+  fpsFrames++;
+  if (nowMs - fpsT >= 500) {
+    fpsVal = Math.round((fpsFrames * 1000) / (nowMs - fpsT));
+    fpsFrames = 0; fpsT = nowMs;
+  }
+  requestAnimationFrame(step);
+}
+
+// =============================================================================
+//  LINEAR LESSON
+//
+// Each linear mode shares the same skeleton:
+//   motor (single rotor, inertia J_motor)  →  transmission (lead screw,
+//   ball screw, or pulley+belt)  →  translating load m on a finite track.
+//
+// Reflected inertia at the motor equals m·r_eff², where r_eff is the
+// "rotational radius" of the device:
+//   • lead/ball screw:  r_eff = lead/(2π)            with lead = pitch · starts
+//   • belt (conveyor):  r_eff = drive-pulley radius
+//
+// The whole-system translational mode keeps the same single-shaft motor
+// but switches the device on demand and runs a position PID into the
+// motor's velocity loop. The motor carries the same leaky-integrator
+// thermal model used by whole-system rotational, so a poorly chosen
+// device/load combination cooks the motor and explodes it.
+// =============================================================================
+
+const X_LIMIT = 0.6;             // translating load travels in [-X_LIMIT, +X_LIMIT] m
+const linear = {
+  mode: "lead",                  // "lead" | "ball" | "conv" | "whole"
+  // Motor (single shaft) state
+  theta: 0, omega: 0, J: 0.012, lastTau: 0,
+  thermal: 0, exploded: false, explosionT: 0,
+  // Load (translating)
+  x: 0, v: 0,
+  drag: null,                    // { kind: "load" | "shaft", initX/Theta, lastX/Theta }
+  t: 0,
+  // Backlash mesh state for lead screw (axial coordinate ψ = x − θ·r_eff).
+  psiOff: 0,
+  // Whole-system position PID integral
+  pidI: 0,
+};
+
+// All adjustable linear-lesson knobs. Mirrors P{} pattern: shared mkRow,
+// log scale where appropriate. value lives on the cfg object directly.
+const LP = {
+  // Drive (motor)
+  Tmax:    { label: "τ_max",  min: 0.05, max: 50,   step: 0.01, value: 2.0,  log: true,
+             tip: "Peak motor torque (N·m)." },
+  wTarget: { label: "ω_tgt",  min: -40,  max: 40,   step: 0.01, value: 12.0,
+             tip: "Target motor angular velocity (rad/s) when not under position control." },
+  Kp:      { label: "K_p",    min: 0.05, max: 200,  step: 0.01, value: 6.0,  log: true,
+             tip: "Velocity-loop proportional gain (N·m·s/rad)." },
+  // Load mass — large range so big inertias really swamp the motor.
+  mLoad:   { label: "load m", min: 0.1,  max: 200,  step: 0.1,  value: 8.0,  log: true,
+             tip: "Mass of the translating load (kg). The trapezoidal weight on the device." },
+  // Lead/ball screw
+  pitch:   { label: "pitch",  min: 0.002, max: 0.10, step: 0.0005, value: 0.010, log: true,
+             tip: "Distance the nut travels per revolution per start (m). With 1 start, lead = pitch; with N starts, lead = N·pitch." },
+  starts:  { label: "starts", min: 1,    max: 6,    step: 1,    value: 1,
+             tip: "Number of independent helical threads. Multi-start screws give a longer lead per turn at the same pitch — fast, but lower mechanical advantage." },
+  lash:    { label: "lash",   min: 0,    max: 0.005, step: 0.0001, value: 0.0008,
+             tip: "Axial backlash between the screw and nut threads (m). On reversal the screw must rotate through this slack before the nut moves." },
+  // Conveyor belt
+  rDrive:  { label: "r₁ drive", min: 0.05, max: 0.5, step: 0.005, value: 0.20,
+             tip: "Radius of the driven pulley (m). Sets the belt's rim-tangential speed for a given motor ω." },
+  rIdler:  { label: "r₂ idler", min: 0.05, max: 0.5, step: 0.005, value: 0.20,
+             tip: "Radius of the idler pulley (m). Doesn't change the speed ratio (the belt is inextensible) but does set how the belt loop looks." },
+  // Whole-system position PID
+  xTarget: { label: "x_tgt",  min: -X_LIMIT, max: X_LIMIT, step: 0.005, value: 0.30,
+             tip: "Target load position (m) for the outer position PID." },
+  KpPos:   { label: "Kp_pos", min: 0.1,  max: 200,  step: 0.1,  value: 30,  log: true,
+             tip: "Position-loop proportional gain (rad/s per m of error)." },
+  KdPos:   { label: "Kd_pos", min: 0,    max: 100,  step: 0.1,  value: 8,
+             tip: "Position-loop derivative gain (rad/s per m/s of velocity). Damps overshoot." },
+  KiPos:   { label: "Ki_pos", min: 0,    max: 100,  step: 0.1,  value: 5,
+             tip: "Position-loop integral gain. Cleans up steady-state offset under load drag." },
+};
+
+// Helpers identical in shape to mkRow/syncSlider but for LP.
+function mkLPRow(parent, key, onChange) {
+  const cfg = LP[key];
+  const row = document.createElement("div");
+  row.className = "row";
+  const lab = document.createElement("label");
+  lab.textContent = cfg.label;
+  if (cfg.tip) lab.title = cfg.tip;
+  const rng = document.createElement("input"); rng.type = "range";
+  const num = document.createElement("input"); num.type = "number";
+  num.min = cfg.min; num.max = cfg.max; num.step = cfg.step; num.value = cfg.value;
+
+  const logMode = !!cfg.log && cfg.min > 0 && cfg.max > cfg.min;
+  const lmin = logMode ? Math.log(cfg.min) : 0;
+  const lmax = logMode ? Math.log(cfg.max) : 0;
+  const sFromV = (v) => logMode
+    ? (Math.log(Math.max(cfg.min, Math.min(cfg.max, v))) - lmin) / (lmax - lmin)
+    : Math.max(cfg.min, Math.min(cfg.max, v));
+  const vFromS = (s) => logMode ? Math.exp(lmin + s * (lmax - lmin)) : s;
+  if (logMode) { rng.min = 0; rng.max = 1; rng.step = 0.0005; }
+  else        { rng.min = cfg.min; rng.max = cfg.max; rng.step = cfg.step; }
+  rng.value = sFromV(cfg.value);
+
+  const commit = (raw, src) => {
+    let v = (src === "rng") ? vFromS(Number(raw)) : Number(raw);
+    if (!Number.isFinite(v)) return;
+    v = Math.max(cfg.min, Math.min(cfg.max, v));
+    if (cfg.step >= 1) v = Math.round(v);
+    cfg.value = v;
+    if (src !== "rng") rng.value = sFromV(v);
+    if (src !== "num") num.value = logMode ? Number(v.toPrecision(4)) : v;
+    if (onChange) onChange(v);
+  };
+  rng.addEventListener("input", () => commit(rng.value, "rng"));
+  num.addEventListener("input", () => commit(num.value, "num"));
+  row.append(lab, rng, num);
+  parent.appendChild(row);
+  cfg._row = row; cfg._sFromV = sFromV;
+}
+
+function syncLPSlider(key) {
+  const cfg = LP[key];
+  if (!cfg || !cfg._row) return;
+  const rng = cfg._row.querySelector('input[type=range]');
+  const num = cfg._row.querySelector('input[type=number]');
+  if (rng) rng.value = cfg._sFromV(cfg.value);
+  if (num) num.value = cfg.value;
+}
+
+// r_eff: the "rotational radius" that converts motor ω → load v in this mode.
+//   v = ω · r_eff,  reflected inertia at motor = m · r_eff²
+// In whole-system mode the displayed device is whichever the user picked
+// from the device-selector — so resolve "whole" to that pick.
+function reffLinear(mode) {
+  let m = mode || linear.mode;
+  if (m === "whole") m = linear.wholeDevice;
+  if (m === "conv") return LP.rDrive.value;
+  return (LP.pitch.value * LP.starts.value) / (2 * Math.PI);
+}
+function activeLinearDevice() {
+  return linear.mode === "whole" ? linear.wholeDevice : linear.mode;
+}
+function reflectedJload() { const r = reffLinear(); return LP.mLoad.value * r * r; }
+function jEffLinear() { return linear.J + reflectedJload(); }
+
+// =============================================================================
+//  LINEAR PHYSICS
+// =============================================================================
+const LIN_DRAG_LOAD  = 1.5;       // viscous drag on the load (N·s/m)
+const LIN_DRAG_MOTOR = 0.005;     // motor shaft drag (N·m·s/rad)
+
+function linearReset() {
+  linear.theta = 0; linear.omega = 0;
+  linear.x = 0; linear.v = 0;
+  linear.lastTau = 0;
+  linear.thermal = 0; linear.exploded = false;
+  linear.psiOff = 0;
+  linear.pidI = 0;
+  linear.t = 0;
+  linear.drag = null;
+  linHistReset();
+}
+
+// Position-loop integrator. Side-effecting; called exactly once per
+// physics step from physicsLinearStep, BEFORE any device dynamics so the
+// engagement test in lead-screw mode reads the same pidI as the dynamics.
+function stepLinearPID(dt) {
+  if (linear.mode !== "whole" || linear.exploded || linear.drag) return;
+  const err = LP.xTarget.value - linear.x;
+  linear.pidI += err * dt;
+  // Anti-windup: cap so the integral term alone can never demand more
+  // velocity than ω_target.
+  const cap = LP.wTarget.value / Math.max(1e-3, LP.KiPos.value);
+  if (linear.pidI >  cap) linear.pidI =  cap;
+  if (linear.pidI < -cap) linear.pidI = -cap;
+}
+
+// Pick the motor torque for the current step. Three regimes:
+//   • drag mode: user is pulling the load by hand — short-circuits the
+//     drive output (torque comes from the constraint, not the motor).
+//   • whole-system: outer position loop → ω demand (clamped to ±ω_tgt) →
+//     velocity loop (Kp, clamped to ±τ_max) → τ.
+//   • everything else (lead/ball/conv): velocity loop directly tracks ω_tgt.
+// Read-only — the only side-effecting integrator (pidI) is advanced by
+// stepLinearPID once per step.
+function linearDriveTorque() {
+  if (linear.exploded || linear.drag) return 0;
+  if (linear.mode !== "whole" && !sim.driveOn) return 0;
+  const wDemand = linearDriveDemand();
+  let tau = LP.Kp.value * (wDemand - linear.omega);
+  if (tau >  LP.Tmax.value) tau =  LP.Tmax.value;
+  if (tau < -LP.Tmax.value) tau = -LP.Tmax.value;
+  return tau;
+}
+
+// Same Newton-cooling model as rotational. Only runs in the whole-system
+// translational lesson — lead/ball/conv stay non-thermal so the device
+// physics can be studied without the motor cooking.
+function stepLinearThermal(dt, tauApplied, tauMax) {
+  if (linear.mode !== "whole") return;
+  const tn = tauApplied / Math.max(1e-3, tauMax);
+  const Einf = THERM_E_INF_MAX * tn * tn;
+  linear.thermal += dt * (Einf - linear.thermal) / THERM_TAU_S;
+  if (linear.thermal < 0) linear.thermal = 0;
+  if (!linear.exploded && linear.thermal >= 1.0) {
+    linear.exploded = true;
+    linear.explosionT = linear.t;
+  }
+}
+
+// End-stop clamping: stop the load when it hits ±X_LIMIT. The screw side
+// remains free to spin (so the user can rotate against the stop and watch
+// the motor dump heat as torque rises against an immovable load — which is
+// pedagogically exactly the thing that breaks real motors).
+function applyEndStops() {
+  if (linear.x >  X_LIMIT) { linear.x =  X_LIMIT; if (linear.v > 0) linear.v = 0; }
+  if (linear.x < -X_LIMIT) { linear.x = -X_LIMIT; if (linear.v < 0) linear.v = 0; }
+}
+
+// Drag-mode: pointer is pinning either the load (lead/ball/conv) or the
+// motor shaft (rare, but handy for inspecting backlash). When drag pins
+// the load, propagate its velocity backwards through r_eff to get the
+// motor's ω; per-step Δx is differentiated with a short window to keep ω
+// smooth at pointer-event cadence (~60Hz).
+function physicsLinearDrag(dt) {
+  const reff = reffLinear();
+  if (linear.drag.kind === "load") {
+    const dx = linear.x - linear.drag.lastX;
+    linear.drag.lastX = linear.x;
+    if (!linear.drag.tHist) linear.drag.tHist = [];
+    linear.drag.tHist.push({ dt, dx });
+    let sumDt = 0, sumDx = 0, slice = 0;
+    for (let k = linear.drag.tHist.length - 1; k >= 0; k--) {
+      sumDt += linear.drag.tHist[k].dt;
+      sumDx += linear.drag.tHist[k].dx;
+      if (sumDt >= 0.08) { slice = k; break; }
+    }
+    if (slice > 0) linear.drag.tHist.splice(0, slice);
+    linear.v = sumDt > 1e-9 ? sumDx / sumDt : 0;
+    if (Math.abs(reff) > 1e-9 && linear.mode !== "lead") {
+      // For backlash-free devices, motor ω locks to load v / r_eff.
+      linear.omega = linear.v / reff;
+      linear.theta += linear.omega * dt;
+    } else if (linear.mode === "lead") {
+      // Backlash: only follow if engaged at a flank. Otherwise the screw
+      // keeps coasting (drag damps it, eventually to rest).
+      const psi = linear.x - linear.theta * reff - linear.psiOff;
+      const H = LP.lash.value / 2;
+      if (psi >= H || psi <= -H) {
+        linear.omega = linear.v / reff;
+        linear.theta += linear.omega * dt;
+      } else {
+        linear.omega *= Math.exp(-LIN_DRAG_MOTOR / Math.max(1e-6, linear.J) * dt);
+        linear.theta += linear.omega * dt;
+        // re-establish ψ_offset reference on entry into engagement
+        const newPsi = linear.x - linear.theta * reff - linear.psiOff;
+        if (newPsi > H)  linear.psiOff += (newPsi - H);
+        if (newPsi < -H) linear.psiOff += (newPsi - (-H));
+      }
+    }
+  }
+  applyEndStops();
+  linear.lastTau = 0;
+}
+
+// Engaged (rigid) coupling between motor and load.
+//   J_eff·dω/dt = τ − c_eff·ω,  v = ω·r_eff
+function physicsLinearRigid(dt) {
+  const reff = reffLinear();
+  const Jeff = jEffLinear();
+  // Effective damping reflected to motor shaft.
+  const ceff = LIN_DRAG_MOTOR + LIN_DRAG_LOAD * reff * reff;
+  const tau = linearDriveTorque();
+  // Implicit-Euler against (c + KpEff)
+  const KpEff = (linear.mode === "whole" || sim.driveOn) && !linear.exploded ? LP.Kp.value : 0;
+  const denom = Jeff + dt * (ceff + KpEff);
+  let wNew = (Jeff * linear.omega + dt * (tau + KpEff * linear.omega)) / Math.max(1e-9, denom);
+  // Saturate against τ_max
+  let tauApp = (linear.mode === "whole" || sim.driveOn) && !linear.exploded
+    ? LP.Kp.value * ((linearDriveDemand() ) - wNew) : 0;
+  if (Math.abs(tauApp) > LP.Tmax.value) {
+    const Tsat = Math.sign(tauApp) * LP.Tmax.value;
+    wNew = linear.omega + dt * (Tsat - ceff * linear.omega) / Math.max(1e-9, Jeff);
+    tauApp = Tsat;
+  }
+  linear.omega = wNew;
+  linear.theta += linear.omega * dt;
+  linear.v = linear.omega * reff;
+  linear.x += linear.v * dt;
+  applyEndStops();
+  if (linear.x === X_LIMIT || linear.x === -X_LIMIT) {
+    // Hitting an end-stop: the load is pinned, but the motor would still
+    // try to drive against it. Decouple v from ω so the motor can stall in
+    // place, dumping torque into heat.
+    linear.v = 0;
+    if ((linear.x ===  X_LIMIT && linear.omega > 0) ||
+        (linear.x === -X_LIMIT && linear.omega < 0)) {
+      linear.omega = 0;
+    }
+  }
+  linear.lastTau = tauApp;
+  stepLinearThermal(dt, tauApp, LP.Tmax.value);
+}
+
+function linearDriveDemand() {
+  if (linear.mode === "whole") {
+    const err = LP.xTarget.value - linear.x;
+    let wD = LP.KpPos.value * err - LP.KdPos.value * linear.v + LP.KiPos.value * linear.pidI;
+    if (wD >  LP.wTarget.value) wD =  LP.wTarget.value;
+    if (wD < -LP.wTarget.value) wD = -LP.wTarget.value;
+    return wD;
+  }
+  return LP.wTarget.value;
+}
+
+// Lead screw with axial backlash. Two-DoF (motor θ, load x), connected
+// through ψ = x − θ·r_eff − ψ_offset, free in (-H,+H), rigid at boundary.
+//
+// Mirrors the rotational backlash solver: pick engagement state, integrate
+// engaged blocks rigidly, integrate disengaged DoFs independently, project
+// any boundary-crosser back and apply a perfectly-plastic impulse so dψ=0
+// after the impact.
+function physicsLeadScrew(dt) {
+  const reff = reffLinear();
+  const H = LP.lash.value / 2;
+  const psi = linear.x - linear.theta * reff - linear.psiOff;
+  const psiDot = linear.v - linear.omega * reff;
+  const tau = linearDriveTorque();
+  // Engagement: tooth flanks only push. At ψ=+H contact pushes load (-x)
+  // and screw the (+θ direction). Released only if the unconstrained
+  // ψ-acceleration would tear the surfaces apart.
+  let engaged = 0;
+  const eps = Math.max(1e-7, H * 1e-3);
+  if (H <= 1e-9) {
+    engaged = (psiDot >= 0) ? +1 : -1;
+  } else if (psi >= H - eps) {
+    // Unconstrained ψ-accel under external forces only:
+    //   ddψ_free = ddx_free - r_eff · ddθ_free
+    //   ddθ_free = (τ - c_motor·ω)/J,  ddx_free = (-c_load·v)/m
+    const ddx = (-LIN_DRAG_LOAD * linear.v) / Math.max(1e-9, LP.mLoad.value);
+    const ddth = (tau - LIN_DRAG_MOTOR * linear.omega) / Math.max(1e-9, linear.J);
+    const ddpsi = ddx - reff * ddth;
+    if (psiDot > 1e-6 || ddpsi > -1e-9) engaged = +1;
+  } else if (psi <= -H + eps) {
+    const ddx = (-LIN_DRAG_LOAD * linear.v) / Math.max(1e-9, LP.mLoad.value);
+    const ddth = (tau - LIN_DRAG_MOTOR * linear.omega) / Math.max(1e-9, linear.J);
+    const ddpsi = ddx - reff * ddth;
+    if (psiDot < -1e-6 || ddpsi < 1e-9) engaged = -1;
+  }
+
+  if (engaged !== 0) {
+    physicsLinearRigid(dt);
+    // Re-establish ψ_offset so we stay at the boundary (corrects rounding).
+    const target = (engaged > 0) ? H : -H;
+    const psiNow = linear.x - linear.theta * reff - linear.psiOff;
+    linear.psiOff += (psiNow - target);
+  } else {
+    // Disengaged: motor and load each evolve independently.
+    // Motor: J·dω/dt = τ - c_motor·ω
+    const denomM = linear.J + dt * (LIN_DRAG_MOTOR + LP.Kp.value * (sim.driveOn || linear.mode === "whole" ? 1 : 0));
+    let wDemand = linearDriveDemand();
+    let tauTarget = (linear.mode === "whole" || sim.driveOn) && !linear.exploded
+      ? LP.Kp.value * (wDemand - linear.omega) : 0;
+    if (tauTarget >  LP.Tmax.value) tauTarget =  LP.Tmax.value;
+    if (tauTarget < -LP.Tmax.value) tauTarget = -LP.Tmax.value;
+    const wNew = linear.omega + dt * (tauTarget - LIN_DRAG_MOTOR * linear.omega) / Math.max(1e-9, linear.J);
+    linear.omega = wNew;
+    linear.theta += linear.omega * dt;
+    // Load: m·dv/dt = -c_load·v
+    const vNew = linear.v + dt * (-LIN_DRAG_LOAD * linear.v) / Math.max(1e-9, LP.mLoad.value);
+    linear.v = vNew;
+    linear.x += linear.v * dt;
+    linear.lastTau = tauTarget;
+    stepLinearThermal(dt, tauTarget, LP.Tmax.value);
+    applyEndStops();
+
+    // Boundary correction: if ψ has crossed ±H, project + plastic impulse.
+    const psiNow = linear.x - linear.theta * reff - linear.psiOff;
+    if (psiNow > H || psiNow < -H) {
+      const target = psiNow > 0 ? +H : -H;
+      const dPsi = target - psiNow;
+      // Apply correction to the load (could be either; symmetric).
+      linear.x += dPsi;
+      const dpsidot = linear.v - linear.omega * reff;
+      if ((target > 0 && dpsidot > 0) || (target < 0 && dpsidot < 0)) {
+        // Plastic impulse: m·Δv = -j, J·Δω = j·r_eff (sign so dψ=0 after).
+        const denom = (1 / Math.max(1e-9, LP.mLoad.value))
+                    + (reff * reff) / Math.max(1e-9, linear.J);
+        const j = -dpsidot / Math.max(1e-9, denom);
+        linear.v     += j / Math.max(1e-9, LP.mLoad.value);
+        linear.omega -= j * reff / Math.max(1e-9, linear.J);
+      }
+      applyEndStops();
+    }
+  }
+}
+
+function physicsLinearStep(dt) {
+  if (linear.drag) { physicsLinearDrag(dt); return; }
+  stepLinearPID(dt);
+  // Whole-system mode runs the chosen device's dynamics (only lead-screw
+  // has its own backlash branch; ball-screw and conveyor share the rigid
+  // path because both are anti-backlash by construction).
+  if (activeLinearDevice() === "lead") physicsLeadScrew(dt);
+  else physicsLinearRigid(dt);
+}
+
+// =============================================================================
+//  LINEAR PLOT HISTORY
+// =============================================================================
+const linHist = [];
+let linLastHistT = -Infinity;
+function linHistReset() { linHist.length = 0; linLastHistT = -Infinity; }
+function linHistPush() {
+  const dt = linear.t - linLastHistT;
+  if (dt < 1 / HIST_RATE_HZ) return;
+  linLastHistT = linear.t;
+  linHist.push({
+    t: linear.t,
+    omega: linear.omega,
+    tau: linear.lastTau || 0,
+    x: linear.x,
+    v: linear.v,
+    target: (linear.mode === "whole") ? LP.xTarget.value : null,
+    thermal: linear.thermal,
+  });
+  while (linHist.length > HIST_MAX) linHist.shift();
+}
+
+// =============================================================================
+//  LINEAR RENDER
+// =============================================================================
+const cvLin   = document.getElementById("cv-lin");
+const ctxLin  = cvLin.getContext("2d");
+const plotLin = document.getElementById("plot-lin");
+const pctxLin = plotLin.getContext("2d");
+
+// Track-frame layout: world x runs across the canvas, world y is centred.
+// Returns the conversions and the on-screen track box for this frame.
+function linLayout() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = cvLin.getBoundingClientRect();
+  cvLin.width  = Math.max(1, Math.round(r.width * dpr));
+  cvLin.height = Math.max(1, Math.round(r.height * dpr));
+  ctxLin.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = r.width, H = r.height;
+  ctxLin.fillStyle = "#0d1013";
+  ctxLin.fillRect(0, 0, W, H);
+
+  const padX = 60, padY = 30;
+  const trackY = H * 0.55;
+  const usableW = W - padX * 2;
+  const xToPx = (xm) => padX + ((xm + X_LIMIT) / (2 * X_LIMIT)) * usableW;
+  const mToPx = usableW / (2 * X_LIMIT);    // scale: m → px (used for sizes)
+  return { W, H, padX, padY, trackY, usableW, xToPx, mToPx };
+}
+
+// Cartoonish trapezoidal weight, drawn centred on (cx, cy_top), pointing up.
+// Larger mass slider → wider footprint, but capped so it never escapes the
+// frame. Hatched fill gives the cartoon-weight feel.
+function drawTrapezoidWeight(cx, cyTop, mSlider, accentColor) {
+  // mSlider is mass in kg. Map to size with a sub-linear curve so 100 kg
+  // doesn't drown the canvas.
+  const sz = 36 + 26 * Math.log10(1 + mSlider);
+  const halfBot = sz * 0.55;
+  const halfTop = sz * 0.32;
+  const h       = sz * 0.65;
+  const x0 = cx - halfBot, y0 = cyTop;
+  const x1 = cx + halfBot, y1 = cyTop;
+  const x2 = cx + halfTop, y2 = cyTop - h;
+  const x3 = cx - halfTop, y3 = cyTop - h;
+
+  ctxLin.beginPath();
+  ctxLin.moveTo(x0, y0); ctxLin.lineTo(x1, y1);
+  ctxLin.lineTo(x2, y2); ctxLin.lineTo(x3, y3);
+  ctxLin.closePath();
+  ctxLin.fillStyle = "#3a3024";
+  ctxLin.fill();
+  ctxLin.strokeStyle = accentColor || "#c0c9d8";
+  ctxLin.lineWidth = 2;
+  ctxLin.stroke();
+
+  // Hash strokes inside the trapezoid for the "weight" cartoon look.
+  ctxLin.save();
+  ctxLin.beginPath();
+  ctxLin.moveTo(x0, y0); ctxLin.lineTo(x1, y1);
+  ctxLin.lineTo(x2, y2); ctxLin.lineTo(x3, y3);
+  ctxLin.closePath();
+  ctxLin.clip();
+  ctxLin.strokeStyle = "#5a4a32";
+  ctxLin.lineWidth = 1;
+  for (let xx = x0 - h; xx < x1 + h; xx += 8) {
+    ctxLin.beginPath();
+    ctxLin.moveTo(xx, y0);
+    ctxLin.lineTo(xx + h, y0 - h);
+    ctxLin.stroke();
+  }
+  ctxLin.restore();
+
+  // Mass label
+  ctxLin.fillStyle = "#e6e9ef";
+  ctxLin.font = "600 12px ui-sans-serif";
+  ctxLin.textAlign = "center"; ctxLin.textBaseline = "middle";
+  ctxLin.fillText(`${mSlider.toFixed(1)} kg`, cx, cyTop - h * 0.55);
+  return { topY: y3, bottomY: y0, halfBot, halfTop, height: h };
+}
+
+// Reflected-inertia callout above the load. Big, central, colour-coded.
+function drawJReflectedCallout(cx, yTop, J, color) {
+  ctxLin.fillStyle = color || "#66bb6a";
+  ctxLin.font = "700 13px ui-sans-serif";
+  ctxLin.textAlign = "center"; ctxLin.textBaseline = "bottom";
+  ctxLin.fillText(`J_load,refl = ${J.toFixed(4)} kg·m²`, cx, yTop - 6);
+  ctxLin.font = "11px ui-sans-serif";
+  ctxLin.fillStyle = "#8a93a3";
+  ctxLin.fillText("(reflected to motor)", cx, yTop - 6 + 14);
+}
+
+// Travel track (a "rail" along the load's axis), with a target marker
+// when in whole-system mode.
+function drawTrack(L, drawTarget) {
+  const y = L.trackY + 30;
+  ctxLin.strokeStyle = "#3a4453";
+  ctxLin.lineWidth = 2;
+  ctxLin.beginPath();
+  ctxLin.moveTo(L.xToPx(-X_LIMIT), y);
+  ctxLin.lineTo(L.xToPx( X_LIMIT), y);
+  ctxLin.stroke();
+  // End-stop ticks
+  for (const xm of [-X_LIMIT, +X_LIMIT]) {
+    const xp = L.xToPx(xm);
+    ctxLin.beginPath();
+    ctxLin.moveTo(xp, y - 8);
+    ctxLin.lineTo(xp, y + 8);
+    ctxLin.stroke();
+  }
+  // Centre tick
+  ctxLin.strokeStyle = "#2a313c";
+  ctxLin.beginPath();
+  ctxLin.moveTo(L.xToPx(0), y - 6);
+  ctxLin.lineTo(L.xToPx(0), y + 6);
+  ctxLin.stroke();
+
+  // Position label
+  ctxLin.fillStyle = "#8a93a3";
+  ctxLin.font = "11px ui-sans-serif";
+  ctxLin.textAlign = "left"; ctxLin.textBaseline = "top";
+  ctxLin.fillText(`x = ${linear.x.toFixed(3)} m`, L.padX, y + 12);
+
+  // Load position dot
+  const xp = L.xToPx(linear.x);
+  ctxLin.fillStyle = "#4ea1ff";
+  ctxLin.beginPath(); ctxLin.arc(xp, y, 4, 0, Math.PI * 2); ctxLin.fill();
+
+  if (drawTarget) {
+    const tp = L.xToPx(LP.xTarget.value);
+    ctxLin.strokeStyle = "#f6c945";
+    ctxLin.lineWidth = 2;
+    ctxLin.beginPath();
+    ctxLin.moveTo(tp, y - 14);
+    ctxLin.lineTo(tp - 6, y - 22);
+    ctxLin.lineTo(tp + 6, y - 22);
+    ctxLin.closePath();
+    ctxLin.fillStyle = "#f6c945";
+    ctxLin.fill();
+    ctxLin.strokeStyle = "#3a2c00";
+    ctxLin.lineWidth = 1;
+    ctxLin.stroke();
+    ctxLin.fillStyle = "#f6c945";
+    ctxLin.font = "10px ui-sans-serif";
+    ctxLin.textAlign = "center"; ctxLin.textBaseline = "bottom";
+    ctxLin.fillText("target", tp, y - 24);
+  }
+}
+
+// Motor cylinder on the left edge of the screw devices. Tints with thermal.
+function drawMotor(cx, cy, r, label) {
+  const E = linear.thermal;
+  const fillC = E > 0.4 ? lerpColor("#1a2030", E > 0.7 ? "#3a1212" : "#3a2d10", Math.min(1, (E - 0.4)/0.3)) : "#1a2030";
+  const strokeC = thermalTint("#4ea1ff", E);
+  ctxLin.fillStyle = fillC;
+  ctxLin.beginPath();
+  ctxLin.arc(cx, cy, r, 0, Math.PI * 2);
+  ctxLin.fill();
+  ctxLin.strokeStyle = strokeC;
+  ctxLin.lineWidth = 2.5;
+  ctxLin.stroke();
+  // Halo when warming up
+  if (E > 0.4 && !linear.exploded) {
+    const t = Math.min(1, (E - 0.4) / 0.6);
+    const halo = E > 0.7 ? "#ef5350" : "#f6c945";
+    ctxLin.save();
+    ctxLin.globalAlpha = 0.18 + 0.45 * t;
+    ctxLin.fillStyle = halo;
+    ctxLin.beginPath();
+    ctxLin.arc(cx, cy, r + 8 + 14 * t, 0, Math.PI * 2);
+    ctxLin.fill();
+    ctxLin.restore();
+  }
+  // shaft indicator showing motor θ
+  const ind = r * 0.8;
+  ctxLin.strokeStyle = strokeC;
+  ctxLin.lineWidth = 2;
+  ctxLin.beginPath();
+  ctxLin.moveTo(cx, cy);
+  ctxLin.lineTo(cx + Math.cos(linear.theta) * ind, cy - Math.sin(linear.theta) * ind);
+  ctxLin.stroke();
+  ctxLin.fillStyle = "#6a7384";
+  ctxLin.beginPath(); ctxLin.arc(cx, cy, 3, 0, Math.PI * 2); ctxLin.fill();
+
+  // label
+  ctxLin.fillStyle = "#e6e9ef";
+  ctxLin.font = "600 12px ui-sans-serif";
+  ctxLin.textAlign = "center"; ctxLin.textBaseline = "top";
+  ctxLin.fillText(label, cx, cy + r + 6);
+  // Thermal mini-bar + explosion overlay only in capstone (whole-system)
+  // mode — the device-only lessons (lead/ball/conv) are non-thermal.
+  if (linear.mode === "whole") {
+    drawLinThermalBar(cx, cy + r + 22, 2 * r, E);
+    if (linear.exploded) drawLinExplosion(cx, cy, r);
+  }
+}
+
+function drawLinThermalBar(cx, y, w, E) {
+  const x = cx - w / 2;
+  const h = 6;
+  ctxLin.fillStyle = "#0d1013";
+  ctxLin.fillRect(x, y, w, h);
+  ctxLin.strokeStyle = "#3a4453";
+  ctxLin.lineWidth = 1;
+  ctxLin.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  const fillW = Math.max(0, Math.min(1, E)) * (w - 2);
+  const col = E > 0.7 ? "#ef5350" : (E > 0.4 ? "#f6c945" : "#66bb6a");
+  ctxLin.fillStyle = col;
+  ctxLin.fillRect(x + 1, y + 1, fillW, h - 2);
+  ctxLin.fillStyle = "#8a93a3";
+  ctxLin.font = "10px ui-sans-serif";
+  ctxLin.textAlign = "center"; ctxLin.textBaseline = "top";
+  ctxLin.fillText(`T ${tempFromE(E).toFixed(0)} °C / ${THERM_T_BLOW} °C`, cx, y + h + 2);
+}
+
+function drawLinExplosion(cx, cy, r) {
+  const tSince = linear.t - linear.explosionT;
+  const expand = Math.min(1, tSince * 1.2);
+  const flash = Math.max(0, 1 - tSince * 0.6);
+  ctxLin.save();
+  ctxLin.translate(cx, cy);
+  const N = 14;
+  ctxLin.beginPath();
+  for (let k = 0; k <= N * 2; k++) {
+    const a = (k / (N * 2)) * Math.PI * 2;
+    const isOuter = (k % 2) === 0;
+    const j = 0.85 + 0.3 * Math.sin(k * 13.37 + linear.t * 9);
+    const rr = (isOuter ? r * 1.85 : r * 0.95) * expand * j;
+    const xx = Math.cos(a) * rr, yy = Math.sin(a) * rr;
+    if (k === 0) ctxLin.moveTo(xx, yy); else ctxLin.lineTo(xx, yy);
+  }
+  ctxLin.closePath();
+  ctxLin.fillStyle = "#ff6b1a"; ctxLin.fill();
+  ctxLin.strokeStyle = "#ffd460"; ctxLin.lineWidth = 2; ctxLin.stroke();
+  ctxLin.beginPath();
+  ctxLin.arc(0, 0, r * 0.75 * expand, 0, Math.PI * 2);
+  ctxLin.fillStyle = "#ffe98a"; ctxLin.fill();
+  if (flash > 0) {
+    ctxLin.globalAlpha = flash;
+    ctxLin.fillStyle = "#fff";
+    ctxLin.beginPath(); ctxLin.arc(0, 0, r * 1.5 * expand, 0, Math.PI * 2);
+    ctxLin.fill();
+    ctxLin.globalAlpha = 1;
+  }
+  ctxLin.font = "bold 13px ui-sans-serif";
+  ctxLin.textAlign = "center"; ctxLin.textBaseline = "middle";
+  ctxLin.fillStyle = "#2a1500";
+  ctxLin.fillText("BOOM", 0, 0);
+  ctxLin.restore();
+}
+
+// ----- Lead screw rendering -----
+// The screw is drawn as a horizontal cylinder whose silhouette is sawtoothed
+// at the thread roots: every visible pitch the cylinder edge dips inward by
+// one root-depth and back out to the next crest. The body of the cylinder
+// shows the helical flanks as diagonal lines from a top valley down to a
+// bottom valley, slanted by the helix angle (= halfPitch · starts per
+// shaft height). Visible axial pitch on screen = LP.pitch.value · mToPx,
+// independent of starts. Number of starts only steepens the helix angle
+// (more axial advance per turn). The nut is drawn as a transparent housing
+// over the load position; meshing nut teeth interlock with the screw thread
+// valleys, and backlash shows as the nut tooth shifting axially within its
+// valley until it touches the opposite flank.
+function screwThreadGeom(L, mode) {
+  const reff = reffLinear(mode);
+  const lead = reff * 2 * Math.PI;
+  const leadPx = Math.max(24, lead * L.mToPx);
+  const starts = LP.starts.value;
+  const pitchPx = Math.max(12, leadPx / starts);
+  const halfPitch = pitchPx / 2;
+  const phase = (linear.theta / (2 * Math.PI)) * leadPx;
+  const phaseMod = ((phase % pitchPx) + pitchPx) % pitchPx;
+  // Bottom edge sawtooth offset: top crest at axial xc corresponds to a
+  // bottom crest at xc + lead/2. Modulo the visible pitch (= lead/starts),
+  // that offset is 0 for even starts, halfPitch for odd starts.
+  const topToBotOffset = (starts % 2 === 0) ? 0 : halfPitch;
+  const phaseModBot = ((phase + topToBotOffset) % pitchPx + pitchPx) % pitchPx;
+  // Helix flank slant (top valley → bottom valley of the same thread):
+  // half-revolution = lead/2 axial, which is starts·halfPitch in pixels.
+  const slantPx = halfPitch * starts;
+  return { reff, lead, leadPx, starts, pitchPx, halfPitch, phase, phaseMod, phaseModBot, topToBotOffset, slantPx };
+}
+
+function drawScrewShaft(L, x0Px, x1Px, yMid, shaftHpx, mode) {
+  const halfH = shaftHpx / 2;
+  const top = yMid - halfH;
+  const bot = yMid + halfH;
+  const { pitchPx, halfPitch, phaseMod, phaseModBot, slantPx } = screwThreadGeom(L, mode);
+  const rootDepth = Math.min(8, Math.max(3, halfH * 0.28));
+
+  // Outer silhouette: top sawtooth + right cap + bottom sawtooth + left cap.
+  ctxLin.save();
+  ctxLin.beginPath();
+  ctxLin.moveTo(x0Px, top);
+  const kT0 = Math.floor((x0Px - phaseMod) / pitchPx) - 1;
+  const kT1 = Math.ceil ((x1Px - phaseMod) / pitchPx) + 1;
+  for (let k = kT0; k <= kT1; k++) {
+    const xc = phaseMod + k * pitchPx;
+    const xv = xc + halfPitch;
+    const xn = xc + pitchPx;
+    if (xv > x0Px && xv < x1Px) ctxLin.lineTo(xv, top + rootDepth);
+    if (xn > x0Px && xn < x1Px) ctxLin.lineTo(xn, top);
+  }
+  ctxLin.lineTo(x1Px, top);
+  ctxLin.lineTo(x1Px, bot);
+  const kB0 = Math.ceil ((x1Px - phaseModBot) / pitchPx) + 1;
+  const kB1 = Math.floor((x0Px - phaseModBot) / pitchPx) - 1;
+  for (let k = kB0; k >= kB1; k--) {
+    const xc = phaseModBot + k * pitchPx;
+    const xv = xc - halfPitch;
+    const xp = xc - pitchPx;
+    if (xv > x0Px && xv < x1Px) ctxLin.lineTo(xv, bot - rootDepth);
+    if (xp > x0Px && xp < x1Px) ctxLin.lineTo(xp, bot);
+  }
+  ctxLin.lineTo(x0Px, bot);
+  ctxLin.closePath();
+
+  const grad = ctxLin.createLinearGradient(0, top, 0, bot);
+  grad.addColorStop(0,    "#1a1f28");
+  grad.addColorStop(0.5,  "#6f7a8a");
+  grad.addColorStop(1,    "#0d1218");
+  ctxLin.fillStyle = grad;
+  ctxLin.fill();
+  ctxLin.strokeStyle = "#2a313c";
+  ctxLin.lineWidth = 1;
+  ctxLin.stroke();
+  ctxLin.restore();
+
+  // Helix flanks: diagonal from each top valley to its same-thread bottom
+  // valley (one full half-turn axially = slantPx). Drawn under a clip so
+  // overshoots into the silhouette gaps don't paint outside the cylinder.
+  ctxLin.save();
+  ctxLin.beginPath();
+  ctxLin.rect(x0Px, top, x1Px - x0Px, shaftHpx);
+  ctxLin.clip();
+  ctxLin.strokeStyle = "rgba(13, 16, 19, 0.55)";
+  ctxLin.lineWidth = 1.2;
+  const kF0 = Math.floor((x0Px - phaseMod - halfPitch - slantPx) / pitchPx) - 1;
+  const kF1 = Math.ceil ((x1Px - phaseMod - halfPitch) / pitchPx) + 1;
+  for (let k = kF0; k <= kF1; k++) {
+    const xt = phaseMod + halfPitch + k * pitchPx;
+    ctxLin.beginPath();
+    ctxLin.moveTo(xt,           top + rootDepth - 0.5);
+    ctxLin.lineTo(xt + slantPx, bot - rootDepth + 0.5);
+    ctxLin.stroke();
+  }
+  // Faint highlight along each crest band — thin specular line just below
+  // the top edge and just above the bottom edge — sells the cylindrical depth.
+  ctxLin.strokeStyle = "rgba(200, 210, 225, 0.18)";
+  ctxLin.lineWidth = 1;
+  ctxLin.beginPath();
+  ctxLin.moveTo(x0Px, top + 1.5);
+  ctxLin.lineTo(x1Px, top + 1.5);
+  ctxLin.stroke();
+  ctxLin.restore();
+}
+
+function drawLeadScrew(L) {
+  const yMid = L.trackY - 40;
+  const shaftHpx = 48;
+  // Motor sits at the leftmost x stop, just outside the travel range.
+  const motorR = 28;
+  const motorCx = L.xToPx(-X_LIMIT) - motorR - 8;
+  drawMotor(motorCx, yMid, motorR, "motor");
+
+  const x0 = L.xToPx(-X_LIMIT) - 4;
+  const x1 = L.xToPx( X_LIMIT) + 4;
+  drawScrewShaft(L, x0, x1, yMid, shaftHpx, "lead");
+
+  // Nut housing — transparent box over the screw at current x.
+  const nutCx = L.xToPx(linear.x);
+  const nutW = 110, nutH = shaftHpx + 30;
+  const nx = nutCx - nutW / 2;
+  const ny = yMid - nutH / 2;
+
+  const halfH = shaftHpx / 2;
+  const top = yMid - halfH;
+  const bot = yMid + halfH;
+  const rootDepth = Math.min(8, Math.max(3, halfH * 0.28));
+  const { pitchPx, halfPitch, phaseMod, phaseModBot } = screwThreadGeom(L, "lead");
+
+  // Backlash visualisation. Real ψ shifts are tiny in pixels (lash is
+  // sub-millimetre); amplify the unit-normalised value [-1, +1] onto a
+  // visible flank-gap shift inside the valley. Cap so the nut tooth
+  // always stays within its valley walls.
+  const psi = linear.x - linear.theta * reffLinear() - linear.psiOff;
+  const Hlash = LP.lash.value / 2;
+  const psiNorm = (Hlash > 1e-9) ? Math.max(-1, Math.min(1, psi / Hlash)) : 0;
+  const psiPx = psiNorm * Math.min(8, halfPitch * 0.5);
+
+  // Box outline (drawn over the screw threads).
+  ctxLin.save();
+  ctxLin.fillStyle = "rgba(78, 161, 255, 0.08)";
+  ctxLin.strokeStyle = "#4ea1ff";
+  ctxLin.lineWidth = 2;
+  ctxLin.beginPath();
+  ctxLin.rect(nx, ny, nutW, nutH);
+  ctxLin.fill();
+  ctxLin.stroke();
+  ctxLin.restore();
+
+  // Nut interior — clip to nut bounds, then draw meshing nut teeth that
+  // sit in screw valleys. Top teeth point DOWN into top valleys; bottom
+  // teeth point UP into bottom valleys. The teeth are offset axially from
+  // the valley centre by psiPx so backlash shows as a visible flank gap.
+  ctxLin.save();
+  ctxLin.beginPath();
+  ctxLin.rect(nx + 1, ny + 1, nutW - 2, nutH - 2);
+  ctxLin.clip();
+
+  // Tooth dimensions: tip sits partway down the valley (above the root)
+  // so axial shifts move the tip across visible space rather than into a
+  // singular point.
+  const halfWBase = halfPitch * 0.42;
+  const halfWTip  = halfPitch * 0.18;
+  const tipDepth  = rootDepth * 0.65;
+
+  ctxLin.fillStyle = "rgba(246, 201, 69, 0.55)";
+  ctxLin.strokeStyle = "#f6c945";
+  ctxLin.lineWidth = 1.5;
+
+  // Top nut teeth (V-tabs hanging down from the inside top of the nut box).
+  const xLeft = nx, xRight = nx + nutW;
+  const kT0 = Math.floor((xLeft  - phaseMod - halfPitch) / pitchPx) - 1;
+  const kT1 = Math.ceil ((xRight - phaseMod - halfPitch) / pitchPx) + 1;
+  for (let k = kT0; k <= kT1; k++) {
+    const xv = phaseMod + halfPitch + k * pitchPx;
+    if (xv < xLeft - halfPitch || xv > xRight + halfPitch) continue;
+    const tx = xv + psiPx;
+    const tipY = top + tipDepth;
+    const baseY = ny + 5;
+    ctxLin.beginPath();
+    ctxLin.moveTo(tx - halfWBase, baseY);
+    ctxLin.lineTo(tx + halfWBase, baseY);
+    ctxLin.lineTo(tx + halfWTip,  tipY);
+    ctxLin.lineTo(tx - halfWTip,  tipY);
+    ctxLin.closePath();
+    ctxLin.fill();
+    ctxLin.stroke();
+  }
+
+  // Bottom nut teeth (V-tabs rising from the inside bottom of the nut).
+  const kB0 = Math.floor((xLeft  - phaseModBot - halfPitch) / pitchPx) - 1;
+  const kB1 = Math.ceil ((xRight - phaseModBot - halfPitch) / pitchPx) + 1;
+  for (let k = kB0; k <= kB1; k++) {
+    const xv = phaseModBot + halfPitch + k * pitchPx;
+    if (xv < xLeft - halfPitch || xv > xRight + halfPitch) continue;
+    const tx = xv + psiPx;
+    const tipY = bot - tipDepth;
+    const baseY = ny + nutH - 5;
+    ctxLin.beginPath();
+    ctxLin.moveTo(tx - halfWBase, baseY);
+    ctxLin.lineTo(tx + halfWBase, baseY);
+    ctxLin.lineTo(tx + halfWTip,  tipY);
+    ctxLin.lineTo(tx - halfWTip,  tipY);
+    ctxLin.closePath();
+    ctxLin.fill();
+    ctxLin.stroke();
+  }
+  ctxLin.restore();
+
+  // Trapezoidal load on top of the nut
+  const wAccent = thermalTint("#66bb6a", linear.thermal);
+  const trap = drawTrapezoidWeight(nutCx, ny, LP.mLoad.value, wAccent);
+  drawJReflectedCallout(nutCx, trap.topY, reflectedJload(), wAccent);
+
+  drawTrack(L, linear.mode === "whole");
+}
+
+// ----- Ball screw rendering -----
+// Same shaft layout as lead screw, but the nut housing is transparent
+// "glass" and shows the ball recirculation: balls roll through the
+// helical groove on the shaft side, then ride a U-shaped tube on the top
+// of the housing back to the start of the groove. No backlash flank
+// indicator (ball screws are pre-loaded against backlash).
+function drawBallScrew(L) {
+  const yMid = L.trackY - 50;
+  const shaftHpx = 44;
+  const motorR = 28;
+  const motorCx = L.xToPx(-X_LIMIT) - motorR - 8;
+  drawMotor(motorCx, yMid, motorR, "motor");
+
+  const x0 = L.xToPx(-X_LIMIT) - 4;
+  const x1 = L.xToPx( X_LIMIT) + 4;
+  drawScrewShaft(L, x0, x1, yMid, shaftHpx, "ball");
+
+  const nutCx = L.xToPx(linear.x);
+  const nutW = 110, nutH = shaftHpx + 40;
+  const nx = nutCx - nutW / 2;
+  const ny = yMid - nutH / 2 - 6;
+
+  const halfH = shaftHpx / 2;
+  const top = yMid - halfH;
+  const bot = yMid + halfH;
+  const rootDepth = Math.min(8, Math.max(3, halfH * 0.28));
+  const { pitchPx, halfPitch, phase, phaseMod, phaseModBot } = screwThreadGeom(L, "ball");
+
+  // recirculation tube — semicircle arching above the nut. Canvas y is
+  // inverted, so "above" = smaller y. Going from angle π (left) to 0
+  // (right) anticlockwise (counterclockwise=true) draws via 3π/2 in
+  // canvas frame, which is the upper semicircle visually.
+  const tubeCx = nutCx;
+  const tubeCy = top - 10;
+  const tubeR = nutW * 0.30;
+  ctxLin.save();
+  ctxLin.strokeStyle = "#7a8493";
+  ctxLin.lineWidth = 10;
+  ctxLin.lineCap = "round";
+  ctxLin.beginPath();
+  ctxLin.arc(tubeCx, tubeCy, tubeR, Math.PI, 0, true);
+  ctxLin.stroke();
+  ctxLin.strokeStyle = "#3a4453";
+  ctxLin.lineWidth = 6;
+  ctxLin.stroke();
+  ctxLin.restore();
+
+  // transparent nut box (glass collar)
+  ctxLin.save();
+  ctxLin.fillStyle = "rgba(120, 150, 200, 0.10)";
+  ctxLin.strokeStyle = "#a8b3c2";
+  ctxLin.lineWidth = 2;
+  ctxLin.beginPath();
+  ctxLin.rect(nx, ny, nutW, nutH);
+  ctxLin.fill();
+  ctxLin.stroke();
+  ctxLin.restore();
+
+  // Balls in the groove + recycle tube. Spacing is one ball per visible
+  // axial pitch, so balls always sit in screw thread valleys (top + bottom
+  // edges of the cylinder, at the V-cut roots). Each ball advances by
+  // pitchPx per full revolution of the screw, matching the helix.
+  ctxLin.save();
+  ctxLin.beginPath();
+  ctxLin.rect(nx + 1, ny + 1, nutW - 2, nutH - 2);
+  ctxLin.clip();
+
+  const ballR = Math.max(3.5, Math.min(6, rootDepth + 1.5));
+  const xLeft = nx, xRight = nx + nutW;
+
+  function drawBall(bx, by) {
+    ctxLin.fillStyle = "#c0c9d8";
+    ctxLin.strokeStyle = "#1a2030";
+    ctxLin.lineWidth = 1;
+    ctxLin.beginPath(); ctxLin.arc(bx, by, ballR, 0, Math.PI * 2); ctxLin.fill(); ctxLin.stroke();
+    ctxLin.fillStyle = "rgba(255,255,255,0.30)";
+    ctxLin.beginPath(); ctxLin.arc(bx - ballR * 0.35, by - ballR * 0.35, ballR * 0.35, 0, Math.PI * 2); ctxLin.fill();
+  }
+
+  // Top valleys: balls seat in the V-cut at the top edge of the cylinder.
+  const kT0 = Math.floor((xLeft  - phaseMod - halfPitch) / pitchPx) - 1;
+  const kT1 = Math.ceil ((xRight - phaseMod - halfPitch) / pitchPx) + 1;
+  for (let k = kT0; k <= kT1; k++) {
+    const xv = phaseMod + halfPitch + k * pitchPx;
+    if (xv < xLeft + ballR * 0.5 || xv > xRight - ballR * 0.5) continue;
+    drawBall(xv, top + rootDepth - 0.5);
+  }
+  // Bottom valleys.
+  const kB0 = Math.floor((xLeft  - phaseModBot - halfPitch) / pitchPx) - 1;
+  const kB1 = Math.ceil ((xRight - phaseModBot - halfPitch) / pitchPx) + 1;
+  for (let k = kB0; k <= kB1; k++) {
+    const xv = phaseModBot + halfPitch + k * pitchPx;
+    if (xv < xLeft + ballR * 0.5 || xv > xRight - ballR * 0.5) continue;
+    drawBall(xv, bot - rootDepth + 0.5);
+  }
+  ctxLin.restore();
+
+  // Balls inside the recirculation tube. The tube path moves balls along
+  // the upper semicircle from right (entry) to left (exit), spaced so the
+  // pitch on the tube matches the groove pitch. Phase advances them
+  // continuously: as the screw turns, balls march along the helix and
+  // around the tube as one closed loop.
+  const tubeArcLen = Math.PI * tubeR;
+  const NTube = Math.max(3, Math.round(tubeArcLen / pitchPx));
+  const tubePhase = ((phase % pitchPx) + pitchPx) % pitchPx;
+  for (let k = 0; k < NTube; k++) {
+    const s = (k * pitchPx + tubePhase) % tubeArcLen;
+    const t = s / tubeArcLen;             // 0 → 1 across the half-arc
+    const ang = Math.PI - t * Math.PI;    // π → 0 (entry on right, exit on left)
+    const bx = tubeCx + Math.cos(ang) * tubeR;
+    const by = tubeCy - Math.abs(Math.sin(ang)) * tubeR;
+    ctxLin.fillStyle = "#c0c9d8";
+    ctxLin.strokeStyle = "#1a2030";
+    ctxLin.lineWidth = 1;
+    ctxLin.beginPath(); ctxLin.arc(bx, by, ballR, 0, Math.PI * 2); ctxLin.fill(); ctxLin.stroke();
+    ctxLin.fillStyle = "rgba(255,255,255,0.30)";
+    ctxLin.beginPath(); ctxLin.arc(bx - ballR * 0.35, by - ballR * 0.35, ballR * 0.35, 0, Math.PI * 2); ctxLin.fill();
+  }
+
+  // Trapezoidal weight perched on the top of the recirculation arch
+  const wAccent = thermalTint("#66bb6a", linear.thermal);
+  const trap = drawTrapezoidWeight(nutCx, ny - 12, LP.mLoad.value, wAccent);
+  drawJReflectedCallout(nutCx, trap.topY, reflectedJload(), wAccent);
+
+  drawTrack(L, linear.mode === "whole");
+}
+
+// ----- Conveyor belt rendering -----
+// Two horizontal pulleys, belt loops top-and-bottom, top surface of belt
+// is horizontal and carries the load. Reuses existing belt geometry math
+// adapted to a custom layout (pulley centres horizontal, common y).
+function drawConveyor(L) {
+  const yMid = L.trackY - 60;
+  const motorR = 28;
+  const motorCx = L.xToPx(-X_LIMIT) - motorR - 8;
+  drawMotor(motorCx, yMid, motorR, "motor");
+
+  // Pulley pixel radii. drive on left edge, idler on right.
+  const r1Px = LP.rDrive.value * L.mToPx;
+  const r2Px = LP.rIdler.value * L.mToPx;
+  // Place pulleys so the top of the belt covers x ∈ [-X_LIMIT, +X_LIMIT].
+  const cy = yMid;
+  const drivePulleyCx = L.xToPx(-X_LIMIT);
+  const idlerPulleyCx = L.xToPx( X_LIMIT);
+
+  // Belt body: two horizontal segments (top + bottom) plus two semicircular
+  // wraps. Top y = cy - r (since both pulleys here have the SAME pulley y).
+  // Equal radii is the easy case — for unequal radii the top tangent line
+  // is angled, but the trapezoidal weight still rests on whatever line the
+  // belt makes between tangent points.
+  const beltColor = "#4a5460";
+  const beltOuter = "#202833";
+
+  // ---- belt body (outline)
+  ctxLin.lineCap = "round"; ctxLin.lineJoin = "round";
+  function pathBelt() {
+    const dx = idlerPulleyCx - drivePulleyCx;
+    const dy = 0;
+    const Lc = Math.hypot(dx, dy);
+    const sinA = (r1Px - r2Px) / Lc;
+    const alpha = Math.asin(Math.max(-1, Math.min(1, sinA)));
+    const cosA = Math.cos(alpha);
+    // Tangent points: top side
+    const aTopX = drivePulleyCx + r1Px * (sinA * 1   + cosA * 0);
+    const aTopY = cy             + r1Px * (sinA * 0   - cosA * 1);
+    const bTopX = idlerPulleyCx + r2Px * (sinA * 1   + cosA * 0);
+    const bTopY = cy             + r2Px * (sinA * 0   - cosA * 1);
+    const aBotX = drivePulleyCx + r1Px * (sinA * 1   - cosA * 0);
+    const aBotY = cy             + r1Px * (sinA * 0   + cosA * 1);
+    const bBotX = idlerPulleyCx + r2Px * (sinA * 1   - cosA * 0);
+    const bBotY = cy             + r2Px * (sinA * 0   + cosA * 1);
+    return { aTopX, aTopY, bTopX, bTopY, aBotX, aBotY, bBotX, bBotY, alpha, Lc };
+  }
+  const bp = pathBelt();
+  ctxLin.beginPath();
+  // Top straight
+  ctxLin.moveTo(bp.aTopX, bp.aTopY);
+  ctxLin.lineTo(bp.bTopX, bp.bTopY);
+  // Idler wrap (right pulley): from top tangent around the right side
+  // (away from driver) to bottom tangent.
+  ctxLin.arc(idlerPulleyCx, cy, r2Px,
+             Math.atan2(bp.bTopY - cy, bp.bTopX - idlerPulleyCx),
+             Math.atan2(bp.bBotY - cy, bp.bBotX - idlerPulleyCx),
+             false);
+  // Bottom straight (back toward driver)
+  ctxLin.lineTo(bp.aBotX, bp.aBotY);
+  // Driver wrap (left pulley): from bottom tangent around the left side
+  ctxLin.arc(drivePulleyCx, cy, r1Px,
+             Math.atan2(bp.aBotY - cy, bp.aBotX - drivePulleyCx),
+             Math.atan2(bp.aTopY - cy, bp.aTopX - drivePulleyCx),
+             false);
+  ctxLin.closePath();
+  ctxLin.strokeStyle = beltOuter; ctxLin.lineWidth = 11; ctxLin.stroke();
+  ctxLin.strokeStyle = beltColor; ctxLin.lineWidth = 7;  ctxLin.stroke();
+  ctxLin.strokeStyle = "#6a7384"; ctxLin.lineWidth = 1;  ctxLin.stroke();
+
+  // pulleys
+  for (const [pcx, pr, label] of [[drivePulleyCx, r1Px, "drive"], [idlerPulleyCx, r2Px, "idler"]]) {
+    ctxLin.fillStyle = "#1a2030";
+    ctxLin.beginPath(); ctxLin.arc(pcx, cy, pr, 0, Math.PI * 2); ctxLin.fill();
+    ctxLin.strokeStyle = label === "drive" ? thermalTint("#4ea1ff", linear.thermal) : "#c0c9d8";
+    ctxLin.lineWidth = 2;
+    ctxLin.beginPath(); ctxLin.arc(pcx, cy, pr, 0, Math.PI * 2); ctxLin.stroke();
+    // Drive pulley shows θ; idler shows the slaved angle ω·r1/r2 (same
+    // as drive when equal radii).
+    let phaseTheta;
+    if (label === "drive") phaseTheta = linear.theta;
+    else                   phaseTheta = linear.theta * (LP.rDrive.value / Math.max(1e-6, LP.rIdler.value));
+    const ind = pr * 0.7;
+    ctxLin.strokeStyle = "#c0c9d8"; ctxLin.lineWidth = 2;
+    ctxLin.beginPath();
+    ctxLin.moveTo(pcx, cy);
+    ctxLin.lineTo(pcx + Math.cos(phaseTheta) * ind, cy - Math.sin(phaseTheta) * ind);
+    ctxLin.stroke();
+    ctxLin.fillStyle = "#6a7384";
+    ctxLin.beginPath(); ctxLin.arc(pcx, cy, 2.5, 0, Math.PI * 2); ctxLin.fill();
+    ctxLin.fillStyle = "#8a93a3";
+    ctxLin.font = "11px ui-sans-serif";
+    ctxLin.textAlign = "center"; ctxLin.textBaseline = "top";
+    ctxLin.fillText(label, pcx, cy + pr + 4);
+  }
+
+  // Belt phase marks on the top run, shifting with theta.
+  const beltPhase = linear.theta * r1Px;
+  const segLen = bp.bTopX - bp.aTopX;
+  const Nmk = Math.max(4, Math.round(segLen / 60));
+  for (let k = 0; k < Nmk; k++) {
+    const u = ((k / Nmk) * segLen + beltPhase) % segLen;
+    const uu = u < 0 ? u + segLen : u;
+    const t = uu / segLen;
+    const xp = bp.aTopX + t * (bp.bTopX - bp.aTopX);
+    const yp = bp.aTopY + t * (bp.bTopY - bp.aTopY);
+    ctxLin.fillStyle = "#0d1013";
+    ctxLin.beginPath(); ctxLin.arc(xp, yp, 4, 0, Math.PI * 2); ctxLin.fill();
+    ctxLin.fillStyle = "#f6c945";
+    ctxLin.beginPath(); ctxLin.arc(xp, yp, 2.5, 0, Math.PI * 2); ctxLin.fill();
+  }
+
+  // Trapezoidal load on top of the belt at current x.
+  const xp = L.xToPx(linear.x);
+  // Slot the load onto the belt's top line at this x.
+  const t = (bp.bTopX > bp.aTopX) ? (xp - bp.aTopX) / (bp.bTopX - bp.aTopX) : 0;
+  const yTop = bp.aTopY + t * (bp.bTopY - bp.aTopY);
+  const wAccent = thermalTint("#66bb6a", linear.thermal);
+  const trap = drawTrapezoidWeight(xp, yTop - 1, LP.mLoad.value, wAccent);
+  drawJReflectedCallout(xp, trap.topY, reflectedJload(), wAccent);
+
+  drawTrack(L, linear.mode === "whole");
+}
+
+function drawWholeSystemTrans(L) {
+  // The user-selected device is whichever the whole-system has chosen.
+  // For now reuse the lead screw (most general — has backlash too).
+  if (linear.wholeDevice === "ball") drawBallScrew(L);
+  else if (linear.wholeDevice === "conv") drawConveyor(L);
+  else drawLeadScrew(L);
+}
+
+function renderLinear() {
+  const L = linLayout();
+  // Title
+  ctxLin.fillStyle = "#8a93a3";
+  ctxLin.font = "11px ui-sans-serif";
+  ctxLin.textAlign = "left"; ctxLin.textBaseline = "top";
+  const titleMap = {
+    lead: "Lead screw — translating load via threaded screw + nut",
+    ball: "Ball screw — recirculating-ball nut, near-zero backlash",
+    conv: "Conveyor belt — translating load on belt-driven flat surface",
+    whole: "Whole-system translational — position PID into selectable device",
+  };
+  ctxLin.fillText(titleMap[linear.mode] || "", 8, 6);
+
+  if (linear.mode === "lead")  drawLeadScrew(L);
+  else if (linear.mode === "ball") drawBallScrew(L);
+  else if (linear.mode === "conv") drawConveyor(L);
+  else if (linear.mode === "whole") drawWholeSystemTrans(L);
+}
+
+function renderLinearPlots() {
+  const dpr = window.devicePixelRatio || 1;
+  const r = plotLin.getBoundingClientRect();
+  plotLin.width  = Math.max(1, Math.round(r.width * dpr));
+  plotLin.height = Math.max(1, Math.round(r.height * dpr));
+  pctxLin.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const W = r.width, H = r.height;
+  pctxLin.fillStyle = getVar("--panel");
+  pctxLin.fillRect(0, 0, W, H);
+
+  const fsize = Math.max(12, Math.min(W, H) * 0.038);
+  const pad = 8;
+  const totalH = H - pad * 3;
+  const upperH = Math.floor(totalH * 0.5);
+  const lowerH = totalH - upperH;
+
+  const tMax = Math.max(linear.t, HIST_WINDOW_S);
+  const tMin = tMax - HIST_WINDOW_S;
+  const winHist = linHist.filter(h => h.t >= tMin);
+
+  // Find data ranges
+  let xAbs = X_LIMIT;
+  for (const h of winHist) { if (Math.abs(h.x) > xAbs) xAbs = Math.abs(h.x); }
+  if (linear.mode === "whole") xAbs = Math.max(xAbs, Math.abs(LP.xTarget.value));
+  const xHi = xAbs, xLo = -xAbs;
+
+  let tAbs = 0.5;
+  for (const h of winHist) { const a = Math.abs(h.tau); if (Number.isFinite(a) && a > tAbs) tAbs = a; }
+  const tauHi = Math.ceil(tAbs * 2) / 2, tauLo = -tauHi;
+
+  // Inline plot grid + lines (small reuse of existing helpers via globals)
+  const px = pad, pw = W - pad * 2;
+  let py = pad;
+
+  // Upper: x(t) and target if whole-system
+  const titleUpper = linear.mode === "whole" ? "x(t) — load position (m), yellow = target" : "x(t) — load position (m)";
+  // Use the existing plot-grid helpers from above by faking pctx (they
+  // close over `pctx`). So we reproduce the grid here on pctxLin.
+  drawLinPlotGrid(px, py, pw, upperH, xLo, xHi, tMin, tMax, titleUpper, fsize);
+  if (linear.mode === "whole") {
+    plotLinLine(px, py, pw, upperH, xLo, xHi, tMin, tMax,
+                winHist.map(h => ({ t: h.t, y: h.target })), "#f6c945", 1.4);
+  }
+  plotLinLine(px, py, pw, upperH, xLo, xHi, tMin, tMax,
+              winHist.map(h => ({ t: h.t, y: h.x })), "#4ea1ff", 2.2);
+  py += upperH + pad;
+
+  drawLinPlotGrid(px, py, pw, lowerH, tauLo, tauHi, tMin, tMax, "τ motor (N·m)", fsize);
+  plotLinLine(px, py, pw, lowerH, tauLo, tauHi, tMin, tMax,
+              winHist.map(h => ({ t: h.t, y: h.tau })), thermalTint("#4ea1ff", linear.thermal), 2.0);
+}
+
+function drawLinPlotGrid(px, py, pw, ph, yMin, yMax, tMin, tMax, title, fsize) {
+  pctxLin.fillStyle = "#0d1013";
+  pctxLin.fillRect(px, py, pw, ph);
+  pctxLin.strokeStyle = "#2a313c";
+  pctxLin.lineWidth = 1;
+  pctxLin.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+  pctxLin.fillStyle = "#55606f";
+  pctxLin.font = `${fsize}px ui-sans-serif`;
+  pctxLin.textBaseline = "middle"; pctxLin.textAlign = "right";
+  for (let i = 0; i <= 4; i++) {
+    const frac = i / 4;
+    const yv = yMax - frac * (yMax - yMin);
+    const yy = py + frac * ph;
+    pctxLin.strokeStyle = "#1e252f";
+    pctxLin.beginPath(); pctxLin.moveTo(px + 36, yy); pctxLin.lineTo(px + pw, yy); pctxLin.stroke();
+    pctxLin.fillStyle = "#55606f";
+    pctxLin.fillText(yv.toFixed(2), px + 34, yy);
+  }
+  if (yMin < 0 && yMax > 0) {
+    const yy = py + (yMax / (yMax - yMin)) * ph;
+    pctxLin.strokeStyle = "#3a4453";
+    pctxLin.beginPath(); pctxLin.moveTo(px + 36, yy); pctxLin.lineTo(px + pw, yy); pctxLin.stroke();
+  }
+  pctxLin.textAlign = "center"; pctxLin.textBaseline = "top";
+  for (let i = 0; i <= 4; i++) {
+    const frac = i / 4;
+    const tv = tMin + frac * (tMax - tMin);
+    const xx = px + 36 + frac * (pw - 40);
+    pctxLin.strokeStyle = "#1e252f";
+    pctxLin.beginPath(); pctxLin.moveTo(xx, py); pctxLin.lineTo(xx, py + ph - 14); pctxLin.stroke();
+    pctxLin.fillStyle = "#55606f";
+    pctxLin.fillText(tv.toFixed(1) + "s", xx, py + ph - 12);
+  }
+  pctxLin.fillStyle = "#8a93a3";
+  pctxLin.textAlign = "left"; pctxLin.textBaseline = "top";
+  pctxLin.fillText(title, px + 6, py + 4);
+}
+
+function plotLinLine(px, py, pw, ph, yMin, yMax, tMin, tMax, pts, color, lw) {
+  if (!pts || pts.length < 2) return;
+  pctxLin.strokeStyle = color;
+  pctxLin.lineWidth = lw || 1.4;
+  pctxLin.beginPath();
+  const x0 = px + 36;
+  const usableW = pw - 40;
+  const yRange = (yMax - yMin) || 1;
+  const tRange = (tMax - tMin) || 1;
+  let started = false;
+  for (const p of pts) {
+    if (!Number.isFinite(p.y)) { started = false; continue; }
+    const xx = x0 + ((p.t - tMin) / tRange) * usableW;
+    const yy = py + (1 - (p.y - yMin) / yRange) * ph;
+    if (!started) { pctxLin.moveTo(xx, yy); started = true; }
+    else pctxLin.lineTo(xx, yy);
+  }
+  pctxLin.stroke();
+}
+
+// =============================================================================
+//  LINEAR UI BUILD
+// =============================================================================
+const linDriveBox = document.getElementById("lin-drive-sliders");
+const linMechBox  = document.getElementById("lin-mech-sliders");
+const linNotes    = document.getElementById("lin-notes");
+const linMechH2   = document.getElementById("lin-mech-h2");
+const linPidPair  = document.getElementById("lin-pid-pair");
+
+function buildLinDriveSliders() {
+  linDriveBox.innerHTML = "";
+  if (linear.mode === "whole") {
+    mkLPRow(linDriveBox, "xTarget");
+    mkLPRow(linDriveBox, "Tmax");
+    mkLPRow(linDriveBox, "wTarget");
+    mkLPRow(linDriveBox, "Kp");
+    mkLPRow(linDriveBox, "KpPos");
+    mkLPRow(linDriveBox, "KdPos");
+    mkLPRow(linDriveBox, "KiPos");
+    linPidPair.style.display = "";
+  } else {
+    mkLPRow(linDriveBox, "wTarget");
+    mkLPRow(linDriveBox, "Tmax");
+    mkLPRow(linDriveBox, "Kp");
+    linPidPair.style.display = "none";
+  }
+}
+
+function buildLinMechSliders() {
+  linMechBox.innerHTML = "";
+  // mass is universal
+  mkLPRow(linMechBox, "mLoad");
+  if (linear.mode === "lead") {
+    mkLPRow(linMechBox, "pitch");
+    mkLPRow(linMechBox, "starts");
+    mkLPRow(linMechBox, "lash");
+    linMechH2.textContent = "Lead-screw mechanism";
+  } else if (linear.mode === "ball") {
+    mkLPRow(linMechBox, "pitch");
+    mkLPRow(linMechBox, "starts");
+    linMechH2.textContent = "Ball-screw mechanism";
+  } else if (linear.mode === "conv") {
+    mkLPRow(linMechBox, "rDrive");
+    mkLPRow(linMechBox, "rIdler");
+    linMechH2.textContent = "Conveyor mechanism";
+  } else if (linear.mode === "whole") {
+    // Device-selector row + the relevant mechanism sliders for the chosen device
+    const row = document.createElement("div");
+    row.className = "pair";
+    row.style.gap = "6px";
+    const lbl = document.createElement("span");
+    lbl.style.color = "var(--muted)";
+    lbl.style.fontSize = "12px";
+    lbl.textContent = "device:";
+    row.appendChild(lbl);
+    for (const [k, name] of [["lead", "lead-screw"], ["ball", "ball-screw"], ["conv", "conveyor"]]) {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = name;
+      if (linear.wholeDevice === k) b.style.borderColor = "var(--accent)";
+      b.addEventListener("click", () => {
+        linear.wholeDevice = k;
+        buildLinMechSliders();
+        updateLinNotes();
+      });
+      row.appendChild(b);
+    }
+    linMechBox.appendChild(row);
+    if (linear.wholeDevice === "lead") {
+      mkLPRow(linMechBox, "pitch"); mkLPRow(linMechBox, "starts"); mkLPRow(linMechBox, "lash");
+    } else if (linear.wholeDevice === "ball") {
+      mkLPRow(linMechBox, "pitch"); mkLPRow(linMechBox, "starts");
+    } else {
+      mkLPRow(linMechBox, "rDrive"); mkLPRow(linMechBox, "rIdler");
+    }
+    linMechH2.textContent = "Whole-system mechanism";
+  }
+}
+
+function updateLinNotes() {
+  const map = {
+    lead:  `<b>lead screw</b> — the screw turns; the nut is constrained to translate. One revolution moves the nut by the <i>lead</i> = pitch · starts. Reflected inertia at the motor is m·(lead/2π)², so a fine pitch (small lead) hides a heavy load behind a tiny effective J. Backlash here is real: when you reverse direction, the screw spins through the lash window before the opposite thread flank catches the nut. Pedagogical takeaway: lead screws trade speed for force, and lash for cost.`,
+    ball:  `<b>ball screw</b> — same kinematics as a lead screw, but balls roll between the screw and nut threads instead of sliding. The recirculation tube above the nut shows balls feeding back from the end of the working groove to the start. Ball screws are pre-loaded against backlash, so you can run a position loop tightly without lost motion. Reflected inertia is the same: m·(lead/2π)².`,
+    conv:  `<b>conveyor belt</b> — the drive pulley spins; a (locally) inextensible belt translates the load along its top surface at v = ω·r₁. Reflected inertia is m·r². Big drive pulleys give big v but huge effective inertia — exactly the speed/force trade-off you tune via gearing.`,
+    whole: `<b>whole-system translational</b> — pick a device, set a load mass and target position. The motor runs an inner velocity loop; an outer position PID drives that velocity demand. The motor's reflected inertia is the rotor J plus m·r_eff². The same Newton-cooling thermal model used by the capstone rotational lesson runs here too: a 25 °C room, τ_th=12 s, copper losses ∝ τ², and a 180 °C blow temperature reached after 5 s of continuous τ_max from cold. Keep retuning the device parameters and gains until the load gets there without cooking the motor.`,
+  };
+  linNotes.innerHTML = map[linear.mode] || "";
+}
+
+// =============================================================================
+//  LINEAR POINTER INTERACTION (drag the load horizontally)
+// =============================================================================
+function clientToCanvasLin(ev) {
+  const r = cvLin.getBoundingClientRect();
+  return { mx: ev.clientX - r.left, my: ev.clientY - r.top };
+}
+// Hit-test: did the pointer click near the trapezoid load on top of the
+// device? We don't know the y precisely (depends on mode), so just check
+// horizontal proximity AND that the y is in the upper 70% of the canvas
+// (where the device + weight live).
+function hitTestLoad(mx, my) {
+  const r = cvLin.getBoundingClientRect();
+  if (my > r.height * 0.85) return false;
+  const padX = 60;
+  const usableW = r.width - padX * 2;
+  const xpx = padX + ((linear.x + X_LIMIT) / (2 * X_LIMIT)) * usableW;
+  return Math.abs(mx - xpx) < 60;
+}
+
+cvLin.addEventListener("pointerdown", (ev) => {
+  if (linear.exploded) return;
+  const { mx, my } = clientToCanvasLin(ev);
+  if (!hitTestLoad(mx, my)) return;
+  linear.drag = { kind: "load", lastX: linear.x };
+  // Freeze velocities so the load is pinned cleanly during drag.
+  linear.v = 0; linear.omega = 0;
+  cvLin.setPointerCapture(ev.pointerId);
+  cvLin.classList.add("grabbing");
+  ev.preventDefault();
+});
+cvLin.addEventListener("pointermove", (ev) => {
+  const { mx, my } = clientToCanvasLin(ev);
+  if (!linear.drag || linear.drag.kind !== "load") {
+    cvLin.style.cursor = hitTestLoad(mx, my) ? "grab" : "default";
+    return;
+  }
+  // pointer x → world x. Map padX..(W-padX) onto [-X_LIMIT, +X_LIMIT].
+  const r = cvLin.getBoundingClientRect();
+  const padX = 60;
+  const usableW = r.width - padX * 2;
+  let xm = ((mx - padX) / usableW) * (2 * X_LIMIT) - X_LIMIT;
+  if (xm >  X_LIMIT) xm =  X_LIMIT;
+  if (xm < -X_LIMIT) xm = -X_LIMIT;
+  linear.x = xm;
+  ev.preventDefault();
+});
+function endLinDrag(ev) {
+  if (!linear.drag) return;
+  linear.drag = null;
+  try { cvLin.releasePointerCapture(ev.pointerId); } catch {}
+  cvLin.classList.remove("grabbing");
+  cvLin.style.cursor = "default";
+}
+cvLin.addEventListener("pointerup", endLinDrag);
+cvLin.addEventListener("pointercancel", endLinDrag);
+cvLin.addEventListener("pointerleave", (ev) => { if (linear.drag) endLinDrag(ev); });
+
+// =============================================================================
+//  LINEAR TAB / SUB-TAB HANDLERS
+// =============================================================================
+document.querySelectorAll("#lin-tabs button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("#lin-tabs button").forEach(b => b.classList.toggle("active", b === btn));
+    linear.mode = btn.dataset.lmode;
+    // First-entry demos: lead default has noticeable lash; ball/conv kick
+    // off a heavier load so the reflected inertia is dramatic.
+    if (linear.mode === "lead")  { LP.pitch.value = 0.010; LP.starts.value = 1; LP.lash.value = 0.0008; }
+    if (linear.mode === "ball")  { LP.pitch.value = 0.010; LP.starts.value = 2; }
+    if (linear.mode === "conv")  { LP.rDrive.value = 0.20; LP.rIdler.value = 0.20; }
+    if (linear.mode === "whole") { /* keep current */ }
+    linearReset();
+    buildLinDriveSliders();
+    buildLinMechSliders();
+    updateLinNotes();
+  });
+});
+
+// =============================================================================
+//  LINEAR READOUT
+// =============================================================================
+const LR = {
+  T:    document.getElementById("lr-T"),
+  F:    document.getElementById("lr-F"),
+  x:    document.getElementById("lr-x"),
+  v:    document.getElementById("lr-v"),
+  Jrefl:document.getElementById("lr-Jrefl"),
+  Jeff: document.getElementById("lr-Jeff"),
+  thE:  document.getElementById("lr-thE"),
+  t:    document.getElementById("lr-t"),
+  fps:  document.getElementById("lr-fps"),
+};
+function updateLinearReadout() {
+  const r = reffLinear();
+  // Force at the load = τ at motor / r_eff (perfect transmission, no
+  // friction loss in the device — pedagogical bound).
+  const F = (Math.abs(r) > 1e-9) ? (linear.lastTau / r) : 0;
+  LR.T.textContent     = (linear.lastTau || 0).toFixed(3);
+  LR.F.textContent     = F.toFixed(2);
+  LR.x.textContent     = linear.x.toFixed(3);
+  LR.v.textContent     = linear.v.toFixed(3);
+  LR.Jrefl.textContent = reflectedJload().toFixed(5);
+  LR.Jeff.textContent  = jEffLinear().toFixed(5);
+  LR.thE.textContent   = tempFromE(linear.thermal).toFixed(0);
+  LR.t.textContent     = linear.t.toFixed(2);
+  LR.fps.textContent   = fpsVal || "--";
+}
+
+// Initial UI
+buildLinDriveSliders();
+buildLinMechSliders();
+updateLinNotes();
+
+// =============================================================================
+//  GO
+// =============================================================================
+buildWheelRows();
+updateModeNotes();
+
+// step() (defined above) already routes physics + render to the linear
+// lesson when sim.lesson === "linear", so no separate RAF is needed.
+requestAnimationFrame(step);
+</script>
+</body>
+</html>

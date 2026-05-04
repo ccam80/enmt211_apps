@@ -1,0 +1,2313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control This System</title>
+<style>
+  :root {
+    --bg: #111418;
+    --panel: #1b1f25;
+    --panel2: #232932;
+    --ink: #e6e9ef;
+    --muted: #8a93a3;
+    --accent: #4ea1ff;
+    --good: #66bb6a;
+    --grid: #2a313c;
+    --cP: #ef5350;
+    --cI: #f6c945;
+    --cD: #26c6da;
+    --cU: #ffffff;
+    --cW: #f6a623;
+    --cRef: #66bb6a;
+    --cX: #4ea1ff;
+    --cY: #ab47bc;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    font: 13px/1.35 ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial;
+  }
+  /* iOS Safari refuses to scroll an iframe document itself, but it WILL scroll
+     an explicitly-sized overflow container inside the iframe. Lock body to the
+     iframe box, then let .scroll-host be the actual scroll surface. */
+  .scroll-host {
+    position: absolute; inset: 0;
+    overflow-y: auto; overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg);
+  }
+  .app {
+    display: flex; flex-direction: column;
+    gap: 10px; padding: 10px;
+    min-height: 100vh;     /* fallback: pre-Safari 15.4 / pre-Chrome 108 */
+    min-height: 100dvh;    /* dynamic viewport — accounts for mobile chrome */
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 10px; background: var(--panel); border-radius: 8px;
+    flex-wrap: wrap;
+  }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
+  header .sp { flex: 1; }
+  header button, .ex-tabs button {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid #2e3642; border-radius: 6px;
+    padding: 5px 10px; cursor: pointer; font-size: 12px;
+  }
+  header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
+  .ex-tabs { display: flex; gap: 4px; }
+  .ex-tabs button.active { border-color: var(--accent); color: var(--accent); }
+
+  .stage {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    grid-template-rows: minmax(360px, 58dvh) auto auto;
+    gap: 10px;
+  }
+  .cv-box, .plot-box {
+    background: var(--panel); border-radius: 8px; padding: 8px;
+    display: flex; position: relative;
+  }
+  .cv-box canvas, .plot-box canvas {
+    width: 100%; height: 100%; display: block; border-radius: 6px;
+    background: #0d1013;
+  }
+  .cv-box canvas { touch-action: none; }
+  .cv-box { grid-column: 1; grid-row: 1; }
+  .plot-box { grid-column: 2; grid-row: 1; }
+
+  /* Animation overlay (hold state) */
+  .anim-overlay {
+    position: absolute; inset: 8px;
+    border-radius: 6px; pointer-events: none;
+    border: 3px solid transparent;
+    transition: border-color 0.25s ease;
+  }
+  .anim-overlay.controlled { border-color: var(--good); box-shadow: 0 0 18px rgba(102,187,106,0.45) inset; }
+  .badge {
+    position: absolute; top: 14px; left: 14px;
+    background: rgba(13,16,19,0.78);
+    border: 1px solid #2e3642; border-radius: 6px;
+    padding: 6px 10px; pointer-events: none;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink); font-size: 13px;
+  }
+  .badge.controlled { color: var(--good); border-color: var(--good); }
+  .badge .tick { font-size: 16px; margin-right: 4px; color: var(--good); }
+  .badge[hidden] { display: none; }
+
+  .ref-row {
+    grid-column: 1; grid-row: 2;
+    background: var(--panel); border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .readout {
+    grid-column: 2; grid-row: 2 / span 2;
+    background: var(--panel); border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .readout h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
+    margin: 0 0 4px 0; color: var(--muted); font-weight: 600;
+  }
+  .readout .ln { display: flex; justify-content: space-between; color: var(--muted); }
+  .readout .ln b { color: var(--ink); font-weight: 600; }
+  .readout .swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 6px; vertical-align: middle;
+  }
+
+  .sub-panels {
+    grid-column: 1; grid-row: 3;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .box {
+    background: var(--panel); border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .box h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
+    margin: 0; color: var(--muted); font-weight: 600;
+  }
+  .box h3 {
+    font-size: 11px; margin: 8px 0 0 0; color: var(--muted); font-weight: 500;
+    border-top: 1px solid #2a313c; padding-top: 6px;
+  }
+
+  .tabs {
+    display: flex; gap: 2px;
+    border-bottom: 1px solid #2a313c;
+    margin: -2px 0 2px 0;
+  }
+  .tabs button {
+    background: transparent; color: var(--muted);
+    border: 0; border-bottom: 2px solid transparent;
+    padding: 5px 10px; cursor: pointer; font: inherit;
+    text-transform: uppercase; letter-spacing: 0.8px; font-size: 11px; font-weight: 600;
+  }
+  .tabs button:hover { color: var(--ink); }
+  .tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .tab-body[hidden] { display: none; }
+
+  .row {
+    display: grid;
+    grid-template-columns: 56px 1fr 80px;
+    align-items: center; gap: 8px;
+  }
+  .row label { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .row label[title] { cursor: help; border-bottom: 1px dotted var(--muted); }
+  .row input[type=range] { width: 100%; accent-color: var(--accent); }
+  .row input[type=number] {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid #2e3642; border-radius: 4px;
+    padding: 3px 5px; width: 100%;
+    font: inherit; font-variant-numeric: tabular-nums;
+  }
+  .row input[type=number]:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  .row input:disabled { opacity: 0.55; cursor: not-allowed; }
+  .row.disabled label { color: #5b6372; }
+  .system-note {
+    color: var(--muted); font-size: 11px; line-height: 1.4;
+    border-left: 2px solid var(--accent); padding-left: 8px; margin-top: 4px;
+  }
+
+  .pair { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .pair button {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid #2e3642; border-radius: 4px;
+    padding: 3px 8px; cursor: pointer; font-size: 12px;
+  }
+  .pair button:hover { border-color: var(--accent); }
+
+  footer { text-align: center; color: var(--muted); font-size: 11px; padding: 4px; }
+</style>
+</head>
+<body>
+<div class="scroll-host">
+<div class="app">
+  <header>
+    <h1 id="ex-title">Control This System</h1>
+    <div class="ex-tabs" id="ex-tabs">
+      <button type="button" data-ex="car" class="active">Car on Road</button>
+      <button type="button" data-ex="carwind">Car on Road (average crosswind)</button>
+      <button type="button" data-ex="heli">Helicopter Hover</button>
+      <button type="button" data-ex="rover">2D Rover</button>
+    </div>
+    <span class="sp"></span>
+    <button id="btn-reset">Reset state</button>
+    <button id="btn-pause">Pause</button>
+  </header>
+
+  <section class="stage">
+    <div class="cv-box">
+      <canvas id="cv"></canvas>
+      <div class="anim-overlay" id="overlay"></div>
+      <div class="badge" id="badge" hidden></div>
+    </div>
+    <div class="plot-box"><canvas id="plot"></canvas></div>
+
+    <div class="ref-row" id="ref-row">
+      <h2 style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:var(--muted);font-weight:600;">Reference</h2>
+    </div>
+
+    <div class="readout" id="readout">
+      <h2>State</h2>
+      <div id="readout-state"></div>
+      <h2>Forces / Effort</h2>
+      <div id="readout-forces"></div>
+    </div>
+
+    <div class="sub-panels">
+      <div class="box" id="box-controllers">
+        <h2 id="ctl-title">Controller</h2>
+        <div class="tabs" id="ctl-tabs"></div>
+        <div id="ctl-bodies"></div>
+      </div>
+      <div class="box" id="box-system">
+        <h2>System parameters</h2>
+        <div id="sys-rows"></div>
+        <div class="system-note" id="sys-note"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer id="footer">
+    Pick an example. Tune the controller until the system holds its target for 10 seconds.
+  </footer>
+</div>
+</div>
+
+<script>
+"use strict";
+
+// ============================================================================
+// CAR-ON-ROAD-PARAMS
+// Edit these to retune the car-on-road example.
+// One value per slider for max range; defaults set the slider's starting value.
+// ============================================================================
+const CAR_ON_ROAD_PARAMS = {
+  // Scene / physics
+  ROAD_HALF_W:     2.0,    // road half-width (m)
+  FORWARD_V:       18,     // forward speed (m/s) — drives road scrolling
+  CAR_HALF_W:      0.45,   // half body width (m)
+  CAR_HALF_L:      0.85,   // half body length (m)
+  TAU_WIND:        0.8,    // crosswind correlation time (s)
+  WIND_BIAS_NO_AVG: 0,     // wind offset for "Car on Road" (just noise, no steady push) (N)
+  WIND_BIAS_AVG:   50,     // wind offset for "Car on Road (average crosswind)" (N)
+
+  // Greyed read-only "system" sliders — value is also the default
+  LAT_MASS:        80,     // effective lateral mass (kg)
+  LAT_MASS_MAX:    400,
+  LAT_DRAG:        1,      // sideways drag (N per m/s)
+  LAT_DRAG_MAX:    200,
+  SIGMA_DEFAULT:   5,      // crosswind gust strength (N)
+  SIGMA_MAX:       15,
+
+  // Controller defaults
+  KP_DEFAULT:      0,
+  KI_DEFAULT:      0,
+  KD_DEFAULT:      0,
+  IMAX_DEFAULT:    1000,
+  UMAX_DEFAULT:    1000,
+  DEAD_DEFAULT:    0.0,
+  EFF_DEFAULT:     0.0,
+
+  // Controller slider maxes (one per slider)
+  KP_MAX:          1000,
+  KI_MAX:          1000,
+  KD_MAX:          1000,
+  IMAX_MAX:        1000,
+  UMAX_MAX:        1000,
+  DEAD_MAX:        1.5,
+  EFF_MAX:         1000,
+};
+
+// ============================================================================
+// HELICOPTER-PARAMS
+// ============================================================================
+const HELICOPTER_PARAMS = {
+  // Scene / physics
+  G:               9.81,   // gravity (m/s²)
+  M:               6.0,    // helicopter mass (kg)
+  C:               0.8,    // vertical drag (N per m/s)
+  TAU_ROTOR:       0.6,    // rotor spool-up time constant (s)
+  T_MAX_MULT:      2.4,    // max rotor thrust as multiple of hover thrust
+  ALT_MAX:         60,     // ceiling for the visualisation (m)
+  SIGMA_W:         6,      // updraft gust strength (N)
+  TAU_W:           2.0,    // updraft correlation time (s)
+
+  // Greyed read-only "system" sliders
+  M_MIN:           0.5,
+  M_MAX:           50,
+  C_MAX:           10,
+  TAU_MIN:         0.05,
+  TAU_MAX:         2,
+  G_MAX:           25,
+
+  // Controller defaults
+  KP_DEFAULT:      0,
+  KI_DEFAULT:      0,
+  KD_DEFAULT:      0,
+  IMAX_DEFAULT:    1000,   
+  OFFSET_DEFAULT:  0,
+  DEAD_DEFAULT:    0.5,
+  EFF_DEFAULT:     0,   
+  REF_DEFAULT:     20,
+  UMAX_DEFAULT:    1000,
+
+  // Controller slider maxes (one per slider)
+  KP_MAX:          1000,
+  KI_MAX:          1000,
+  KD_MAX:          1000,
+  IMAX_MAX:        1000,
+  OFFSET_MAX:      100,
+  DEAD_MAX:        4,
+  EFF_MAX:         1000,
+  REF_MIN:         1,
+  REF_MAX:         50,
+  UMAX_MIN:        1,
+  UMAX_MAX:        1000,
+};
+
+// ============================================================================
+// CART-2D-PARAMS
+// ============================================================================
+const CART_2D_PARAMS = {
+  // Scene / physics
+  ARM:             0.25,   // half-track from centre to each motor (m)
+  WORLD_R:         6,      // world half-width (m)
+  ARRIVE_R:        0.08,   // hard arrival radius (m) — yaw + drive switch off
+
+  // Greyed read-only "system" sliders
+  MASS_DEFAULT:    5,      // rover mass (kg)
+  MASS_MIN:        1,
+  MASS_MAX:        50,
+  DRAG_DEFAULT:    6,
+  DRAG_MAX:        50,
+  INERTIA_DEFAULT: 0.6,    // yaw inertia
+  INERTIA_MIN:     0.05,
+  INERTIA_MAX:     5,
+  ANG_DRAG_DEFAULT:1.5,
+  ANG_DRAG_MAX:    20,
+  ARM_MIN:         0.05,
+  ARM_MAX:         1,
+
+  // Controller defaults
+  YKP_DEFAULT:     0,
+  YKI_DEFAULT:     0,
+  YKD_DEFAULT:     0,
+  YIMAX_DEFAULT:   1000,
+  DKP_DEFAULT:     0,
+  DKI_DEFAULT:     0,
+  DKD_DEFAULT:     0,
+  DIMAX_DEFAULT:   1000,
+  YUMAX_DEFAULT:   1000,
+  DUMAX_DEFAULT:   1000,
+
+  // Controller slider maxes (one per slider)
+  YKP_MAX:         1000,
+  YKI_MAX:         1000,
+  YKD_MAX:         1000,
+  YIMAX_MAX:       1000,
+  DKP_MAX:         1000,
+  DKI_MAX:         1000,
+  DKD_MAX:         1000,
+  DIMAX_MAX:       1000,
+  YUMAX_MIN:       1,
+  YUMAX_MAX:       1000,
+  DUMAX_MIN:       1,
+  DUMAX_MAX:       1000,
+};
+
+// ============================================================================
+// Common UI helpers
+// ============================================================================
+
+function getVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#fff";
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function wrapAngle(a) { while (a > Math.PI) a -= 2*Math.PI; while (a <= -Math.PI) a += 2*Math.PI; return a; }
+
+// Param spec → {label, min, max, step, value, log?, tip?, disabled?}
+// _row, _sliderFromValue, _onChange will be attached after mkRow.
+function mkRow(parent, cfg) {
+  const row = document.createElement("div");
+  row.className = "row" + (cfg.disabled ? " disabled" : "");
+  const lab = document.createElement("label");
+  lab.textContent = cfg.label;
+  if (cfg.tip) lab.title = cfg.tip;
+  const rng = document.createElement("input");
+  rng.type = "range";
+  const num = document.createElement("input");
+  num.type = "number";
+  num.min = cfg.min; num.max = cfg.max; num.step = cfg.step;
+  num.value = cfg.value;
+  if (cfg.disabled) { rng.disabled = true; num.disabled = true; }
+
+  // Log slider: cfg.log = true.  If cfg.min > 0, simple log range.
+  // If cfg.min === 0, allocate the bottom ZERO_FRAC of the slider to value 0
+  // and the rest to a log curve from cfg.logMin (default 1) up to cfg.max.
+  const logMode = !!cfg.log && cfg.max > 0;
+  const allowZero = logMode && cfg.min === 0;
+  const logFloor = logMode ? (cfg.logMin || (cfg.min > 0 ? cfg.min : 1)) : 0;
+  const ZERO_FRAC = 0.02;
+  const lmin = logMode ? Math.log(logFloor) : 0;
+  const lmax = logMode ? Math.log(cfg.max) : 0;
+
+  const sliderFromValue = (v) => {
+    if (logMode) {
+      if (allowZero && v <= 0) return 0;
+      const c = clamp(v, logFloor, cfg.max);
+      const ls = (Math.log(c) - lmin) / (lmax - lmin);
+      return allowZero ? ZERO_FRAC + (1 - ZERO_FRAC) * ls : ls;
+    }
+    return clamp(v, cfg.min, cfg.max);
+  };
+  const valueFromSlider = (s) => {
+    if (!logMode) return s;
+    if (allowZero) {
+      if (s < ZERO_FRAC) return 0;
+      const ls = (s - ZERO_FRAC) / (1 - ZERO_FRAC);
+      return Math.exp(lmin + ls * (lmax - lmin));
+    }
+    return Math.exp(lmin + s * (lmax - lmin));
+  };
+
+  if (logMode) { rng.min = 0; rng.max = 1; rng.step = 0.0005; }
+  else        { rng.min = cfg.min; rng.max = cfg.max; rng.step = cfg.step; }
+  rng.value = sliderFromValue(cfg.value);
+
+  const commit = (raw, src) => {
+    let v;
+    if (src === "rng") v = valueFromSlider(Number(raw));
+    else               v = Number(raw);
+    if (!Number.isFinite(v)) return;
+    cfg.value = v;
+    if (src !== "rng") rng.value = sliderFromValue(v);
+    if (src !== "num") num.value = logMode ? Number(v.toPrecision(4)) : v;
+    if (cfg._onChange) cfg._onChange(v);
+    notifyControlChange();
+  };
+  rng.addEventListener("input", () => commit(rng.value, "rng"));
+  num.addEventListener("input", () => commit(num.value, "num"));
+  row.append(lab, rng, num);
+  parent.appendChild(row);
+  cfg._row = row;
+  cfg._sliderFromValue = sliderFromValue;
+}
+
+function syncSlider(cfg) {
+  if (!cfg || !cfg._row) return;
+  const rng = cfg._row.querySelector('input[type=range]');
+  const num = cfg._row.querySelector('input[type=number]');
+  if (rng) rng.value = cfg._sliderFromValue ? cfg._sliderFromValue(cfg.value) : cfg.value;
+  if (num) num.value = cfg.value;
+}
+
+// ============================================================================
+// Hold-detection (within ±2 % of target for 10 s → "System Controlled!")
+// ============================================================================
+
+const HOLD_THRESHOLD = 0.02;       // 2 %
+const HOLD_DURATION_S = 10;
+
+const hold = {
+  inBand: false,
+  bandT: 0,           // time accumulated within band
+  controlled: false,  // latched true at 10 s, cleared on control change
+};
+
+function resetHold() {
+  hold.inBand = false;
+  hold.bandT = 0;
+  hold.controlled = false;
+}
+
+// Called when any controller / reference / target slider changes.
+function notifyControlChange() {
+  if (hold.controlled) hold.controlled = false;
+  hold.bandT = 0;
+  hold.inBand = false;
+}
+
+// Each example provides holdMetric() → {error, scale}.  We say "in band" when
+// |error| <= scale * HOLD_THRESHOLD.  scale is whatever number the example
+// considers a 100 % deviation (target for heli, road half-width for car, etc.).
+function updateHold(dt) {
+  const m = currentExample.holdMetric();
+  const inBand = Math.abs(m.error) <= m.scale * HOLD_THRESHOLD;
+  if (hold.controlled) {
+    // stays latched until notifyControlChange()
+    return;
+  }
+  if (inBand) {
+    if (!hold.inBand) { hold.inBand = true; hold.bandT = 0; }
+    hold.bandT += dt;
+    if (hold.bandT >= HOLD_DURATION_S) {
+      hold.controlled = true;
+    }
+  } else {
+    hold.inBand = false;
+    hold.bandT = 0;
+  }
+}
+
+// ============================================================================
+// Plot history
+// ============================================================================
+
+const HIST_WINDOW_S = 10;
+const HIST_RATE_HZ = 60;
+const HIST_MAX = HIST_WINDOW_S * HIST_RATE_HZ;
+let hist = [];
+let lastHistT = -Infinity;
+
+function pushHist(record) {
+  if (!record) return;
+  const dt = record.t - lastHistT;
+  if (dt < 1 / HIST_RATE_HZ) return;
+  lastHistT = record.t;
+  hist.push(record);
+  while (hist.length > HIST_MAX) hist.shift();
+}
+
+function clearHist() { hist = []; lastHistT = -Infinity; }
+
+// ============================================================================
+// Examples
+// ============================================================================
+
+// Each example:
+//   id, title, footer
+//   params: { ... }    — all controller + system params, may include ._readonly
+//   controllerTabs: [{id, label, paramKeys, note?}]
+//   systemKeys: [...], systemNote
+//   refRowBuild(refRow)        — build reference row
+//   stateRowSpecs: [{id, label, units, color?}]
+//   forceRowSpecs: [...]
+//   readoutValues() → {state:{id:value}, force:{id:value}}
+//   resetState()
+//   step(dt)         — advance physics by dt; populate latest controller/state for readout/plot
+//   render(ctx, w, h)
+//   plotConfig: top {title, yKeys:[{key,color,label,dash?,width?}], yPolicy} bottom {title, yKeys}
+//   holdMetric() → {error, scale}
+//   onPointer(type, mx, my, w, h)  — examples use this for drag/click
+//   activate()/deactivate()
+
+// ----------------------------------------------------------------------------
+// EXAMPLE 1: CAR ON ROAD
+// ----------------------------------------------------------------------------
+
+function makeCarExample(opts) {
+  const C = CAR_ON_ROAD_PARAMS;
+  const ROAD_HALF_W = C.ROAD_HALF_W;
+  const FORWARD_V   = C.FORWARD_V;
+  const CAR_HALF_W  = C.CAR_HALF_W;
+  const CAR_HALF_L  = C.CAR_HALF_L;
+
+  const params = {
+    // Controller (PID) — log scale, 1 → max
+    kp:     { label: "P",     min: 0, max: C.KP_MAX,   step: 0.01, value: C.KP_DEFAULT, log: true, logMin: 1 },
+    ki:     { label: "I",     min: 0, max: C.KI_MAX,   step: 0.01, value: C.KI_DEFAULT, log: true, logMin: 1 },
+    kd:     { label: "D",     min: 0, max: C.KD_MAX,   step: 0.01, value: C.KD_DEFAULT, log: true, logMin: 1 },
+    iClamp: { label: "Imax",  min: 0, max: C.IMAX_MAX, step: 0.1,  value: C.IMAX_DEFAULT, log: true, logMin: 1,
+              tip: "Largest size the integral term can grow to (N). Prevents it running away when steering is already at its limit." },
+    uMax:   { label: "uMax",  min: 1, max: C.UMAX_MAX, step: 0.1,  value: C.UMAX_DEFAULT, log: true,
+              tip: "Largest steering force the controller can ever command (N). Acts like a real actuator's limit." },
+    // Bang-bang
+    dead:   { label: "dead",  min: 0, max: C.DEAD_MAX, step: 0.01, value: C.DEAD_DEFAULT,
+              tip: "Deadband width (m). The controller flips direction once the car crosses past the deadband edge on the opposite side." },
+    effort: { label: "eff",   min: 0, max: C.EFF_MAX,  step: 0.1,  value: C.EFF_DEFAULT, log: true, logMin: 1,
+              tip: "Steering force the bang-bang controller pushes with (N). It's always pushing — never zero — and only flips direction." },
+    // System (read-only) — effective lateral channel only.
+    mass: { label: "m_lat", min: 10, max: C.LAT_MASS_MAX, step: 1,   value: C.LAT_MASS, disabled: true,
+            tip: "How heavy the car feels sideways (kg). Not the full vehicle mass — just the part that resists sudden side-to-side motion." },
+    drag: { label: "c",     min: 0,  max: C.LAT_DRAG_MAX, step: 1,   value: C.LAT_DRAG, disabled: true,
+            tip: "How strongly the road and tyres resist sideways motion (N per m/s of side speed)." },
+    sigma:{ label: "σ",     min: 0,  max: C.SIGMA_MAX, step: 0.1,    value: C.SIGMA_DEFAULT, disabled: true,
+            tip: "Typical strength of the gusty crosswind (N). The wind drifts slowly; this is roughly how strong the gusts get." },
+  };
+
+  const state = {
+    y: 0, vy: 0,             // lateral position (m), lateral velocity (m/s)
+    Fwind: 0,                // OU-coloured side-wind force (N)
+    I: 0, ePrev: 0,
+    mode: "pid",
+    bbDir: 0,                // bang-bang sign (-1, 0, +1) — never returns to 0 once set
+    scroll: 0,               // accumulated forward distance (m), for road texture
+    // last controller outputs
+    lastE: 0, lastUP: 0, lastUI: 0, lastUD: 0, lastU: 0, lastDist: 0,
+    t: 0,
+  };
+
+  function resetState() {
+    state.y = 0; state.vy = 0; state.Fwind = 0;
+    state.I = 0; state.ePrev = 0;
+    state.bbDir = 0; state.scroll = 0;
+    state.lastE = state.lastUP = state.lastUI = state.lastUD = state.lastU = state.lastDist = 0;
+    state.t = 0;
+    clearHist();
+    resetHold();
+  }
+
+  function controller(dt) {
+    const e = 0 - state.y;        // ref = 0 (centerline)
+    if (state.mode === "bangbang") {
+      const half = params.dead.value / 2;
+      // Hysteresis: always push left or right, never zero.  Flip direction
+      // only after the car has crossed past the OPPOSITE edge of the deadband.
+      if (state.bbDir === 0)            state.bbDir = (e >= 0 ? +1 : -1);
+      else if (state.bbDir > 0 && e < -half) state.bbDir = -1;
+      else if (state.bbDir < 0 && e >  half) state.bbDir = +1;
+      const uRaw = state.bbDir * params.effort.value;
+      const uCap = params.uMax.value;
+      const u = clamp(uRaw, -uCap, uCap);
+      state.ePrev = e;
+      return { u, uP: 0, uI: 0, uD: 0, e };
+    }
+    const Inew = state.I + params.ki.value * 0.5 * (e + state.ePrev) * dt;
+    const Imax = params.iClamp.value;
+    state.I = clamp(Inew, -Imax, Imax);
+    const dedt = -state.vy;
+    const uP = params.kp.value * e;
+    const uI = state.I;
+    const uD = params.kd.value * dedt;
+    const uRaw = uP + uI + uD;
+    const uCap = params.uMax.value;
+    const u = clamp(uRaw, -uCap, uCap);
+    state.ePrev = e;
+    return { u, uP, uI, uD, e };
+  }
+
+  // Disturbance is an OU coloured-noise side-wind force (N) plus a small
+  // constant bias.  The bias is what forces the integrator to do real work —
+  // pure feedback with no I term will sit off-centre by F_bias / kp forever.
+  const TAU_WIND  = C.TAU_WIND;
+  const WIND_BIAS = opts.windBias;
+  function updateWind(dt) {
+    const sigma = params.sigma.value;     // slider value is the std of the OU component (N)
+    if (sigma <= 0) { state.Fwind = 0; return; }
+    const u1 = Math.max(1e-9, Math.random());
+    const u2 = Math.random();
+    const n  = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    state.Fwind += (-state.Fwind / TAU_WIND) * dt + sigma * Math.sqrt(2 * dt / TAU_WIND) * n;
+  }
+
+  function accel(vy, u, Fwind) {
+    const m = Math.max(1e-3, params.mass.value);
+    return (u - params.drag.value * vy + Fwind) / m;
+  }
+
+  function step(dt) {
+    updateWind(dt);
+    const c = controller(dt);
+    state.lastUP = c.uP; state.lastUI = c.uI; state.lastUD = c.uD;
+    state.lastU = c.u; state.lastE = c.e;
+    const Fwind_total = state.Fwind + WIND_BIAS;
+    state.lastDist = Fwind_total;
+    // Semi-implicit Euler over the linear part is fine here; the wind is
+    // already low-passed so we don't need RK4.
+    const a = accel(state.vy, c.u, Fwind_total);
+    state.vy += a * dt;
+    state.y  += state.vy * dt;
+    // Hard wall at road edges (slightly inside)
+    const yMax = ROAD_HALF_W - CAR_HALF_W;
+    if (state.y >  yMax) { state.y =  yMax; if (state.vy > 0) state.vy = 0; }
+    if (state.y < -yMax) { state.y = -yMax; if (state.vy < 0) state.vy = 0; }
+
+    state.scroll += FORWARD_V * dt;
+    state.t += dt;
+
+    pushHist({
+      t: state.t,
+      ref: 0, x: state.y,
+      uP: state.lastUP, uI: state.lastUI, uD: state.lastUD,
+      u: state.lastU, wind: state.lastDist,
+      deadHi: params.dead.value/2, deadLo: -params.dead.value/2,
+    });
+  }
+
+  function render(ctx, W, H) {
+    ctx.fillStyle = "#0d1013";
+    ctx.fillRect(0, 0, W, H);
+
+    // Map: world x (lateral, ±ROAD_HALF_W) → screen X (centre);
+    //      world y (forward) → screen Y (down=behind, up=ahead)
+    const cx = W / 2;
+    const usableW = Math.min(W * 0.7, 520);
+    const pxPerM_x = usableW / (2 * ROAD_HALF_W);
+    const roadLeft  = cx - ROAD_HALF_W * pxPerM_x;
+    const roadRight = cx + ROAD_HALF_W * pxPerM_x;
+
+    // Road surface
+    ctx.fillStyle = "#1a1f27";
+    ctx.fillRect(roadLeft, 0, roadRight - roadLeft, H);
+    // Verge
+    ctx.fillStyle = "#16191e";
+    ctx.fillRect(0, 0, roadLeft, H);
+    ctx.fillRect(roadRight, 0, W - roadRight, H);
+    // Edge lines
+    ctx.strokeStyle = "#aab2c0";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(roadLeft + 0.5, 0); ctx.lineTo(roadLeft + 0.5, H);
+    ctx.moveTo(roadRight - 0.5, 0); ctx.lineTo(roadRight - 0.5, H);
+    ctx.stroke();
+
+    // Scrolling dashed centre line.  The world is moving downward on screen,
+    // so dashes shift +y as scroll increases.
+    const dashLen = 4.0; // m on/off
+    const offset = (state.scroll % (dashLen * 2));
+    const pxPerM_y = pxPerM_x;  // square-ish; use same scale
+    ctx.strokeStyle = "#f6c945";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([dashLen * pxPerM_y, dashLen * pxPerM_y]);
+    ctx.lineDashOffset = -offset * pxPerM_y;
+    ctx.beginPath();
+    ctx.moveTo(cx, 0); ctx.lineTo(cx, H);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+
+    // Lane "ribs" along edges as scroll cue
+    ctx.strokeStyle = "#3a4453";
+    ctx.lineWidth = 1.2;
+    const ribStep = 5.0;
+    const ribOff = (state.scroll % ribStep) * pxPerM_y;
+    for (let yp = -ribStep * pxPerM_y + ribOff; yp < H + ribStep; yp += ribStep * pxPerM_y) {
+      ctx.beginPath();
+      ctx.moveTo(roadLeft - 14, yp); ctx.lineTo(roadLeft - 4, yp);
+      ctx.moveTo(roadRight + 4, yp); ctx.lineTo(roadRight + 14, yp);
+      ctx.stroke();
+    }
+
+    // Reference (centerline already drawn).  Add small ref triangles at top.
+    ctx.fillStyle = getVar("--cRef");
+    ctx.beginPath();
+    ctx.moveTo(cx, 6); ctx.lineTo(cx - 6, 18); ctx.lineTo(cx + 6, 18); ctx.closePath();
+    ctx.fill();
+
+    // Car position
+    const carX = cx + state.y * pxPerM_x;
+    const carY = H * 0.62;
+    const carW = CAR_HALF_W * 2 * pxPerM_x;
+    const carL = CAR_HALF_L * 2 * pxPerM_x;
+    ctx.save();
+    ctx.translate(carX, carY);
+    // Body
+    ctx.fillStyle = "#2b3340"; ctx.strokeStyle = "#6a7384"; ctx.lineWidth = 1.5;
+    roundRect(ctx, -carW/2, -carL/2, carW, carL, 6);
+    ctx.fill(); ctx.stroke();
+    // Windshield
+    ctx.fillStyle = "#4ea1ff44"; ctx.strokeStyle = "#4ea1ff88";
+    roundRect(ctx, -carW/2 + 4, -carL/2 + 4, carW - 8, carL * 0.32, 4);
+    ctx.fill(); ctx.stroke();
+    // Rear window
+    roundRect(ctx, -carW/2 + 4, carL * 0.10, carW - 8, carL * 0.28, 4);
+    ctx.fill(); ctx.stroke();
+    // Wheels
+    ctx.fillStyle = "#12161c";
+    const wW = carW * 0.18, wH = carL * 0.18;
+    ctx.fillRect(-carW/2 - 3, -carL * 0.30 - wH/2, wW + 3, wH);
+    ctx.fillRect( carW/2 - wW, -carL * 0.30 - wH/2, wW + 3, wH);
+    ctx.fillRect(-carW/2 - 3,  carL * 0.30 - wH/2, wW + 3, wH);
+    ctx.fillRect( carW/2 - wW,  carL * 0.30 - wH/2, wW + 3, wH);
+    // Heading mark
+    ctx.fillStyle = "#e6e9ef";
+    ctx.fillRect(-1, -carL/2 + 3, 2, 5);
+    ctx.restore();
+
+    // Stacked horizontal force arrows above the car: u (always), then PID
+    // components when the PID controller is active, then crosswind on top.
+    const F_PX = 0.6;        // px per N
+    const F_CAP = 220;       // visual cap so saturated values don't fly off-screen
+    const fx = (F) => {
+      let dx = F * F_PX;
+      if (Math.abs(dx) > F_CAP) dx = Math.sign(dx) * F_CAP;
+      return dx;
+    };
+    const slotGap = 14;
+    const topY = carY - carL/2 - 8;
+    const slots = [];
+    slots.push({ F: state.lastU,    color: getVar("--cU"), label: "u"         });
+    if (state.mode === "pid") {
+      slots.push({ F: state.lastUP, color: getVar("--cP"), label: "P"         });
+      slots.push({ F: state.lastUI, color: getVar("--cI"), label: "I"         });
+      slots.push({ F: state.lastUD, color: getVar("--cD"), label: "D"         });
+    }
+    slots.push({ F: state.lastDist, color: getVar("--cW"), label: "crosswind" });
+    for (let i = 0; i < slots.length; i++) {
+      const s = slots[i];
+      const y = topY - slotGap * i;
+      drawArrow(ctx, carX, y, fx(s.F), 0, s.color, `${s.label} ${s.F.toFixed(0)}`, 10);
+    }
+
+    // Telemetry: error in metres, top centre
+    ctx.fillStyle = "#aab2c0";
+    ctx.font = "12px ui-sans-serif";
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText("y = " + state.y.toFixed(2) + " m  (ref 0.00)", cx, 24);
+  }
+
+  function holdMetric() {
+    return { error: state.y, scale: ROAD_HALF_W };
+  }
+
+  function activate() {
+    document.getElementById("ex-title").textContent = opts.title;
+    const biasNote = WIND_BIAS !== 0
+      ? ", plus a steady " + WIND_BIAS.toFixed(0) + " N push"
+      : ", with no steady offset";
+    document.getElementById("footer").textContent =
+      "The car drifts sideways under a gusty crosswind (around " + params.sigma.value.toFixed(1) +
+      " N typical" + biasNote + "). Bring it to the centerline and hold it within " +
+      (ROAD_HALF_W * HOLD_THRESHOLD * 100).toFixed(0) + " cm for 10 seconds to win.";
+  }
+
+  const ex = {
+    id: opts.id,
+    params,
+    activate,
+    resetState,
+    step,
+    render,
+    holdMetric,
+    setMode(m) { state.mode = m; state.I = 0; state.ePrev = 0; state.bbDir = 0; },
+    getMode() { return state.mode; },
+    state,
+    controllerTabs: [
+      { id: "pid",      label: "PID",       paramKeys: ["kp","ki","kd","iClamp","uMax"] },
+      { id: "bangbang", label: "Bang-bang", paramKeys: ["dead","effort","uMax"],
+        note: "The controller is always pushing the car either left or right at the full effort — never zero. It only flips direction once the car has crossed past the opposite edge of the deadband, so the car keeps oscillating across the centerline." },
+    ],
+    systemKeys: ["mass","drag","sigma"],
+    systemNote: "How heavy the car feels sideways, how the road resists side-to-side motion, and how strong the crosswind gusts get. Fixed for this example.",
+    stateRowSpecs: [
+      { id:"y",   label:"y",     units:"m"   },
+      { id:"vy",  label:"ẏ",    units:"m/s" },
+      { id:"e",   label:"err",   units:"m"   },
+      { id:"i",   label:"∫err",  units:""    },
+      { id:"t",   label:"sim t", units:"s"   },
+    ],
+    forceRowSpecs: [
+      { id:"uP", label:"P",          color:"--cP" },
+      { id:"uI", label:"I",          color:"--cI" },
+      { id:"uD", label:"D",          color:"--cD" },
+      { id:"u",  label:"u total",    color:"--cU" },
+      { id:"w",  label:"crosswind",  color:"--cW" },
+    ],
+    readoutValues() {
+      return {
+        state: {
+          y:  state.y.toFixed(3),
+          vy: state.vy.toFixed(3),
+          e:  state.lastE.toFixed(3),
+          i:  state.I.toFixed(3),
+          t:  state.t.toFixed(2),
+        },
+        force: {
+          uP: state.lastUP.toFixed(2),
+          uI: state.lastUI.toFixed(2),
+          uD: state.lastUD.toFixed(2),
+          u:  state.lastU.toFixed(2),
+          w:  state.lastDist.toFixed(2),
+        }
+      };
+    },
+    refRowBuild(refRow) {
+      const note = document.createElement("div");
+      note.style.cssText = "color:var(--muted);font-size:12px;line-height:1.4;";
+      note.innerHTML = "The target is the road centerline. Hold the car within 4 cm of it for 10 seconds to win.";
+      refRow.appendChild(note);
+    },
+  };
+  ex.plotConfig = {
+    top: {
+      title: "lateral position (m)",
+      yKeys: [
+        { key: "ref", label:"ref", color: getVar("--cRef") },
+        { key: "x",   label:"y",   color: getVar("--cX"), width: 2 },
+      ],
+      bandFromMode: () => ex.getMode() === "bangbang",
+      yMinFloor: -ROAD_HALF_W, yMaxCeil: ROAD_HALF_W,
+    },
+    bottom: {
+      title: "control effort & crosswind (N)",
+      yKeys: [
+        { key:"uP", label:"P",         color: getVar("--cP"), width: 1.2 },
+        { key:"uI", label:"I",         color: getVar("--cI"), width: 1.2 },
+        { key:"uD", label:"D",         color: getVar("--cD"), width: 1.2 },
+        { key:"wind", label:"crosswind", color: getVar("--cW"), width: 1.2 },
+        { key:"u",  label:"u",         color: getVar("--cU"), width: 2 },
+      ],
+    },
+  };
+  return ex;
+}
+
+const carEx = makeCarExample({
+  id: "car",
+  title: "Car on Road — keep it on the centerline",
+  windBias: CAR_ON_ROAD_PARAMS.WIND_BIAS_NO_AVG,
+});
+const carWindEx = makeCarExample({
+  id: "carwind",
+  title: "Car on Road (average crosswind) — keep it on the centerline",
+  windBias: CAR_ON_ROAD_PARAMS.WIND_BIAS_AVG,
+});
+
+// ----------------------------------------------------------------------------
+// EXAMPLE 2: HELICOPTER HOVER
+//
+// State: h (altitude, m), vh (vertical velocity, m/s), T (rotor thrust, N).
+// Rotor has first-order spool dynamics: τ·dT/dt = T_cmd − T.  This lag is the
+// main reason a slow integral term wins over high P gain — too much P just
+// excites the lag and the heli porpoises.  Steady-state hover requires
+// T = m·g exactly, so without integral action there's a constant offset.
+//
+//   τ_rotor = 0.6 s
+//   m       = 6 kg (RC-class)
+//   g       = 9.81
+//   c       = 0.8 N·s/m  (induced + parasite vertical drag)
+//   wind    = stochastic up/down gusts (Ornstein–Uhlenbeck-ish)
+//
+// Equations:
+//   ḣ  = vh
+//   v̇h = (T − m·g − c·vh + F_wind) / m
+//   Ṫ  = (T_cmd − T) / τ
+//   F_wind ← AR(1) gust process (slowly varying), sigma_wind tuneable but fixed.
+// ----------------------------------------------------------------------------
+
+const heliEx = (() => {
+  const H = HELICOPTER_PARAMS;
+  const G = H.G;
+  const M = H.M;
+  const C = H.C;
+  const TAU = H.TAU_ROTOR;
+  const T_HOVER = M * G;
+  const T_MAX   = T_HOVER * H.T_MAX_MULT;
+  const ALT_MAX = H.ALT_MAX;
+
+  const iMaxDefault   = H.IMAX_DEFAULT  != null ? H.IMAX_DEFAULT  : T_HOVER;
+  const effDefault    = H.EFF_DEFAULT   != null ? H.EFF_DEFAULT   : T_HOVER * 0.4;
+
+  const params = {
+    // PID controller — operates around hover thrust.  Log sliders, 1 → max.
+    kp:     { label: "P",    min: 0, max: H.KP_MAX,   step: 0.01, value: H.KP_DEFAULT, log: true, logMin: 1 },
+    ki:     { label: "I",    min: 0, max: H.KI_MAX,   step: 0.01, value: H.KI_DEFAULT, log: true, logMin: 1 },
+    kd:     { label: "D",    min: 0, max: H.KD_MAX,   step: 0.01, value: H.KD_DEFAULT, log: true, logMin: 1 },
+    iClamp: { label: "Imax", min: 0, max: H.IMAX_MAX, step: 0.1,  value: iMaxDefault, log: true, logMin: 1,
+              tip: "Largest size the integral term can grow to (N). Prevents it running away when the rotor is at full thrust." },
+    uMax:   { label: "uMax", min: H.UMAX_MIN, max: H.UMAX_MAX, step: 0.1, value: H.UMAX_DEFAULT, log: true,
+              tip: "Largest correction the controller can ever add to (or subtract from) hover thrust (N). Caps the PID's authority — separate from the rotor's hard Tmax limit." },
+    offset: { label: "offset", min: 0, max: H.OFFSET_MAX, step: 0.1, value: H.OFFSET_DEFAULT,
+              tip: "Constant baseline thrust added to whatever the PID controller commands (N). Set near the helicopter's weight (m·g ≈ "
+                + T_HOVER.toFixed(1) + " N) and the controller only has to correct small differences. Leave at 0 to make the integral controller learn the lift on its own." },
+    // Bang-bang
+    dead:   { label: "dead", min: 0, max: H.DEAD_MAX, step: 0.05, value: H.DEAD_DEFAULT,
+              tip: "Deadband width (m). Thrust flips between hover±effort once altitude crosses past the opposite edge." },
+    effort: { label: "eff",  min: 0, max: H.EFF_MAX,  step: 0.1,  value: effDefault, log: true, logMin: 1,
+              tip: "Extra thrust above or below hover that the bang-bang controller adds. It's always adding or subtracting — never zero." },
+    // Reference
+    ref:    { label: "h*",   min: H.REF_MIN, max: H.REF_MAX, step: 0.1, value: H.REF_DEFAULT },
+    // System (read-only)
+    mass:   { label: "m",    min: H.M_MIN,   max: H.M_MAX, step: 0.1,  value: M, disabled: true,
+              tip: "Helicopter mass (kg). Hover thrust must equal mass × gravity ≈ " + T_HOVER.toFixed(1) + " N." },
+    drag:   { label: "c",    min: 0,         max: H.C_MAX, step: 0.1,  value: C, disabled: true,
+              tip: "How much the air slows vertical motion (N per m/s of vertical speed)." },
+    tau:    { label: "τ",    min: H.TAU_MIN, max: H.TAU_MAX, step: 0.05, value: TAU, disabled: true,
+              tip: "Time the rotor takes to spool up or down to a new commanded thrust (s). This delay is why a high P gain makes the helicopter bounce." },
+    Tmax:   { label: "Tmax", min: T_HOVER,   max: T_HOVER*4, step: 1,    value: T_MAX, disabled: true,
+              tip: "Largest thrust the rotor can ever produce (N)." },
+    g:      { label: "g",    min: 1,         max: H.G_MAX, step: 0.01, value: G, disabled: true,
+              tip: "Gravity (m/s²)." },
+  };
+
+  const state = {
+    h: 0, vh: 0, T: T_HOVER,
+    I: 0, ePrev: 0,
+    bbDir: 0,                       // bang-bang sign (-1, 0, +1)
+    mode: "pid",
+    wind: 0,
+    t: 0,
+    lastE:0, lastUP:0, lastUI:0, lastUD:0, lastU:0, lastFw:0, lastTcmd:T_HOVER, lastT:T_HOVER,
+  };
+
+  function resetState() {
+    state.h = 0; state.vh = 0; state.T = params.mass.value * params.g.value;
+    state.I = 0; state.ePrev = 0; state.bbDir = 0;
+    state.wind = 0;
+    state.lastE = state.lastUP = state.lastUI = state.lastUD = state.lastU = state.lastFw = 0;
+    state.lastTcmd = state.lastT = state.T;
+    state.t = 0;
+    clearHist();
+    resetHold();
+  }
+
+  function controller(dt) {
+    const ref = params.ref.value;
+    const e = ref - state.h;
+    const m = params.mass.value, g = params.g.value;
+    if (state.mode === "bangbang") {
+      const half = params.dead.value / 2;
+      // Hysteresis: thrust is always hover ± effort, never just hover.
+      // Direction flips only when altitude crosses past the OPPOSITE edge of
+      // the deadband.
+      if (state.bbDir === 0)            state.bbDir = (e >= 0 ? +1 : -1);
+      else if (state.bbDir > 0 && e < -half) state.bbDir = -1;
+      else if (state.bbDir < 0 && e >  half) state.bbDir = +1;
+      const Tcmd = m*g + state.bbDir * params.effort.value;
+      const u = clamp(Tcmd, 0, params.Tmax.value);
+      state.ePrev = e;
+      return { Tcmd: u, uP: 0, uI: 0, uD: 0, e };
+    }
+    const Inew = state.I + params.ki.value * 0.5 * (e + state.ePrev) * dt;
+    const Imax = params.iClamp.value;
+    state.I = clamp(Inew, -Imax, Imax);
+    const dedt = -state.vh;       // derivative on measurement
+    const uP = params.kp.value * e;
+    const uI = state.I;
+    const uD = params.kd.value * dedt;
+    const uMax = params.uMax.value;
+    const pidOut = clamp(uP + uI + uD, -uMax, uMax);
+    const Tff = params.offset.value;
+    const Tcmd = clamp(Tff + pidOut, 0, params.Tmax.value);
+    state.ePrev = e;
+    return { Tcmd, uP, uI, uD, e };
+  }
+
+  // OU wind on the vertical-force channel.  Steady-state std ≈ σ_w; τ_w is the
+  // correlation time of the gust.  This is the disturbance the I-term has to
+  // absorb.
+  const SIGMA_W = H.SIGMA_W;
+  const TAU_W   = H.TAU_W;
+  function updateWind(dt) {
+    const u1 = Math.max(1e-9, Math.random());
+    const u2 = Math.random();
+    const n = Math.sqrt(-2*Math.log(u1)) * Math.cos(2*Math.PI*u2);
+    state.wind += (-state.wind / TAU_W) * dt + SIGMA_W * Math.sqrt(2 * dt / TAU_W) * n;
+  }
+
+  function dynamics(h, vh, T, T_cmd, F_wind) {
+    const m = params.mass.value, g = params.g.value, c = params.drag.value;
+    const tau = params.tau.value;
+    return {
+      dh:  vh,
+      dvh: (T - m*g - c*vh + F_wind) / m,
+      dT:  (T_cmd - T) / tau,
+    };
+  }
+
+  function step(dt) {
+    updateWind(dt);
+    const c = controller(dt);
+    const T_cmd = c.Tcmd;
+
+    // RK4 over 3-state system [h, vh, T]
+    const Fw = state.wind;
+    const k1 = dynamics(state.h, state.vh, state.T, T_cmd, Fw);
+    const k2 = dynamics(state.h + 0.5*dt*k1.dh, state.vh + 0.5*dt*k1.dvh, state.T + 0.5*dt*k1.dT, T_cmd, Fw);
+    const k3 = dynamics(state.h + 0.5*dt*k2.dh, state.vh + 0.5*dt*k2.dvh, state.T + 0.5*dt*k2.dT, T_cmd, Fw);
+    const k4 = dynamics(state.h + dt*k3.dh,    state.vh + dt*k3.dvh,    state.T + dt*k3.dT,    T_cmd, Fw);
+
+    state.h  += (dt/6) * (k1.dh + 2*k2.dh + 2*k3.dh + k4.dh);
+    state.vh += (dt/6) * (k1.dvh + 2*k2.dvh + 2*k3.dvh + k4.dvh);
+    state.T  += (dt/6) * (k1.dT + 2*k2.dT + 2*k3.dT + k4.dT);
+    state.T   = clamp(state.T, 0, params.Tmax.value);
+
+    if (state.h < 0) { state.h = 0; if (state.vh < 0) state.vh = 0; }
+    if (state.h > ALT_MAX) { state.h = ALT_MAX; if (state.vh > 0) state.vh = 0; }
+
+    state.lastE = c.e;
+    state.lastUP = c.uP; state.lastUI = c.uI; state.lastUD = c.uD;
+    state.lastU = T_cmd - params.mass.value * params.g.value;  // command above hover
+    state.lastFw = Fw;
+    state.lastTcmd = T_cmd; state.lastT = state.T;
+    state.t += dt;
+
+    pushHist({
+      t: state.t,
+      ref: params.ref.value, x: state.h,
+      uP: state.lastUP, uI: state.lastUI, uD: state.lastUD,
+      u: state.lastU, wind: state.lastFw,
+      Tcmd: state.lastTcmd, T: state.lastT,
+      deadHi: params.ref.value + params.dead.value/2,
+      deadLo: params.ref.value - params.dead.value/2,
+    });
+  }
+
+  function render(ctx, W, H) {
+    ctx.fillStyle = "#0d1013";
+    ctx.fillRect(0, 0, W, H);
+
+    // Sky gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "#1a2333");
+    grad.addColorStop(1, "#0d1013");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    const groundY = H - 28;
+    // Altitude mapping
+    const topMargin = 30;
+    const altPxPerM = (groundY - topMargin) / ALT_MAX;
+    const altToY = (a) => groundY - a * altPxPerM;
+
+    // Ground
+    ctx.fillStyle = "#1a1f27";
+    ctx.fillRect(0, groundY, W, H - groundY);
+    ctx.strokeStyle = "#2a313c";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, groundY); ctx.lineTo(W, groundY); ctx.stroke();
+    // Hatching
+    for (let x = 0; x < W; x += 14) {
+      ctx.beginPath(); ctx.moveTo(x, groundY); ctx.lineTo(x - 8, groundY + 10); ctx.stroke();
+    }
+
+    // Altitude scale on left
+    ctx.strokeStyle = "#1e252f"; ctx.lineWidth = 1;
+    ctx.fillStyle = "#55606f"; ctx.font = "11px ui-sans-serif";
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    for (let a = 0; a <= ALT_MAX; a += 10) {
+      const y = altToY(a);
+      ctx.beginPath(); ctx.moveTo(28, y); ctx.lineTo(W, y); ctx.stroke();
+      ctx.fillText(a + " m", 26, y);
+    }
+
+    // Reference line
+    const refY = altToY(params.ref.value);
+    ctx.strokeStyle = getVar("--cRef");
+    ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(34, refY); ctx.lineTo(W - 6, refY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = getVar("--cRef");
+    ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+    ctx.fillText("ref " + params.ref.value.toFixed(1) + " m", W - 8, refY - 3);
+
+    // ±2% band shading
+    const halfBand = params.ref.value * HOLD_THRESHOLD;
+    ctx.fillStyle = "rgba(102,187,106,0.10)";
+    ctx.fillRect(34, altToY(params.ref.value + halfBand),
+                 W - 40, altToY(params.ref.value - halfBand) - altToY(params.ref.value + halfBand));
+
+    // Helicopter
+    const heliX = W * 0.55;
+    const heliY = altToY(state.h);
+    drawHelicopter(ctx, heliX, heliY, state.t);
+
+    // Rotor downwash visualisation (length proportional to thrust)
+    const downwashLen = clamp((state.T / T_HOVER) * 30, 6, 80);
+    ctx.strokeStyle = "rgba(78,161,255,0.4)";
+    ctx.lineWidth = 1.5;
+    for (let i = -3; i <= 3; i++) {
+      ctx.beginPath();
+      const x = heliX + i * 10;
+      ctx.moveTo(x, heliY + 14);
+      ctx.lineTo(x, heliY + 14 + downwashLen);
+      ctx.stroke();
+    }
+
+    // Updraft arrow on left side (positive = upward force on the heli)
+    if (Math.abs(state.lastFw) > 1) {
+      drawArrow(ctx, 80, heliY, 0, -state.lastFw * 1.5, getVar("--cW"),
+        "updraft " + state.lastFw.toFixed(0) + " N", 11);
+    }
+
+    // Weight (m·g, always pulling DOWN) and offset (feedforward thrust pushing
+    // UP) arrows.  Anchored side-by-side just left of the rotor: when the user
+    // sets offset ≈ m·g the two arrows are equal-length and opposing, which is
+    // the steady-state hover balance.
+    {
+      const F_PX = 1.0;
+      const CAP  = 80;
+      const cap = (v) => Math.sign(v) * Math.min(Math.abs(v), CAP);
+      const weight = params.mass.value * params.g.value;
+      drawArrow(ctx, heliX - 70, heliY, 0, cap(weight * F_PX), getVar("--cY"),
+        `m·g ${weight.toFixed(0)}`, 10);
+      if (state.mode === "pid" && params.offset.value > 0) {
+        drawArrow(ctx, heliX - 40, heliY, 0, -cap(params.offset.value * F_PX),
+          getVar("--cRef"), `offset ${params.offset.value.toFixed(0)}`, 10);
+      }
+    }
+
+    // PID component arrows — vertical, side-by-side to the right of the heli.
+    // Up = positive (push heli up), down = negative.  Visual scale is forced
+    // smaller than the wind arrow so saturated PID terms don't dominate.
+    if (state.mode === "pid") {
+      const F_PX = 1.0;
+      const CAP  = 70;
+      const fy = (F) => {
+        let dy = -F * F_PX;
+        if (Math.abs(dy) > CAP) dy = Math.sign(dy) * CAP;
+        return dy;
+      };
+      const baseY = heliY + 30;     // anchor below the heli body
+      const colDx = 30;
+      const colX0 = heliX + 70;
+      const items = [
+        { F: state.lastUP, color: getVar("--cP"), label: "P" },
+        { F: state.lastUI, color: getVar("--cI"), label: "I" },
+        { F: state.lastUD, color: getVar("--cD"), label: "D" },
+        { F: state.lastU,  color: getVar("--cU"), label: "u" },
+      ];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const x = colX0 + colDx * i;
+        drawArrow(ctx, x, baseY, 0, fy(it.F), it.color,
+                  `${it.label} ${it.F.toFixed(0)}`, 10);
+      }
+    }
+
+    // Thrust readout
+    ctx.fillStyle = "#aab2c0"; ctx.font = "12px ui-sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillText("T = " + state.T.toFixed(1) + " N  (hover " + (params.mass.value * params.g.value).toFixed(1) + ")",
+      10, 8);
+    ctx.fillText("h = " + state.h.toFixed(2) + " m   ḣ = " + state.vh.toFixed(2) + " m/s",
+      10, 24);
+  }
+
+  function drawHelicopter(ctx, cx, cy, t) {
+    // Body
+    ctx.fillStyle = "#2b3340"; ctx.strokeStyle = "#6a7384"; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 28, 14, 0, 0, 2*Math.PI);
+    ctx.fill(); ctx.stroke();
+    // Cockpit window
+    ctx.fillStyle = "#4ea1ff44"; ctx.strokeStyle = "#4ea1ff88";
+    ctx.beginPath();
+    ctx.ellipse(cx + 12, cy - 2, 10, 7, 0, 0, 2*Math.PI);
+    ctx.fill(); ctx.stroke();
+    // Tail boom
+    ctx.fillStyle = "#2b3340"; ctx.strokeStyle = "#6a7384";
+    ctx.beginPath();
+    ctx.moveTo(cx - 18, cy - 3);
+    ctx.lineTo(cx - 70, cy - 1);
+    ctx.lineTo(cx - 70, cy + 1);
+    ctx.lineTo(cx - 18, cy + 4);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // Tail fin + rotor
+    ctx.beginPath();
+    ctx.moveTo(cx - 65, cy);
+    ctx.lineTo(cx - 75, cy - 10);
+    ctx.lineTo(cx - 70, cy);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    // Tail rotor (spinning)
+    const tt = t * 18;
+    ctx.strokeStyle = "#aab2c0"; ctx.lineWidth = 1.5;
+    ctx.save();
+    ctx.translate(cx - 73, cy - 4);
+    ctx.rotate(tt);
+    ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(7, 0); ctx.stroke();
+    ctx.restore();
+    // Skids
+    ctx.strokeStyle = "#6a7384"; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx - 24, cy + 14); ctx.lineTo(cx + 22, cy + 14);
+    ctx.moveTo(cx - 18, cy + 12); ctx.lineTo(cx - 22, cy + 14);
+    ctx.moveTo(cx + 16, cy + 12); ctx.lineTo(cx + 20, cy + 14);
+    ctx.stroke();
+    // Main rotor disc — blur disc with leading-edge highlight
+    ctx.save();
+    ctx.translate(cx, cy - 10);
+    const rotSpd = 30 + (state.T / T_HOVER) * 10;
+    ctx.rotate((t * rotSpd) % (2*Math.PI));
+    ctx.strokeStyle = "rgba(230,233,239,0.35)";
+    ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(-44, 0); ctx.lineTo(44, 0); ctx.stroke();
+    ctx.strokeStyle = "rgba(230,233,239,0.85)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.arc(0, 0, 44, 0, 2*Math.PI); ctx.stroke();
+    ctx.restore();
+    // Mast
+    ctx.strokeStyle = "#6a7384"; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx, cy - 5); ctx.lineTo(cx, cy - 14); ctx.stroke();
+  }
+
+  function holdMetric() {
+    return { error: state.h - params.ref.value, scale: params.ref.value };
+  }
+
+  function activate() {
+    document.getElementById("ex-title").textContent = "Helicopter Hover — hold the target altitude";
+    document.getElementById("footer").textContent =
+      "Helicopter mass " + params.mass.value.toFixed(1) + " kg, so it needs about " +
+      (params.mass.value * params.g.value).toFixed(1) +
+      " N of thrust just to hover. The rotor takes about " + params.tau.value.toFixed(2) +
+      " s to change thrust after a command, so a high P gain just makes it bounce. " +
+      "The integral term (or the offset slider) is what cancels the constant pull of gravity. " +
+      "Random updrafts add a small ongoing disturbance.";
+  }
+
+  return {
+    id: "heli",
+    params,
+    activate,
+    resetState,
+    step,
+    render,
+    holdMetric,
+    setMode(m) { state.mode = m; state.I = 0; state.ePrev = 0; state.bbDir = 0; },
+    getMode() { return state.mode; },
+    state,
+    controllerTabs: [
+      { id: "pid",      label: "PID",       paramKeys: ["kp","ki","kd","iClamp","uMax","offset"] },
+      { id: "bangbang", label: "Bang-bang", paramKeys: ["dead","effort"],
+        note: "Thrust is always hover ± effort — never exactly hover. The direction only flips once the helicopter has crossed past the opposite edge of the deadband, so altitude keeps oscillating across the target." },
+    ],
+    systemKeys: ["mass","drag","tau","Tmax","g"],
+    systemNote: "The rotor takes time to change thrust, which is why turning P up too high makes the helicopter bounce. The integral term — or the offset slider — is what carries the steady weight of the helicopter against gravity.",
+    stateRowSpecs: [
+      { id:"h",   label:"h",     units:"m"   },
+      { id:"vh",  label:"ḣ",    units:"m/s" },
+      { id:"T",   label:"T",     units:"N"   },
+      { id:"e",   label:"err",   units:"m"   },
+      { id:"i",   label:"∫err",  units:""    },
+      { id:"t",   label:"sim t", units:"s"   },
+    ],
+    forceRowSpecs: [
+      { id:"uP",   label:"P",           color:"--cP" },
+      { id:"uI",   label:"I",           color:"--cI" },
+      { id:"uD",   label:"D",           color:"--cD" },
+      { id:"u",    label:"thrust above hover", color:"--cU" },
+      { id:"w",    label:"updraft",     color:"--cW" },
+    ],
+    readoutValues() {
+      return {
+        state: {
+          h:  state.h.toFixed(3),
+          vh: state.vh.toFixed(3),
+          T:  state.T.toFixed(2),
+          e:  state.lastE.toFixed(3),
+          i:  state.I.toFixed(3),
+          t:  state.t.toFixed(2),
+        },
+        force: {
+          uP: state.lastUP.toFixed(2),
+          uI: state.lastUI.toFixed(2),
+          uD: state.lastUD.toFixed(2),
+          u:  state.lastU.toFixed(2),
+          w:  state.lastFw.toFixed(2),
+        }
+      };
+    },
+    refRowBuild(refRow) {
+      mkRow(refRow, params.ref);
+      const qr = document.createElement("div");
+      qr.className = "pair";
+      for (const v of [5, 10, 20, 30, 40]) {
+        const b = document.createElement("button");
+        b.textContent = v + " m";
+        b.addEventListener("click", () => {
+          params.ref.value = v;
+          syncSlider(params.ref);
+          notifyControlChange();
+        });
+        qr.appendChild(b);
+      }
+      refRow.appendChild(qr);
+    },
+    plotConfig: {
+      top: {
+        title: "altitude (m)",
+        yKeys: [
+          { key:"ref", label:"ref", color: getVar("--cRef") },
+          { key:"x",   label:"h",   color: getVar("--cX"), width: 2 },
+        ],
+        bandFromMode: () => heliEx.getMode() === "bangbang",
+        yMinFloor: 0, yMaxCeil: 60,
+      },
+      bottom: {
+        title: "command above hover & updraft (N)",
+        yKeys: [
+          { key:"uP",   label:"P",       color: getVar("--cP"), width: 1.2 },
+          { key:"uI",   label:"I",       color: getVar("--cI"), width: 1.2 },
+          { key:"uD",   label:"D",       color: getVar("--cD"), width: 1.2 },
+          { key:"wind", label:"updraft", color: getVar("--cW"), width: 1.2 },
+          { key:"u",    label:"u",       color: getVar("--cU"), width: 2 },
+        ],
+      },
+    },
+  };
+})();
+
+// ----------------------------------------------------------------------------
+// EXAMPLE 3: 2D ROVER (click target, two motors)
+//
+// State: x, y (m), θ (rad heading), v (longitudinal m/s), ω (rad/s).
+// Inputs: u_L, u_R (each clamped ±uMax).
+//   F_drive = (u_L + u_R)            (longitudinal force, N)
+//   M_yaw   = (u_R − u_L) · ARM      (yaw moment, N·m)
+//   m·v̇     = F_drive − c·v
+//   J·ω̇     = M_yaw   − cω·ω
+//   ẋ      = v·cosθ
+//   ẏ      = v·sinθ
+//   θ̇      = ω
+//
+// Two PID controllers:
+//   Yaw PID:    err = wrap(atan2(ty−y, tx−x) − θ),  out = motor IMBALANCE.
+//   Drive PID:  err = distance to target,           out = motor AVERAGE.
+//   Final:  u_L = avg − imb,   u_R = avg + imb,   then clamp to ±uMax.
+// ----------------------------------------------------------------------------
+
+const roverEx = (() => {
+  const R = CART_2D_PARAMS;
+  const ARM     = R.ARM;
+  const WORLD_R = R.WORLD_R;
+
+  const params = {
+    // Yaw controller — log scale, 1 → max
+    yKp:    { label: "yP",    min: 0, max: R.YKP_MAX,   step: 0.01, value: R.YKP_DEFAULT,   log: true, logMin: 1 },
+    yKi:    { label: "yI",    min: 0, max: R.YKI_MAX,   step: 0.01, value: R.YKI_DEFAULT,   log: true, logMin: 1 },
+    yKd:    { label: "yD",    min: 0, max: R.YKD_MAX,   step: 0.01, value: R.YKD_DEFAULT,   log: true, logMin: 1 },
+    yImax:  { label: "yImax", min: 0, max: R.YIMAX_MAX, step: 0.1,  value: R.YIMAX_DEFAULT, log: true, logMin: 1 },
+    // Drive controller
+    dKp:    { label: "dP",    min: 0, max: R.DKP_MAX,   step: 0.01, value: R.DKP_DEFAULT,   log: true, logMin: 1 },
+    dKi:    { label: "dI",    min: 0, max: R.DKI_MAX,   step: 0.01, value: R.DKI_DEFAULT,   log: true, logMin: 1 },
+    dKd:    { label: "dD",    min: 0, max: R.DKD_MAX,   step: 0.01, value: R.DKD_DEFAULT,   log: true, logMin: 1 },
+    dImax:  { label: "dImax", min: 0, max: R.DIMAX_MAX, step: 0.1,  value: R.DIMAX_DEFAULT, log: true, logMin: 1 },
+    // Per-controller output clamps
+    yUmax:  { label: "yUmax", min: R.YUMAX_MIN, max: R.YUMAX_MAX, step: 0.1, value: R.YUMAX_DEFAULT, log: true,
+              tip: "Largest yaw output magnitude (N). Caps the imbalance between motors that the yaw controller can command." },
+    dUmax:  { label: "dUmax", min: R.DUMAX_MIN, max: R.DUMAX_MAX, step: 0.1, value: R.DUMAX_DEFAULT, log: true,
+              tip: "Largest drive output magnitude (N). Caps the average motor command from the drive controller." },
+    // System
+    mass:   { label: "m",  min: R.MASS_MIN,    max: R.MASS_MAX,     step: 0.1,  value: R.MASS_DEFAULT,    disabled: true,
+              tip: "Rover mass (kg)." },
+    drag:   { label: "c",  min: 0,             max: R.DRAG_MAX,     step: 0.1,  value: R.DRAG_DEFAULT,    disabled: true,
+              tip: "How much the floor slows the rover (N per m/s of speed)." },
+    inertia:{ label: "J",  min: R.INERTIA_MIN, max: R.INERTIA_MAX,  step: 0.01, value: R.INERTIA_DEFAULT, disabled: true,
+              tip: "How hard the rover is to turn. Bigger value = slower rotation for the same motor difference." },
+    angDrag:{ label: "cω", min: 0,             max: R.ANG_DRAG_MAX, step: 0.05, value: R.ANG_DRAG_DEFAULT, disabled: true,
+              tip: "How much the floor slows the rover's turning." },
+    arm:    { label: "L",  min: R.ARM_MIN,     max: R.ARM_MAX,      step: 0.01, value: ARM,                disabled: true,
+              tip: "Distance from the rover's centre to each motor (m). Bigger arm = more turning power from the same motor difference." },
+  };
+
+  const state = {
+    x: 0, y: 0, theta: 0, v: 0, omega: 0,
+    tx: 2.5, ty: 0,
+    yI: 0, dI: 0, yePrev: 0, dePrev: 0,
+    t: 0,
+    // last
+    lastYE: 0, lastDE: 0,
+    lastYP: 0, lastYI: 0, lastYD: 0, lastImb: 0,
+    lastDP: 0, lastDI: 0, lastDD: 0, lastAvg: 0,
+    lastUL: 0, lastUR: 0,
+  };
+
+  function resetState() {
+    state.x = 0; state.y = 0; state.theta = 0; state.v = 0; state.omega = 0;
+    state.tx = 2.5; state.ty = 0;
+    state.yI = 0; state.dI = 0; state.yePrev = 0; state.dePrev = 0;
+    state.lastYE = state.lastDE = 0;
+    state.lastYP = state.lastYI = state.lastYD = state.lastImb = 0;
+    state.lastDP = state.lastDI = state.lastDD = state.lastAvg = 0;
+    state.lastUL = state.lastUR = 0;
+    state.t = 0;
+    clearHist();
+    resetHold();
+  }
+
+  // Arrival deadband:
+  //   dist > ARRIVE_R → full yaw and drive
+  //   dist ≤ ARRIVE_R → yaw OFF, drive OFF, both integrators zeroed (so the
+  //                     rover coasts to rest inside the band).
+  const ARRIVE_R = R.ARRIVE_R;
+
+  function controllers(dt) {
+    const dx = state.tx - state.x;
+    const dy = state.ty - state.y;
+    const dist = Math.hypot(dx, dy);
+    const desiredHeading = Math.atan2(dy, dx);
+    const yE = wrapAngle(desiredHeading - state.theta);
+    const dE = dist;
+
+    const inArrive = dist <= ARRIVE_R;
+    const active = !inArrive;
+
+    // Yaw PID — fully off inside arrival radius (resets I to avoid wind-up).
+    let yP = 0, yD = 0;
+    if (active) {
+      const yIn = state.yI + params.yKi.value * 0.5 * (yE + state.yePrev) * dt;
+      state.yI = clamp(yIn, -params.yImax.value, params.yImax.value);
+      yP = params.yKp.value * yE;
+      yD = params.yKd.value * (-state.omega);
+    } else {
+      state.yI = 0;
+    }
+    let imb = active ? (yP + state.yI + yD) : 0;
+    imb = clamp(imb, -params.yUmax.value, params.yUmax.value);
+    state.yePrev = yE;
+
+    // Drive PID — full strength outside the arrival radius, with no
+    // alignment gating: the controller pushes on distance error directly.
+    let dP = 0, dD = 0;
+    if (active) {
+      const dIn = state.dI + params.dKi.value * 0.5 * (dE + state.dePrev) * dt;
+      state.dI = clamp(dIn, -params.dImax.value, params.dImax.value);
+      dP = params.dKp.value * dE;
+      dD = params.dKd.value * (-state.v);
+    } else {
+      state.dI = 0;
+    }
+    let avg = active ? (dP + state.dI + dD) : 0;
+    avg = clamp(avg, -params.dUmax.value, params.dUmax.value);
+    state.dePrev = dE;
+
+    // Combine
+    let uL = avg - imb;
+    let uR = avg + imb;
+
+    // Recompute the actually applied imbalance/average (after clamp) for the readout
+    const appliedAvg = (uL + uR) * 0.5;
+    const appliedImb = (uR - uL) * 0.5;
+
+    state.lastYE = yE; state.lastDE = dE;
+    state.lastYP = yP; state.lastYI = state.yI; state.lastYD = yD; state.lastImb = appliedImb;
+    state.lastDP = dP; state.lastDI = state.dI; state.lastDD = dD; state.lastAvg = appliedAvg;
+    state.lastUL = uL; state.lastUR = uR;
+
+    return { uL, uR };
+  }
+
+  function dynamics(s, uL, uR) {
+    const m = params.mass.value, c = params.drag.value;
+    const J = params.inertia.value, cw = params.angDrag.value;
+    const F = uL + uR;
+    const M = (uR - uL) * params.arm.value;
+    return {
+      dx: s.v * Math.cos(s.theta),
+      dy: s.v * Math.sin(s.theta),
+      dtheta: s.omega,
+      dv: (F - c * s.v) / m,
+      domega: (M - cw * s.omega) / J,
+    };
+  }
+
+  function step(dt) {
+    const { uL, uR } = controllers(dt);
+    // RK4 over the 5-state system
+    const s0 = { x: state.x, y: state.y, theta: state.theta, v: state.v, omega: state.omega };
+    const k1 = dynamics(s0, uL, uR);
+    const s2 = { x: s0.x + 0.5*dt*k1.dx, y: s0.y + 0.5*dt*k1.dy, theta: s0.theta + 0.5*dt*k1.dtheta,
+                 v: s0.v + 0.5*dt*k1.dv, omega: s0.omega + 0.5*dt*k1.domega };
+    const k2 = dynamics(s2, uL, uR);
+    const s3 = { x: s0.x + 0.5*dt*k2.dx, y: s0.y + 0.5*dt*k2.dy, theta: s0.theta + 0.5*dt*k2.dtheta,
+                 v: s0.v + 0.5*dt*k2.dv, omega: s0.omega + 0.5*dt*k2.domega };
+    const k3 = dynamics(s3, uL, uR);
+    const s4 = { x: s0.x + dt*k3.dx, y: s0.y + dt*k3.dy, theta: s0.theta + dt*k3.dtheta,
+                 v: s0.v + dt*k3.dv, omega: s0.omega + dt*k3.domega };
+    const k4 = dynamics(s4, uL, uR);
+
+    state.x     = s0.x     + (dt/6)*(k1.dx + 2*k2.dx + 2*k3.dx + k4.dx);
+    state.y     = s0.y     + (dt/6)*(k1.dy + 2*k2.dy + 2*k3.dy + k4.dy);
+    state.theta = s0.theta + (dt/6)*(k1.dtheta + 2*k2.dtheta + 2*k3.dtheta + k4.dtheta);
+    state.v     = s0.v     + (dt/6)*(k1.dv + 2*k2.dv + 2*k3.dv + k4.dv);
+    state.omega = s0.omega + (dt/6)*(k1.domega + 2*k2.domega + 2*k3.domega + k4.domega);
+
+    // Soft world clamp
+    state.x = clamp(state.x, -WORLD_R, WORLD_R);
+    state.y = clamp(state.y, -WORLD_R, WORLD_R);
+    state.theta = wrapAngle(state.theta);
+
+    state.t += dt;
+
+    pushHist({
+      t: state.t,
+      ref: 0, x: state.lastDE,                          // distance error on top plot
+      uP: state.lastDP, uI: state.lastDI, uD: state.lastDD,
+      u:  state.lastAvg, wind: 0,
+      yawErr: state.lastYE,
+      yP: state.lastYP, yI: state.lastYI, yD: state.lastYD,
+      imb: state.lastImb,
+      uL: state.lastUL, uR: state.lastUR,
+    });
+  }
+
+  // World ↔ screen helpers used by render and pointer
+  function viewMetrics(W, H) {
+    const pad = 18;
+    const usable = Math.min(W, H) - pad * 2;
+    const scale = usable / (2 * WORLD_R);
+    const cx = W / 2, cy = H / 2;
+    return { cx, cy, scale, pad };
+  }
+  function world2screen(wx, wy, W, H) {
+    const m = viewMetrics(W, H);
+    return { sx: m.cx + wx * m.scale, sy: m.cy - wy * m.scale };
+  }
+  function screen2world(sx, sy, W, H) {
+    const m = viewMetrics(W, H);
+    return { wx: (sx - m.cx) / m.scale, wy: -(sy - m.cy) / m.scale };
+  }
+
+  function render(ctx, W, H) {
+    ctx.fillStyle = "#0d1013";
+    ctx.fillRect(0, 0, W, H);
+    const m = viewMetrics(W, H);
+
+    // Grid (1 m)
+    ctx.strokeStyle = "#1e252f"; ctx.lineWidth = 1;
+    for (let g = -WORLD_R; g <= WORLD_R; g++) {
+      const { sx } = world2screen(g, 0, W, H);
+      ctx.beginPath(); ctx.moveTo(sx, m.cy - WORLD_R*m.scale); ctx.lineTo(sx, m.cy + WORLD_R*m.scale);
+      ctx.stroke();
+      const { sy } = world2screen(0, g, W, H);
+      ctx.beginPath(); ctx.moveTo(m.cx - WORLD_R*m.scale, sy); ctx.lineTo(m.cx + WORLD_R*m.scale, sy);
+      ctx.stroke();
+    }
+    // World box
+    ctx.strokeStyle = "#3a4453"; ctx.lineWidth = 1.5;
+    ctx.strokeRect(m.cx - WORLD_R*m.scale, m.cy - WORLD_R*m.scale,
+                   2*WORLD_R*m.scale, 2*WORLD_R*m.scale);
+
+    // Origin marker
+    ctx.fillStyle = "#55606f"; ctx.font = "11px ui-sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillText("0,0", m.cx + 4, m.cy + 4);
+
+    // Target
+    const tgt = world2screen(state.tx, state.ty, W, H);
+    ctx.strokeStyle = getVar("--cRef"); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(tgt.sx, tgt.sy, 14, 0, 2*Math.PI); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(tgt.sx - 18, tgt.sy); ctx.lineTo(tgt.sx + 18, tgt.sy);
+    ctx.moveTo(tgt.sx, tgt.sy - 18); ctx.lineTo(tgt.sx, tgt.sy + 18);
+    ctx.stroke();
+    ctx.fillStyle = getVar("--cRef");
+    ctx.font = "12px ui-sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+    ctx.fillText("(" + state.tx.toFixed(2) + ", " + state.ty.toFixed(2) + ")",
+      tgt.sx + 18, tgt.sy - 4);
+
+    // Hold band — circle of radius 2*WORLD_R*0.02 = 0.24 m around target
+    const bandR = WORLD_R * HOLD_THRESHOLD * m.scale;
+    ctx.fillStyle = "rgba(102,187,106,0.10)";
+    ctx.beginPath(); ctx.arc(tgt.sx, tgt.sy, bandR, 0, 2*Math.PI); ctx.fill();
+
+    // Trail (last N positions) — sample from history quickly for visual
+    ctx.strokeStyle = "rgba(78,161,255,0.25)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    let started = false;
+    for (let i = Math.max(0, hist.length - 200); i < hist.length; i++) {
+      // We didn't store x,y in history (top plot uses dist error), so use the live state path only.
+      // Skip: we only know the current position.  Show direction line to target instead.
+    }
+    // Direction line current → target
+    const cur = world2screen(state.x, state.y, W, H);
+    ctx.strokeStyle = "rgba(102,187,106,0.35)"; ctx.lineWidth = 1.2;
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(cur.sx, cur.sy); ctx.lineTo(tgt.sx, tgt.sy); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Cart body
+    ctx.save();
+    ctx.translate(cur.sx, cur.sy);
+    ctx.rotate(-state.theta);   // screen Y is flipped
+    const bodyW = m.scale * 0.7;       // 0.7 m long
+    const bodyH = m.scale * 0.55;      // 0.55 m wide
+    ctx.fillStyle = "#2b3340"; ctx.strokeStyle = "#6a7384"; ctx.lineWidth = 1.5;
+    roundRect(ctx, -bodyW/2, -bodyH/2, bodyW, bodyH, 6);
+    ctx.fill(); ctx.stroke();
+    // Front mark
+    ctx.fillStyle = "#4ea1ff";
+    ctx.beginPath();
+    ctx.moveTo(bodyW/2 - 2, 0);
+    ctx.lineTo(bodyW/2 - 12, -bodyH*0.32);
+    ctx.lineTo(bodyW/2 - 12,  bodyH*0.32);
+    ctx.closePath(); ctx.fill();
+    // Motors (left/right) as little rectangles
+    const motW = bodyW * 0.30, motH = bodyH * 0.22;
+    ctx.fillStyle = "#3a4453"; ctx.strokeStyle = "#6a7384";
+    ctx.fillRect(-motW/2, -bodyH/2 - motH, motW, motH);   // left motor (top in body frame, world +y arm)
+    ctx.strokeRect(-motW/2, -bodyH/2 - motH, motW, motH);
+    ctx.fillRect(-motW/2,  bodyH/2,         motW, motH);  // right motor
+    ctx.strokeRect(-motW/2,  bodyH/2,        motW, motH);
+    // Motor force indicators — proportional length, drawn fore/aft
+    const motorScaleMax = params.yUmax.value + params.dUmax.value;
+    const uS = (motorScaleMax > 0) ? (m.scale * 0.6 / motorScaleMax) : 0;
+    const dxL = state.lastUL * uS;
+    const dxR = state.lastUR * uS;
+    ctx.strokeStyle = getVar("--cP"); ctx.fillStyle = getVar("--cP"); ctx.lineWidth = 2;
+    drawArrowLocal(ctx, 0, -bodyH/2 - motH/2, dxL, 0, "L " + state.lastUL.toFixed(0), 10, getVar("--cP"));
+    ctx.strokeStyle = getVar("--cI"); ctx.fillStyle = getVar("--cI");
+    drawArrowLocal(ctx, 0,  bodyH/2 + motH/2, dxR, 0, "R " + state.lastUR.toFixed(0), 10, getVar("--cI"));
+    ctx.restore();
+
+    // Status
+    ctx.fillStyle = "#aab2c0"; ctx.font = "12px ui-sans-serif";
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillText("dist " + state.lastDE.toFixed(2) + " m   yaw err " + (state.lastYE * 180/Math.PI).toFixed(1) + "°",
+      10, 8);
+    ctx.fillText("Click anywhere to set the target.", 10, 24);
+  }
+
+  function holdMetric() {
+    return { error: state.lastDE, scale: WORLD_R };
+  }
+
+  function activate() {
+    document.getElementById("ex-title").textContent = "2D Rover — drive to the click point";
+    document.getElementById("footer").textContent =
+      "Two motors push the rover forward. Driving them equally goes straight; pushing one harder turns it. " +
+      "The yaw controller picks how unequal they should be; the drive controller picks how strong on average. " +
+      "Click anywhere on the canvas to set a target.";
+  }
+
+  function onPointer(type, mx, my, W, H) {
+    if (type !== "click") return;
+    const w = screen2world(mx, my, W, H);
+    state.tx = clamp(w.wx, -WORLD_R + 0.2, WORLD_R - 0.2);
+    state.ty = clamp(w.wy, -WORLD_R + 0.2, WORLD_R - 0.2);
+    notifyControlChange();   // a new target counts as a "control change"
+  }
+
+  return {
+    id: "rover",
+    params,
+    activate,
+    resetState,
+    step,
+    render,
+    holdMetric,
+    setMode(m) { /* no bang-bang here */ },
+    getMode() { return "pid"; },
+    state,
+    onPointer,
+    controllerTabs: [
+      { id: "yaw",   label: "Yaw PID",   paramKeys: ["yKp","yKi","yKd","yImax","yUmax"],
+        note: "The yaw error is how far the rover's nose needs to swing to face the target. The output is the difference between the two motors — a positive value runs the right motor harder so the rover turns left." },
+      { id: "drive", label: "Drive PID", paramKeys: ["dKp","dKi","dKd","dImax","dUmax"],
+        note: "The drive error is the distance to the target. The output is the same value sent to both motors (positive = both push forward). The drive controller runs unconditionally outside the arrival radius — it does not wait for the rover to face the target." },
+    ],
+    systemKeys: ["mass","drag","inertia","angDrag","arm"],
+    systemNote: "Both controllers send commands to the same two motors. Each motor gets the drive output ± half the yaw output. The yaw and drive controllers are each capped at their own uMax.",
+    stateRowSpecs: [
+      { id:"x",    label:"x",    units:"m"     },
+      { id:"y",    label:"y",    units:"m"     },
+      { id:"th",   label:"θ",    units:"°"    },
+      { id:"v",    label:"v",    units:"m/s"   },
+      { id:"om",   label:"ω",    units:"rad/s" },
+      { id:"dist", label:"dist", units:"m"     },
+      { id:"yawe", label:"yaw e",units:"°"     },
+      { id:"t",    label:"sim t",units:"s"     },
+    ],
+    forceRowSpecs: [
+      { id:"yP",  label:"yaw P", color:"--cP" },
+      { id:"yI",  label:"yaw I", color:"--cI" },
+      { id:"yD",  label:"yaw D", color:"--cD" },
+      { id:"imb", label:"imbalance", color:"--cU" },
+      { id:"dP",  label:"drv P", color:"--cP" },
+      { id:"dI",  label:"drv I", color:"--cI" },
+      { id:"dD",  label:"drv D", color:"--cD" },
+      { id:"avg", label:"average", color:"--cU" },
+      { id:"uL",  label:"motor L", color:"--cY" },
+      { id:"uR",  label:"motor R", color:"--cW" },
+    ],
+    readoutValues() {
+      return {
+        state: {
+          x:   state.x.toFixed(2),
+          y:   state.y.toFixed(2),
+          th:  (state.theta * 180/Math.PI).toFixed(1),
+          v:   state.v.toFixed(2),
+          om:  state.omega.toFixed(2),
+          dist:state.lastDE.toFixed(2),
+          yawe:(state.lastYE * 180/Math.PI).toFixed(1),
+          t:   state.t.toFixed(2),
+        },
+        force: {
+          yP: state.lastYP.toFixed(1),
+          yI: state.lastYI.toFixed(1),
+          yD: state.lastYD.toFixed(1),
+          imb:state.lastImb.toFixed(1),
+          dP: state.lastDP.toFixed(1),
+          dI: state.lastDI.toFixed(1),
+          dD: state.lastDD.toFixed(1),
+          avg:state.lastAvg.toFixed(1),
+          uL: state.lastUL.toFixed(1),
+          uR: state.lastUR.toFixed(1),
+        }
+      };
+    },
+    refRowBuild(refRow) {
+      const note = document.createElement("div");
+      note.style.cssText = "color:var(--muted);font-size:12px;line-height:1.4;";
+      note.innerHTML = "Click anywhere on the canvas to set the target. Hold the rover within about 12 cm of it for 10 seconds to win.";
+      refRow.appendChild(note);
+      const qr = document.createElement("div");
+      qr.className = "pair";
+      const presets = [{x: 2.5, y: 0, n: "(2.5, 0)"}, {x: -2, y: 2, n:"(-2, 2)"}, {x: 0, y: -3, n:"(0, -3)"}, {x: 4, y: 4, n:"(4, 4)"}];
+      for (const p of presets) {
+        const b = document.createElement("button");
+        b.textContent = p.n;
+        b.addEventListener("click", () => { state.tx = p.x; state.ty = p.y; notifyControlChange(); });
+        qr.appendChild(b);
+      }
+      refRow.appendChild(qr);
+    },
+    plotConfig: {
+      top: {
+        title: "distance to target (m)",
+        yKeys: [
+          { key:"ref", label:"ref", color: getVar("--cRef") },
+          { key:"x",   label:"dist", color: getVar("--cX"), width: 2 },
+        ],
+        bandFromMode: () => false,
+        yMinFloor: 0, yMaxCeil: 8,
+      },
+      bottom: {
+        title: "motor command (N)",
+        yKeys: [
+          { key:"uL",  label:"motor L", color: getVar("--cY"), width: 1.6 },
+          { key:"uR",  label:"motor R", color: getVar("--cW"), width: 1.6 },
+          { key:"imb", label:"imb",    color: getVar("--cU"), width: 1.0 },
+          { key:"u",   label:"avg",    color: getVar("--cD"), width: 1.5 },
+        ],
+      },
+    },
+  };
+})();
+
+// ============================================================================
+// Drawing helpers
+// ============================================================================
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawArrow(ctx, x0, y0, dx, dy, color, label, fsize) {
+  const len = Math.hypot(dx, dy);
+  if (len < 1.5) return;
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(1.5, fsize * 0.14);
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x0 + dx, y0 + dy);
+  ctx.stroke();
+  const ux = dx / len, uy = dy / len;
+  const head = Math.max(6, fsize * 0.7);
+  const wing = Math.max(3, fsize * 0.35);
+  ctx.beginPath();
+  ctx.moveTo(x0 + dx, y0 + dy);
+  ctx.lineTo(x0 + dx - head*ux + wing*(-uy), y0 + dy - head*uy + wing*(ux));
+  ctx.lineTo(x0 + dx - head*ux - wing*(-uy), y0 + dy - head*uy - wing*(ux));
+  ctx.closePath();
+  ctx.fill();
+  if (label) {
+    ctx.font = `${fsize}px ui-sans-serif`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, x0 + dx + 8 * Math.sign(dx || 1), y0 + dy);
+  }
+}
+
+function drawArrowLocal(ctx, x0, y0, dx, dy, label, fsize, color) {
+  const len = Math.hypot(dx, dy);
+  if (len < 1.5) {
+    if (label) {
+      ctx.fillStyle = color || "#aab2c0";
+      ctx.font = `${fsize}px ui-sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(label, x0, y0);
+    }
+    return;
+  }
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x0 + dx, y0 + dy);
+  ctx.stroke();
+  const ux = dx / len, uy = dy / len;
+  const head = 6;
+  const wing = 4;
+  ctx.beginPath();
+  ctx.moveTo(x0 + dx, y0 + dy);
+  ctx.lineTo(x0 + dx - head*ux + wing*(-uy), y0 + dy - head*uy + wing*(ux));
+  ctx.lineTo(x0 + dx - head*ux - wing*(-uy), y0 + dy - head*uy - wing*(ux));
+  ctx.closePath();
+  ctx.fill();
+  if (label) {
+    ctx.font = `${fsize}px ui-sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+    ctx.fillText(label, x0 + dx, y0 + dy - 4);
+  }
+}
+
+// ============================================================================
+// Plot rendering (shared)
+// ============================================================================
+
+function drawPlotGrid(pctx, px, py, pw, ph, yMin, yMax, tMin, tMax, title, fsize) {
+  pctx.fillStyle = "#0d1013";
+  pctx.fillRect(px, py, pw, ph);
+  pctx.strokeStyle = "#2a313c"; pctx.lineWidth = 1;
+  pctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+
+  pctx.fillStyle = "#55606f";
+  pctx.font = `${fsize}px ui-sans-serif`;
+  pctx.textBaseline = "middle";
+  pctx.textAlign = "right";
+  const yTicks = 3;
+  for (let i = 0; i <= yTicks; i++) {
+    const frac = i / yTicks;
+    const yv = yMax - frac * (yMax - yMin);
+    const yy = py + frac * ph;
+    pctx.strokeStyle = "#1e252f";
+    pctx.beginPath();
+    pctx.moveTo(px + 38, yy); pctx.lineTo(px + pw, yy);
+    pctx.stroke();
+    pctx.fillStyle = "#55606f";
+    pctx.fillText(yv.toFixed(1), px + 36, yy);
+  }
+  pctx.textAlign = "center"; pctx.textBaseline = "top";
+  const xTicks = 4;
+  for (let i = 0; i <= xTicks; i++) {
+    const frac = i / xTicks;
+    const tv = tMin + frac * (tMax - tMin);
+    const xx = px + 38 + frac * (pw - 42);
+    pctx.strokeStyle = "#1e252f";
+    pctx.beginPath();
+    pctx.moveTo(xx, py); pctx.lineTo(xx, py + ph - 14);
+    pctx.stroke();
+    pctx.fillStyle = "#55606f";
+    pctx.fillText(tv.toFixed(1) + "s", xx, py + ph - 12);
+  }
+  pctx.fillStyle = "#8a93a3";
+  pctx.font = `${fsize}px ui-sans-serif`;
+  pctx.textAlign = "left"; pctx.textBaseline = "top";
+  pctx.fillText(title, px + 6, py + 4);
+}
+
+function plotLine(pctx, px, py, pw, ph, yMin, yMax, tMin, tMax, pts, color, lw, dash) {
+  if (!pts || pts.length < 2) return;
+  pctx.strokeStyle = color;
+  pctx.lineWidth = lw || 1.5;
+  pctx.setLineDash(dash || []);
+  pctx.beginPath();
+  const x0 = px + 38;
+  const usableW = pw - 42;
+  const yRange = (yMax - yMin) || 1;
+  const tRange = (tMax - tMin) || 1;
+  let started = false;
+  for (const p of pts) {
+    if (p.y === undefined || p.y === null || !Number.isFinite(p.y)) continue;
+    const xx = x0 + ((p.t - tMin) / tRange) * usableW;
+    const yy = py + (1 - (p.y - yMin) / yRange) * ph;
+    if (!started) { pctx.moveTo(xx, yy); started = true; }
+    else pctx.lineTo(xx, yy);
+  }
+  pctx.stroke();
+  pctx.setLineDash([]);
+}
+
+function drawLegend(pctx, rightX, topY, fsize, entries) {
+  pctx.font = `${fsize}px ui-sans-serif`;
+  pctx.textAlign = "right"; pctx.textBaseline = "top";
+  let y = topY;
+  for (const e of entries) {
+    pctx.fillStyle = e.color;
+    pctx.fillText("■ " + e.label, rightX, y);
+    y += fsize + 2;
+  }
+}
+
+// ============================================================================
+// Top-level wiring
+// ============================================================================
+
+const examples = [carEx, carWindEx, heliEx, roverEx];
+let currentExample = carEx;
+
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const plot = document.getElementById("plot");
+const pctx = plot.getContext("2d");
+
+function fitCanvas(c, cx) {
+  const dpr = window.devicePixelRatio || 1;
+  const r = c.getBoundingClientRect();
+  c.width = Math.max(1, Math.round(r.width * dpr));
+  c.height = Math.max(1, Math.round(r.height * dpr));
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { w: r.width, h: r.height };
+}
+
+const ro = new ResizeObserver(() => {});
+ro.observe(cv); ro.observe(plot);
+
+// ============================================================================
+// Build example UI
+// ============================================================================
+
+const refRowEl = document.getElementById("ref-row");
+const ctlTabsEl = document.getElementById("ctl-tabs");
+const ctlBodiesEl = document.getElementById("ctl-bodies");
+const sysRowsEl = document.getElementById("sys-rows");
+const sysNoteEl = document.getElementById("sys-note");
+const stateReadEl = document.getElementById("readout-state");
+const forceReadEl = document.getElementById("readout-forces");
+const ctlTitleEl = document.getElementById("ctl-title");
+
+function clearChildren(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+
+function buildExampleUI(ex) {
+  // Reset header
+  // Reference row
+  clearChildren(refRowEl);
+  const h = document.createElement("h2");
+  h.style.cssText = "margin:0;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:var(--muted);font-weight:600;";
+  h.textContent = "Reference / Target";
+  refRowEl.appendChild(h);
+  ex.refRowBuild(refRowEl);
+
+  // Controller tabs
+  clearChildren(ctlTabsEl);
+  clearChildren(ctlBodiesEl);
+  ctlTitleEl.textContent = (ex.controllerTabs.length === 1)
+    ? "Controller — " + ex.controllerTabs[0].label
+    : "Controllers";
+  ex.controllerTabs.forEach((tab, idx) => {
+    const btn = document.createElement("button");
+    btn.type = "button"; btn.dataset.tab = tab.id;
+    btn.textContent = tab.label;
+    if (idx === 0) btn.classList.add("active");
+    btn.addEventListener("click", () => activateTab(ex, tab.id));
+    ctlTabsEl.appendChild(btn);
+    const body = document.createElement("div");
+    body.dataset.body = tab.id;
+    body.className = "tab-body";
+    if (idx > 0) body.hidden = true;
+    for (const k of tab.paramKeys) {
+      mkRow(body, ex.params[k]);
+    }
+    if (tab.note) {
+      const note = document.createElement("div");
+      note.style.cssText = "color:var(--muted);font-size:11px;line-height:1.4;";
+      note.innerHTML = tab.note;
+      body.appendChild(note);
+    }
+    ctlBodiesEl.appendChild(body);
+    if (idx === 0) {
+      // For single-mode examples (rover) just leave it; for car/heli the first tab's id is "pid"
+      ex.setMode(tab.id);
+    }
+  });
+
+  // System rows (read-only)
+  clearChildren(sysRowsEl);
+  for (const k of ex.systemKeys) {
+    mkRow(sysRowsEl, ex.params[k]);
+  }
+  sysNoteEl.textContent = ex.systemNote || "";
+
+  // Readout
+  clearChildren(stateReadEl);
+  for (const s of ex.stateRowSpecs) {
+    const ln = document.createElement("div");
+    ln.className = "ln";
+    ln.innerHTML = `<span>${s.label}</span><b><span data-rs="${s.id}">--</span> ${s.units || ""}</b>`;
+    stateReadEl.appendChild(ln);
+  }
+  clearChildren(forceReadEl);
+  for (const f of ex.forceRowSpecs) {
+    const ln = document.createElement("div");
+    ln.className = "ln";
+    const sw = f.color ? `<i class="swatch" style="background:var(${f.color})"></i>` : "";
+    ln.innerHTML = `<span>${sw}${f.label}</span><b data-rf="${f.id}">--</b>`;
+    forceReadEl.appendChild(ln);
+  }
+
+  ex.activate();
+}
+
+function activateTab(ex, tabId) {
+  for (const btn of ctlTabsEl.querySelectorAll("button")) {
+    btn.classList.toggle("active", btn.dataset.tab === tabId);
+  }
+  for (const body of ctlBodiesEl.querySelectorAll(".tab-body")) {
+    body.hidden = (body.dataset.body !== tabId);
+  }
+  // For car/heli the tab id is the controller mode.  For rover it's just a sub-pane label.
+  if (ex.id === "rover") return;
+  ex.setMode(tabId);
+  notifyControlChange();
+}
+
+// ============================================================================
+// Switching examples
+// ============================================================================
+
+const exTabs = document.getElementById("ex-tabs");
+exTabs.addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-ex]");
+  if (!btn) return;
+  const id = btn.dataset.ex;
+  const ex = examples.find(x => x.id === id);
+  if (!ex) return;
+  for (const b of exTabs.querySelectorAll("button")) b.classList.toggle("active", b === btn);
+  switchExample(ex);
+});
+
+function switchExample(ex) {
+  currentExample = ex;
+  state_paused = false;
+  document.getElementById("btn-pause").textContent = "Pause";
+  buildExampleUI(ex);
+  ex.resetState();
+}
+
+// ============================================================================
+// Pointer (rover click)
+// ============================================================================
+
+cv.addEventListener("click", (ev) => {
+  if (!currentExample.onPointer) return;
+  const r = cv.getBoundingClientRect();
+  currentExample.onPointer("click", ev.clientX - r.left, ev.clientY - r.top, r.width, r.height);
+});
+
+// ============================================================================
+// Reset / pause / loop
+// ============================================================================
+
+let state_paused = false;
+document.getElementById("btn-reset").addEventListener("click", () => {
+  currentExample.resetState();
+});
+document.getElementById("btn-pause").addEventListener("click", (e) => {
+  state_paused = !state_paused;
+  e.target.textContent = state_paused ? "Resume" : "Pause";
+});
+
+// ============================================================================
+// Loop
+// ============================================================================
+
+const PHYS_HZ = 240;
+const PHYS_DT = 1 / PHYS_HZ;
+let accumulator = 0;
+let lastMs = performance.now();
+let fpsFrames = 0, fpsT = performance.now(), fpsVal = 0;
+
+const overlayEl = document.getElementById("overlay");
+const badgeEl = document.getElementById("badge");
+
+function step(nowMs) {
+  const dt = Math.min(0.1, (nowMs - lastMs) / 1000);
+  lastMs = nowMs;
+  if (!state_paused) {
+    accumulator += dt;
+    if (accumulator > 0.25) accumulator = 0.25;
+    while (accumulator >= PHYS_DT) {
+      currentExample.step(PHYS_DT);
+      updateHold(PHYS_DT);
+      accumulator -= PHYS_DT;
+    }
+  }
+  render();
+  renderPlots();
+  updateReadout();
+  updateOverlay();
+  fpsFrames++;
+  if (nowMs - fpsT >= 500) {
+    fpsVal = Math.round((fpsFrames * 1000) / (nowMs - fpsT));
+    fpsFrames = 0; fpsT = nowMs;
+  }
+  requestAnimationFrame(step);
+}
+
+function render() {
+  const sz = fitCanvas(cv, ctx);
+  currentExample.render(ctx, sz.w, sz.h);
+}
+
+function updateOverlay() {
+  if (hold.controlled) {
+    overlayEl.classList.add("controlled");
+    badgeEl.hidden = false;
+    badgeEl.classList.add("controlled");
+    badgeEl.innerHTML = `<span class="tick">✓</span>System Controlled!`;
+  } else if (hold.inBand) {
+    overlayEl.classList.remove("controlled");
+    badgeEl.hidden = false;
+    badgeEl.classList.remove("controlled");
+    const remain = Math.max(0, HOLD_DURATION_S - hold.bandT);
+    badgeEl.textContent = "At target… " + remain.toFixed(1) + " s";
+  } else {
+    overlayEl.classList.remove("controlled");
+    badgeEl.hidden = true;
+    badgeEl.classList.remove("controlled");
+  }
+}
+
+function updateReadout() {
+  const v = currentExample.readoutValues();
+  for (const [id, val] of Object.entries(v.state)) {
+    const el = stateReadEl.querySelector(`[data-rs="${id}"]`);
+    if (el) el.textContent = val;
+  }
+  for (const [id, val] of Object.entries(v.force)) {
+    const el = forceReadEl.querySelector(`[data-rf="${id}"]`);
+    if (el) el.textContent = val;
+  }
+}
+
+function renderPlots() {
+  const sz = fitCanvas(plot, pctx);
+  const W = sz.w, H = sz.h;
+  pctx.fillStyle = "#0d1013";
+  pctx.fillRect(0, 0, W, H);
+  const fsize = Math.max(9, Math.min(W, H) * 0.030);
+  const pad = 6;
+  const topH = Math.floor((H - pad * 3) / 2);
+  const botH = H - pad * 3 - topH;
+
+  const tMax = Math.max(currentExample.state.t, HIST_WINDOW_S);
+  const tMin = tMax - HIST_WINDOW_S;
+  const cfg = currentExample.plotConfig;
+
+  // Top plot
+  let dMin = cfg.top.yMinFloor, dMax = cfg.top.yMaxCeil;
+  const winHist = hist.filter(h => h.t >= tMin);
+  const showBand = cfg.top.bandFromMode && cfg.top.bandFromMode();
+  for (const h of winHist) {
+    for (const yk of cfg.top.yKeys) {
+      const v = h[yk.key];
+      if (Number.isFinite(v)) { if (v < dMin) dMin = v; if (v > dMax) dMax = v; }
+    }
+    if (showBand && Number.isFinite(h.deadHi) && Number.isFinite(h.deadLo)) {
+      if (h.deadLo < dMin) dMin = h.deadLo;
+      if (h.deadHi > dMax) dMax = h.deadHi;
+    }
+  }
+  const yLo = Math.floor(dMin), yHi = Math.ceil(dMax);
+
+  const px = pad, py = pad, pw = W - pad * 2;
+  drawPlotGrid(pctx, px, py, pw, topH, yLo, yHi, tMin, tMax, cfg.top.title, fsize);
+  const legendTop = cfg.top.yKeys.map(k => ({ color:k.color, label:k.label }));
+  if (showBand) legendTop.push({ color:"#ef5350", label:"deadband" });
+  drawLegend(pctx, px + pw - 6, py + 4, fsize, legendTop);
+  if (showBand) {
+    const hi = winHist.map(h => ({ t: h.t, y: h.deadHi }));
+    const lo = winHist.map(h => ({ t: h.t, y: h.deadLo }));
+    plotLine(pctx, px, py, pw, topH, yLo, yHi, tMin, tMax, hi, "#ef5350", 1, [4,4]);
+    plotLine(pctx, px, py, pw, topH, yLo, yHi, tMin, tMax, lo, "#ef5350", 1, [4,4]);
+  }
+  for (const yk of cfg.top.yKeys) {
+    const pts = winHist.map(h => ({ t: h.t, y: h[yk.key] }));
+    plotLine(pctx, px, py, pw, topH, yLo, yHi, tMin, tMax, pts, yk.color, yk.width || 1.5, yk.dash);
+  }
+
+  // Bottom plot — symmetric ±step
+  const py2 = py + topH + pad;
+  let fAbs = 0;
+  for (const h of winHist) {
+    for (const yk of cfg.bottom.yKeys) {
+      const v = h[yk.key];
+      if (Number.isFinite(v)) {
+        const a = Math.abs(v);
+        if (a > fAbs) fAbs = a;
+      }
+    }
+  }
+  const STEP = 50;
+  const fHi = Math.max(STEP, Math.ceil(fAbs / STEP) * STEP);
+  const fLo = -fHi;
+  drawPlotGrid(pctx, px, py2, pw, botH, fLo, fHi, tMin, tMax, cfg.bottom.title, fsize);
+  drawLegend(pctx, px + pw - 6, py2 + 4, fsize,
+    cfg.bottom.yKeys.map(k => ({ color:k.color, label:k.label })));
+  for (const yk of cfg.bottom.yKeys) {
+    const pts = winHist.map(h => ({ t: h.t, y: h[yk.key] }));
+    plotLine(pctx, px, py2, pw, botH, fLo, fHi, tMin, tMax, pts, yk.color, yk.width || 1.5, yk.dash);
+  }
+}
+
+// ============================================================================
+// Boot
+// ============================================================================
+
+switchExample(carEx);
+requestAnimationFrame(step);
+</script>
+</body>
+</html>

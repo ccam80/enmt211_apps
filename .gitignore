@@ -1,0 +1,4 @@
+*/.omc/
+.omc/*
+.claude/
+/.claude/*

@@ -1,0 +1,1257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PID 3-Cart Spring-Damper Train</title>
+<style>
+  :root {
+    --bg: #111418;
+    --panel: #1b1f25;
+    --panel2: #232932;
+    --ink: #e6e9ef;
+    --muted: #8a93a3;
+    --accent: #4ea1ff;
+    --good: #66bb6a;
+    --grid: #2a313c;
+    --cP: #ef5350;  /* P - red */
+    --cI: #f6c945;  /* I - yellow */
+    --cD: #26c6da;  /* D - cyan */
+    --cU: #ffffff;  /* total - white */
+    --cW: #f6a623;  /* wind - orange */
+    --cRef: #66bb6a; /* ref - green */
+    --cX1: #4ea1ff;  /* cart 1 - blue */
+    --cX2: #ab47bc;  /* cart 2 - purple */
+    --cX3: #ff7043;  /* cart 3 - orange-red (controlled output) */
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    font: 13px/1.35 ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial;
+  }
+  /* iOS Safari refuses to scroll an iframe document itself, but it WILL scroll
+     an explicitly-sized overflow container inside the iframe. Lock body to the
+     iframe box, then let .scroll-host be the actual scroll surface. */
+  .scroll-host {
+    position: absolute; inset: 0;
+    overflow-y: auto; overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg);
+  }
+  .app {
+    display: flex; flex-direction: column;
+    gap: 10px; padding: 10px;
+    min-height: 100vh;     /* fallback: pre-Safari 15.4 / pre-Chrome 108 */
+    min-height: 100dvh;    /* dynamic viewport — accounts for mobile chrome */
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 10px; background: var(--panel); border-radius: 8px;
+  }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
+  header .sp { flex: 1; }
+  header button {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid #2e3642; border-radius: 6px;
+    padding: 5px 10px; cursor: pointer; font-size: 12px;
+  }
+  header button:hover { border-color: var(--accent); }
+
+  .stage {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    grid-template-rows: minmax(340px, 58dvh) auto auto;
+    gap: 10px;
+  }
+  .cv-box, .plot-box {
+    background: var(--panel); border-radius: 8px; padding: 8px;
+    display: flex;
+  }
+  .cv-box canvas, .plot-box canvas {
+    width: 100%; height: 100%; display: block; border-radius: 6px;
+    background: #0d1013;
+  }
+  .cv-box canvas { touch-action: none; cursor: grab; }
+  .cv-box canvas.grabbing { cursor: grabbing; }
+  .cv-box { grid-column: 1; grid-row: 1; }
+  .plot-box { grid-column: 2; grid-row: 1; }
+
+  .ref-row {
+    grid-column: 1; grid-row: 2;
+    background: var(--panel); border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .readout {
+    grid-column: 2; grid-row: 2 / span 2;
+    background: var(--panel); border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  .readout h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
+    margin: 0 0 4px 0; color: var(--muted); font-weight: 600;
+  }
+  .readout .ln { display: flex; justify-content: space-between; color: var(--muted); }
+  .readout .ln b { color: var(--ink); font-weight: 600; }
+  .readout .swatch {
+    display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+    margin-right: 6px; vertical-align: middle;
+  }
+
+  .sub-panels {
+    grid-column: 1; grid-row: 3;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .box {
+    background: var(--panel); border-radius: 8px; padding: 10px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .box h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
+    margin: 0; color: var(--muted); font-weight: 600;
+  }
+  .box h3 {
+    font-size: 11px; margin: 8px 0 0 0; color: var(--muted); font-weight: 500;
+    border-top: 1px solid #2a313c; padding-top: 6px;
+  }
+
+  .tabs {
+    display: flex; gap: 2px;
+    border-bottom: 1px solid #2a313c;
+    margin: -2px 0 2px 0;
+  }
+  .tabs button {
+    background: transparent; color: var(--muted);
+    border: 0; border-bottom: 2px solid transparent;
+    padding: 5px 10px; cursor: pointer; font: inherit;
+    text-transform: uppercase; letter-spacing: 0.8px; font-size: 11px; font-weight: 600;
+  }
+  .tabs button:hover { color: var(--ink); }
+  .tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
+  .tab-body[hidden] { display: none; }
+
+  .row {
+    display: grid;
+    grid-template-columns: 48px 1fr 72px;
+    align-items: center; gap: 8px;
+  }
+  .row label { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .row label[title] { cursor: help; border-bottom: 1px dotted var(--muted); }
+  .row input[type=range] { width: 100%; accent-color: var(--accent); }
+  .row input[type=number] {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid #2e3642; border-radius: 4px;
+    padding: 3px 5px; width: 100%;
+    font: inherit; font-variant-numeric: tabular-nums;
+  }
+  .row input[type=number]:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+  .pair { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .pair button {
+    background: var(--panel2); color: var(--ink);
+    border: 1px solid #2e3642; border-radius: 4px;
+    padding: 3px 8px; cursor: pointer; font-size: 12px;
+  }
+  .pair button:hover { border-color: var(--accent); }
+
+  footer { text-align: center; color: var(--muted); font-size: 11px; padding: 4px; }
+</style>
+</head>
+<body>
+<div class="scroll-host">
+<div class="app">
+  <header>
+    <h1>PID 3-Cart Spring-Damper Train — drive cart 3 via cart 1</h1>
+    <span class="sp"></span>
+    <button id="btn-reset">Reset state</button>
+    <button id="btn-rest">Reset to rest</button>
+    <button id="btn-pause">Pause</button>
+  </header>
+
+  <section class="stage">
+    <div class="cv-box"><canvas id="cv"></canvas></div>
+    <div class="plot-box"><canvas id="plot"></canvas></div>
+
+    <div class="ref-row" id="ref-row">
+      <h2 style="margin:0;font-size:11px;text-transform:uppercase;letter-spacing:0.8px;color:var(--muted);font-weight:600;">Reference (target for cart&nbsp;3)</h2>
+    </div>
+
+    <div class="readout" id="readout">
+      <h2>State</h2>
+      <div class="ln"><span><i class="swatch" style="background:var(--cX1)"></i>x₁</span><b><span id="r-x1">0.00</span> m</b></div>
+      <div class="ln"><span><i class="swatch" style="background:var(--cX2)"></i>x₂</span><b><span id="r-x2">0.00</span> m</b></div>
+      <div class="ln"><span><i class="swatch" style="background:var(--cX3)"></i>x₃</span><b><span id="r-x3">0.00</span> m</b></div>
+      <div class="ln"><span>v₃</span><b><span id="r-v3">0.00</span> m/s</b></div>
+      <div class="ln"><span>err = ref − x₃</span><b><span id="r-e">0.00</span> m</b></div>
+      <div class="ln"><span>∫err</span><b><span id="r-i">0.00</span></b></div>
+      <div class="ln"><span>sim t</span><b><span id="r-t">0.00</span> s</b></div>
+      <div class="ln"><span>fps</span><b><span id="r-fps">--</span></b></div>
+      <h2>Forces on cart 1 (N)</h2>
+      <div class="ln"><span><i class="swatch" style="background:var(--cP)"></i>P</span><b id="r-up">0.00</b></div>
+      <div class="ln"><span><i class="swatch" style="background:var(--cI)"></i>I</span><b id="r-ui">0.00</b></div>
+      <div class="ln"><span><i class="swatch" style="background:var(--cD)"></i>D</span><b id="r-ud">0.00</b></div>
+      <div class="ln"><span><i class="swatch" style="background:var(--cU)"></i>u total</span><b id="r-u">0.00</b></div>
+      <div class="ln"><span><i class="swatch" style="background:var(--cW)"></i>wind (each cart)</span><b id="r-w">0.00</b></div>
+    </div>
+
+    <div class="sub-panels">
+      <div class="box" id="box-pid">
+        <div class="tabs">
+          <button type="button" class="tab active" data-tab="pid">PID</button>
+          <button type="button" class="tab" data-tab="bangbang">Bang-bang</button>
+        </div>
+        <div class="tab-body" data-body="pid" id="tab-pid"></div>
+        <div class="tab-body" data-body="bangbang" id="tab-bangbang" hidden></div>
+      </div>
+      <div class="box" id="box-cart-env">
+        <div class="tabs" id="cart-tabs">
+          <button type="button" class="tab active" data-cart-tab="0">Cart 1</button>
+          <button type="button" class="tab"        data-cart-tab="1">Cart 2</button>
+          <button type="button" class="tab"        data-cart-tab="2">Cart 3</button>
+        </div>
+        <div class="tab-body" data-cart-body="0" id="tab-cart-0"></div>
+        <div class="tab-body" data-cart-body="1" id="tab-cart-1" hidden></div>
+        <div class="tab-body" data-cart-body="2" id="tab-cart-2" hidden></div>
+        <h3>Environment</h3>
+        <div id="env-section"></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Three identical masses linked by springs (natural length 1 m) and dampers; equilibrium at x = 1, 2, 3 m. Control u is applied to cart 1 only; error is measured on cart 3. RK4 at 240 Hz; bumper spring at the wall against cart 1.
+  </footer>
+</div>
+</div>
+
+<script>
+"use strict";
+
+// ---------- Parameter registry ----------------------------------------------
+const P = {
+  ref:    { label: "ref",  min: 0.3,  max: 4.5, step: 0.01, value: 3.0 },
+  kp:     { label: "P",    min: 0,    max: 800, step: 0.1,  value: 0   },
+  ki:     { label: "I",    min: 0,    max: 800, step: 0.1,  value: 0   },
+  kd:     { label: "D",    min: 0,    max: 200, step: 0.05, value: 0   },
+  iClamp: { label: "Imax", min: 0,    max: 800, step: 1,    value: 800,
+            tip: "Anti-windup clamp on |uI| (N)." },
+  uMax:   { label: "uMax", min: 0,    max: 2000,step: 1,    value: 1500,
+            tip: "Actuator saturation on u (N) applied to cart 1." },
+  dead:   { label: "dead", min: 0,    max: 2,   step: 0.01, value: 0.10,
+            tip: "Bang-bang deadband width on cart-3 error (m)." },
+  effort: { label: "eff",  min: 0,    max: 2000,step: 1,    value: 400,
+            tip: "Bang-bang effort magnitude on cart 1 (N)." },
+  wind:   { label: "wind", min: -200, max: 200, step: 0.1,  value: 0,
+            tip: "Horizontal wind force applied equally to all three carts (N)." },
+  // Per-cart mass
+  mass1:  { label: "m",    min: 0.1,  max: 1000,step: 0.01, value: 1.0, log: true,
+            tip: "Mass of cart 1 (kg)." },
+  mass2:  { label: "m",    min: 0.1,  max: 1000,step: 0.01, value: 1.0, log: true,
+            tip: "Mass of cart 2 (kg)." },
+  mass3:  { label: "m",    min: 0.1,  max: 1000,step: 0.01, value: 1.0, log: true,
+            tip: "Mass of cart 3 (kg)." },
+  // Per-link stiffness; link i is the spring on the LEFT of cart i (wall↔1, 1↔2, 2↔3)
+  k1:     { label: "k",    min: 0,    max: 200, step: 0.1,  value: 20,
+            tip: "Stiffness of the spring between the wall and cart 1 (N/m). Natural length 1 m." },
+  k2:     { label: "k",    min: 0,    max: 200, step: 0.1,  value: 20,
+            tip: "Stiffness of the spring between cart 1 and cart 2 (N/m). Natural length 1 m." },
+  k3:     { label: "k",    min: 0,    max: 200, step: 0.1,  value: 20,
+            tip: "Stiffness of the spring between cart 2 and cart 3 (N/m). Natural length 1 m." },
+  // Per-link damping
+  c1:     { label: "c",    min: 0,    max: 20,  step: 0.01, value: 0.5,
+            tip: "Damping coefficient between the wall and cart 1; acts on cart 1's velocity." },
+  c2:     { label: "c",    min: 0,    max: 20,  step: 0.01, value: 0.5,
+            tip: "Damping coefficient between cart 1 and cart 2; acts on relative velocity v₂−v₁." },
+  c3:     { label: "c",    min: 0,    max: 20,  step: 0.01, value: 0.5,
+            tip: "Damping coefficient between cart 2 and cart 3; acts on relative velocity v₃−v₂." },
+};
+const CART_PARAMS = [
+  { mass: "mass1", k: "k1", c: "c1", linkDesc: "wall ↔ cart 1" },
+  { mass: "mass2", k: "k2", c: "c2", linkDesc: "cart 1 ↔ cart 2" },
+  { mass: "mass3", k: "k3", c: "c3", linkDesc: "cart 2 ↔ cart 3" },
+];
+
+// Train constants
+const N_CARTS = 3;
+const EQ = [1.0, 2.0, 3.0];          // equilibrium positions of the three carts
+const L_LINK = 1.0;                  // natural length of every spring
+const X_BUMP = 0.35;                 // bumper engages when cart 1 < X_BUMP
+const K_BUMP = 5000;                 // bumper stiffness (N/m)
+const CART_HALF_W_M = 0.18;          // cart half-width in meters
+
+function mkRow(parent, key) {
+  const cfg = P[key];
+  const row = document.createElement("div");
+  row.className = "row";
+  const lab = document.createElement("label");
+  lab.textContent = cfg.label;
+  if (cfg.tip) lab.title = cfg.tip;
+  const rng = document.createElement("input");
+  rng.type = "range";
+  const num = document.createElement("input");
+  num.type = "number";
+  num.min = cfg.min; num.max = cfg.max; num.step = cfg.step;
+  num.value = cfg.value;
+
+  const logMode = !!cfg.log && cfg.min > 0 && cfg.max > cfg.min;
+  const lmin = logMode ? Math.log(cfg.min) : 0;
+  const lmax = logMode ? Math.log(cfg.max) : 0;
+  const sliderFromValue = (v) => {
+    if (logMode) {
+      const clamped = Math.max(cfg.min, Math.min(cfg.max, v));
+      return (Math.log(clamped) - lmin) / (lmax - lmin);
+    }
+    return Math.max(cfg.min, Math.min(cfg.max, v));
+  };
+  const valueFromSlider = (s) => logMode ? Math.exp(lmin + s * (lmax - lmin)) : s;
+
+  if (logMode) { rng.min = 0; rng.max = 1; rng.step = 0.0005; }
+  else        { rng.min = cfg.min; rng.max = cfg.max; rng.step = cfg.step; }
+  rng.value = sliderFromValue(cfg.value);
+
+  const commit = (raw, src) => {
+    let v;
+    if (src === "rng") v = valueFromSlider(Number(raw));
+    else               v = Number(raw);
+    if (!Number.isFinite(v)) return;
+    cfg.value = v;
+    if (src !== "rng") rng.value = sliderFromValue(v);
+    if (src !== "num") num.value = logMode ? Number(v.toPrecision(4)) : v;
+  };
+  rng.addEventListener("input", () => commit(rng.value, "rng"));
+  num.addEventListener("input", () => commit(num.value, "num"));
+  row.append(lab, rng, num);
+  parent.appendChild(row);
+  cfg._row = row;
+  cfg._sliderFromValue = sliderFromValue;
+}
+
+function syncSlider(key) {
+  const cfg = P[key];
+  if (!cfg || !cfg._row) return;
+  const rng = cfg._row.querySelector('input[type=range]');
+  const num = cfg._row.querySelector('input[type=number]');
+  if (rng) rng.value = cfg._sliderFromValue ? cfg._sliderFromValue(cfg.value) : cfg.value;
+  if (num) num.value = cfg.value;
+}
+
+const refBox = document.getElementById("ref-row");
+const pidBox = document.getElementById("box-pid");
+const ceBox  = document.getElementById("box-cart-env");
+
+mkRow(refBox, "ref");
+{
+  const qr = document.createElement("div");
+  qr.className = "pair";
+  for (const v of [1, 2, 3, 3.5, 4]) {
+    const b = document.createElement("button");
+    b.textContent = v.toFixed(1);
+    b.addEventListener("click", () => {
+      P.ref.value = v;
+      syncSlider("ref");
+    });
+    qr.appendChild(b);
+  }
+  refBox.appendChild(qr);
+}
+
+const tabPid = document.getElementById("tab-pid");
+const tabBB  = document.getElementById("tab-bangbang");
+
+mkRow(tabPid, "kp");
+mkRow(tabPid, "ki");
+mkRow(tabPid, "kd");
+mkRow(tabPid, "iClamp");
+mkRow(tabPid, "uMax");
+{
+  const row = document.createElement("div");
+  row.className = "pair";
+  const b1 = document.createElement("button");
+  b1.textContent = "Reset ∫";
+  b1.addEventListener("click", () => { state.I = 0; });
+  const b2 = document.createElement("button");
+  b2.textContent = "Zero I,D";
+  b2.addEventListener("click", () => {
+    P.ki.value = 0; P.kd.value = 0;
+    for (const k of ["ki","kd"]) syncSlider(k);
+  });
+  row.append(b1, b2);
+  tabPid.appendChild(row);
+}
+
+mkRow(tabBB, "dead");
+mkRow(tabBB, "effort");
+{
+  const note = document.createElement("div");
+  note.style.cssText = "color:var(--muted);font-size:11px;line-height:1.4;";
+  note.innerHTML =
+    "Output is ±eff applied to cart 1, switched on hysteresis around the cart-3 error. " +
+    "Sign flips with <b>ref vs cart-3 equilibrium</b> (eq₃ = " + EQ[2].toFixed(2) + " m).";
+  tabBB.appendChild(note);
+}
+
+// Per-cart tabs: each contains that cart's mass and the spring/damper on its left.
+for (let i = 0; i < N_CARTS; i++) {
+  const body = document.getElementById("tab-cart-" + i);
+  const cp = CART_PARAMS[i];
+  mkRow(body, cp.mass);
+  const lh = document.createElement("h3");
+  lh.textContent = "Spring/damper · " + cp.linkDesc;
+  lh.style.marginTop = "2px";
+  body.appendChild(lh);
+  mkRow(body, cp.k);
+  mkRow(body, cp.c);
+}
+
+const envBox = document.getElementById("env-section");
+mkRow(envBox, "wind");
+{
+  const row = document.createElement("div");
+  row.className = "pair";
+  for (const v of [-50, 0, 50]) {
+    const b = document.createElement("button");
+    b.textContent = v === 0 ? "calm" : (v > 0 ? "→ " + v : "← " + Math.abs(v));
+    b.addEventListener("click", () => {
+      P.wind.value = v;
+      syncSlider("wind");
+    });
+    row.appendChild(b);
+  }
+  envBox.appendChild(row);
+}
+
+// Cart-tab switching
+document.querySelectorAll("#cart-tabs button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const idx = btn.dataset.cartTab;
+    document.querySelectorAll("#cart-tabs button").forEach(b =>
+      b.classList.toggle("active", b === btn));
+    document.querySelectorAll("[data-cart-body]").forEach(body => {
+      body.hidden = (body.dataset.cartBody !== idx);
+    });
+  });
+});
+
+// ---------- Simulation state ------------------------------------------------
+const state = {
+  x: EQ.slice(), v: [0, 0, 0],
+  I: 0, ePrev: 0, t: 0, paused: false,
+  dragging: -1,        // index of cart being dragged, or -1
+  dragOffsetM: 0,
+  mode: "pid",
+  bbOn: false,
+};
+// Last-rendered geometry per cart (for hit-testing)
+const viewGeom = { W: 1, H: 1, carts: [{}, {}, {}] };
+let lastE = 0, lastUP = 0, lastUI = 0, lastUD = 0, lastU = 0;
+
+function resetState() {
+  state.x = EQ.slice();
+  state.v = [0, 0, 0];
+  state.I = 0; state.ePrev = 0; state.t = 0;
+  lastE = lastUP = lastUI = lastUD = lastU = 0;
+  hist.length = 0;
+  lastHistT = -Infinity;
+}
+document.getElementById("btn-reset").addEventListener("click", resetState);
+document.getElementById("btn-rest").addEventListener("click", () => {
+  resetState();
+  P.ref.value = EQ[2];
+  syncSlider("ref");
+});
+const btnPause = document.getElementById("btn-pause");
+btnPause.addEventListener("click", () => {
+  state.paused = !state.paused;
+  btnPause.textContent = state.paused ? "Resume" : "Pause";
+});
+
+document.querySelectorAll("#box-pid .tabs button").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const tab = btn.dataset.tab;
+    document.querySelectorAll("#box-pid .tabs button").forEach(b => b.classList.toggle("active", b === btn));
+    document.querySelectorAll("#box-pid .tab-body").forEach(body => {
+      body.hidden = (body.dataset.body !== tab);
+    });
+    state.mode = tab;
+    state.I = 0;
+    state.ePrev = 0;
+    state.bbOn = false;
+  });
+});
+
+// ---------- Physics ---------------------------------------------------------
+// State vector y = [x1, v1, x2, v2, x3, v3]
+function rhs(y, u) {
+  const m1 = Math.max(1e-6, P.mass1.value);
+  const m2 = Math.max(1e-6, P.mass2.value);
+  const m3 = Math.max(1e-6, P.mass3.value);
+  const k1 = P.k1.value, k2 = P.k2.value, k3 = P.k3.value;
+  const c1 = P.c1.value, c2 = P.c2.value, c3 = P.c3.value;
+  const w = P.wind.value;
+  const x1 = y[0], v1 = y[1], x2 = y[2], v2 = y[3], x3 = y[4], v3 = y[5];
+
+  // Wall ↔ cart 1 spring/damper (link 1)
+  let F1 = -k1 * (x1 - L_LINK) - c1 * v1;
+  if (x1 < X_BUMP) F1 += K_BUMP * (X_BUMP - x1);
+
+  // Cart 1 ↔ cart 2 (link 2)
+  const s12 = (x2 - x1) - L_LINK;
+  const d12 = (v2 - v1);
+  const Flink12 = k2 * s12 + c2 * d12;
+  F1 += Flink12;
+  let F2 = -Flink12;
+
+  // Cart 2 ↔ cart 3 (link 3)
+  const s23 = (x3 - x2) - L_LINK;
+  const d23 = (v3 - v2);
+  const Flink23 = k3 * s23 + c3 * d23;
+  F2 += Flink23;
+  let F3 = -Flink23;
+
+  // Cart-cart contact: stiff penalty spring + light damping when bodies overlap.
+  const minGap = 2 * CART_HALF_W_M;
+  const pen12 = minGap - (x2 - x1);
+  if (pen12 > 0) {
+    const Fc = K_BUMP * pen12 + Math.max(0, -d12) * K_BUMP * 0.01;
+    F1 -= Fc;
+    F2 += Fc;
+  }
+  const pen23 = minGap - (x3 - x2);
+  if (pen23 > 0) {
+    const Fc = K_BUMP * pen23 + Math.max(0, -d23) * K_BUMP * 0.01;
+    F2 -= Fc;
+    F3 += Fc;
+  }
+
+  // Wind on every cart
+  F1 += w; F2 += w; F3 += w;
+
+  // Control input acts on cart 1 only
+  F1 += u;
+
+  return [v1, F1 / m1, v2, F2 / m2, v3, F3 / m3];
+}
+
+function rk4Step(dt, u) {
+  const y = [state.x[0], state.v[0], state.x[1], state.v[1], state.x[2], state.v[2]];
+  const k1 = rhs(y, u);
+  const y2 = y.map((yi, i) => yi + 0.5 * dt * k1[i]);
+  const k2 = rhs(y2, u);
+  const y3 = y.map((yi, i) => yi + 0.5 * dt * k2[i]);
+  const k3 = rhs(y3, u);
+  const y4 = y.map((yi, i) => yi + dt * k3[i]);
+  const k4 = rhs(y4, u);
+  const out = y.map((yi, i) => yi + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+
+  // Hard wall safety net for cart 1
+  if (out[0] < CART_HALF_W_M) {
+    out[0] = CART_HALF_W_M;
+    if (out[1] < 0) out[1] = 0;
+  }
+  state.x[0] = out[0]; state.v[0] = out[1];
+  state.x[1] = out[2]; state.v[1] = out[3];
+  state.x[2] = out[4]; state.v[2] = out[5];
+
+  // If a cart is being dragged, override its updated state with the held values.
+  if (state.dragging >= 0) {
+    state.v[state.dragging] = 0;
+    // x is set externally on pointermove
+  }
+}
+
+function controller(dt) {
+  // Error and derivative are measured on cart 3 (the controlled output).
+  const e = P.ref.value - state.x[2];
+  if (state.mode === "bangbang") {
+    const dir = (P.ref.value > EQ[2]) ? 1 : (P.ref.value < EQ[2] ? -1 : 0);
+    const half = P.dead.value / 2;
+    if (dir > 0) {
+      if (e >  half) state.bbOn = true;
+      else if (e < -half) state.bbOn = false;
+    } else if (dir < 0) {
+      if (e < -half) state.bbOn = true;
+      else if (e >  half) state.bbOn = false;
+    } else {
+      state.bbOn = false;
+    }
+    const uRaw = state.bbOn ? dir * P.effort.value : 0;
+    const uCap = P.uMax.value;
+    const u = Math.max(-uCap, Math.min(uCap, uRaw));
+    state.ePrev = e;
+    return { u, uP: 0, uI: 0, uD: 0, e };
+  }
+  // PID — integrate the I effort directly so changing ki doesn't retroactively rescale history.
+  const Inew = state.I + P.ki.value * 0.5 * (e + state.ePrev) * dt;
+  const Imax = P.iClamp.value;
+  state.I = Math.max(-Imax, Math.min(Imax, Inew));
+  const dedt = -state.v[2];   // derivative-on-measurement of cart 3
+  const uP = P.kp.value * e;
+  const uI = state.I;
+  const uD = P.kd.value * dedt;
+  const uRaw = uP + uI + uD;
+  const uCap = P.uMax.value;
+  const u = Math.max(-uCap, Math.min(uCap, uRaw));
+  state.ePrev = e;
+  return { u, uP, uI, uD, e };
+}
+
+// ---------- Plot history ----------------------------------------------------
+const HIST_WINDOW_S = 10;
+const HIST_RATE_HZ = 60;
+const HIST_MAX = HIST_WINDOW_S * HIST_RATE_HZ;
+const hist = [];
+let lastHistT = -Infinity;
+
+function pushHist() {
+  const dt = state.t - lastHistT;
+  if (dt < 1 / HIST_RATE_HZ) return;
+  lastHistT = state.t;
+  const half = P.dead.value / 2;
+  hist.push({
+    t: state.t, ref: P.ref.value,
+    x1: state.x[0], x2: state.x[1], x3: state.x[2],
+    uP: lastUP, uI: lastUI, uD: lastUD, u: lastU, wind: P.wind.value,
+    deadHi: P.ref.value + half, deadLo: P.ref.value - half,
+  });
+  while (hist.length > HIST_MAX) hist.shift();
+}
+
+// ---------- Fixed-timestep loop --------------------------------------------
+const PHYS_HZ = 240;
+const PHYS_DT = 1 / PHYS_HZ;
+let accumulator = 0;
+let lastMs = performance.now();
+let fpsFrames = 0, fpsT = performance.now(), fpsVal = 0;
+
+function step(nowMs) {
+  const dt = Math.min(0.1, (nowMs - lastMs) / 1000);
+  lastMs = nowMs;
+  if (!state.paused) {
+    accumulator += dt;
+    if (accumulator > 0.25) accumulator = 0.25;
+    while (accumulator >= PHYS_DT) {
+      const c = controller(PHYS_DT);
+      lastUP = c.uP; lastUI = c.uI; lastUD = c.uD; lastU = c.u; lastE = c.e;
+      rk4Step(PHYS_DT, c.u);
+      state.t += PHYS_DT;
+      accumulator -= PHYS_DT;
+    }
+    pushHist();
+  }
+  render();
+  renderPlots();
+  updateReadout();
+  fpsFrames++;
+  if (nowMs - fpsT >= 500) {
+    fpsVal = Math.round((fpsFrames * 1000) / (nowMs - fpsT));
+    fpsFrames = 0; fpsT = nowMs;
+  }
+  requestAnimationFrame(step);
+}
+
+// ---------- Readout ---------------------------------------------------------
+const R = {
+  x1: document.getElementById("r-x1"),
+  x2: document.getElementById("r-x2"),
+  x3: document.getElementById("r-x3"),
+  v3: document.getElementById("r-v3"),
+  e:  document.getElementById("r-e"),
+  i:  document.getElementById("r-i"),
+  t:  document.getElementById("r-t"),
+  fps:document.getElementById("r-fps"),
+  uP: document.getElementById("r-up"),
+  uI: document.getElementById("r-ui"),
+  uD: document.getElementById("r-ud"),
+  u:  document.getElementById("r-u"),
+  w:  document.getElementById("r-w"),
+};
+function updateReadout() {
+  R.x1.textContent = state.x[0].toFixed(3);
+  R.x2.textContent = state.x[1].toFixed(3);
+  R.x3.textContent = state.x[2].toFixed(3);
+  R.v3.textContent = state.v[2].toFixed(3);
+  R.e.textContent  = lastE.toFixed(3);
+  R.i.textContent  = state.I.toFixed(3);
+  R.t.textContent  = state.t.toFixed(2);
+  R.fps.textContent = fpsVal || "--";
+  R.uP.textContent = lastUP.toFixed(2);
+  R.uI.textContent = lastUI.toFixed(2);
+  R.uD.textContent = lastUD.toFixed(2);
+  R.u.textContent  = lastU.toFixed(2);
+  R.w.textContent  = P.wind.value.toFixed(2);
+}
+
+// ---------- Canvas sizing ---------------------------------------------------
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const plot = document.getElementById("plot");
+const pctx = plot.getContext("2d");
+
+function fitCanvas(c, cx) {
+  const dpr = window.devicePixelRatio || 1;
+  const r = c.getBoundingClientRect();
+  c.width = Math.max(1, Math.round(r.width * dpr));
+  c.height = Math.max(1, Math.round(r.height * dpr));
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { w: r.width, h: r.height };
+}
+const ro = new ResizeObserver(() => {});
+ro.observe(cv); ro.observe(plot);
+
+// ---------- Rendering: animation -------------------------------------------
+const WORLD_X_MIN = 0;
+const WORLD_X_MAX = 5;
+const WALL_MARGIN_PX = 18;
+
+function world2screen(xm, W) {
+  const usable = W - WALL_MARGIN_PX * 2;
+  const scale = usable / (WORLD_X_MAX - WORLD_X_MIN);
+  return WALL_MARGIN_PX + (xm - WORLD_X_MIN) * scale;
+}
+function scalePxPerM(W) {
+  const usable = W - WALL_MARGIN_PX * 2;
+  return usable / (WORLD_X_MAX - WORLD_X_MIN);
+}
+
+function drawSpring(x0, y, x1, coils, amp) {
+  ctx.beginPath();
+  ctx.moveTo(x0, y);
+  const len = x1 - x0;
+  if (Math.abs(len) < 2) { ctx.lineTo(x1, y); ctx.stroke(); return; }
+  const segs = coils * 2;
+  const lead = Math.min(10, Math.abs(len) * 0.15) * Math.sign(len);
+  const coilStart = x0 + lead;
+  const coilEnd = x1 - lead;
+  ctx.lineTo(coilStart, y);
+  for (let i = 1; i < segs; i++) {
+    const t = i / segs;
+    const cx = coilStart + (coilEnd - coilStart) * t;
+    const cy = y + (i % 2 === 0 ? -amp : amp);
+    ctx.lineTo(cx, cy);
+  }
+  ctx.lineTo(coilEnd, y);
+  ctx.lineTo(x1, y);
+  ctx.stroke();
+}
+
+// Dashpot/damper: cylinder on the left, piston rod sliding in from the right.
+function drawDamper(x0, y, x1, h) {
+  const len = x1 - x0;
+  if (Math.abs(len) < 4) return;
+  const dir = Math.sign(len);
+  const cylLen = Math.min(Math.abs(len) * 0.45, 22);
+  const cylX0 = x0;
+  const cylX1 = x0 + dir * cylLen;
+  // cylinder body (open end on the rod side)
+  ctx.beginPath();
+  ctx.moveTo(cylX1, y - h);
+  ctx.lineTo(cylX0, y - h);
+  ctx.lineTo(cylX0, y + h);
+  ctx.lineTo(cylX1, y + h);
+  ctx.stroke();
+  // piston disc inside cylinder (~70% along the cylinder from closed end)
+  const pistonX = cylX0 + dir * cylLen * 0.55;
+  ctx.beginPath();
+  ctx.moveTo(pistonX, y - h * 0.85);
+  ctx.lineTo(pistonX, y + h * 0.85);
+  ctx.stroke();
+  // rod from piston out to x1
+  ctx.beginPath();
+  ctx.moveTo(pistonX, y);
+  ctx.lineTo(x1, y);
+  ctx.stroke();
+}
+
+function drawArrow(x0, y, dx, color, label, fsize) {
+  if (Math.abs(dx) < 0.5) return;
+  ctx.strokeStyle = color; ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(1.5, fsize * 0.14);
+  ctx.beginPath();
+  ctx.moveTo(x0, y); ctx.lineTo(x0 + dx, y);
+  ctx.stroke();
+  const head = Math.max(6, fsize * 0.7) * Math.sign(dx);
+  const wing = Math.max(3, fsize * 0.35);
+  ctx.beginPath();
+  ctx.moveTo(x0 + dx, y);
+  ctx.lineTo(x0 + dx - head, y - wing);
+  ctx.lineTo(x0 + dx - head, y + wing);
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = `${fsize}px ui-sans-serif`;
+  ctx.textAlign = dx > 0 ? "left" : "right";
+  ctx.textBaseline = "middle";
+  ctx.fillText(label, x0 + dx + Math.sign(dx) * 6, y);
+}
+
+const CART_FILLS   = ["#2b3340", "#33293f", "#3a2a25"];
+const CART_STROKES = ["#6a7384", "#9a78b0", "#c47a5e"];
+const CART_WIN     = ["#4ea1ff", "#ab47bc", "#ff7043"];
+
+function render() {
+  const sz = fitCanvas(cv, ctx);
+  const W = sz.w, H = sz.h;
+
+  const fbase = Math.max(10, Math.min(W, H) * 0.028);
+  const fsmall = Math.max(9, Math.min(W, H) * 0.022);
+
+  ctx.fillStyle = "#0d1013";
+  ctx.fillRect(0, 0, W, H);
+
+  const groundY = Math.round(H * 0.72);
+  ctx.strokeStyle = "#2a313c";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, groundY + 22); ctx.lineTo(W, groundY + 22);
+  ctx.stroke();
+  ctx.fillStyle = "#1a1f27";
+  ctx.fillRect(0, groundY + 22, W, H - (groundY + 22));
+
+  const scale = scalePxPerM(W);
+  const wallScreenX = world2screen(0, W);
+
+  // x-axis ticks
+  ctx.strokeStyle = "#1e252f";
+  ctx.fillStyle = "#55606f";
+  ctx.font = `${fsmall}px ui-sans-serif`;
+  ctx.textAlign = "center";
+  for (let xm = 0; xm <= WORLD_X_MAX; xm++) {
+    const sx = world2screen(xm, W);
+    ctx.beginPath();
+    ctx.moveTo(sx, groundY + 22);
+    ctx.lineTo(sx, groundY + 28);
+    ctx.stroke();
+    ctx.fillText(xm + " m", sx, groundY + 28 + fsmall + 2);
+  }
+
+  // wall
+  const wallTop = groundY - Math.max(80, H * 0.25);
+  const wallH = (groundY + 22) - wallTop;
+  ctx.fillStyle = "#2a313c";
+  ctx.fillRect(wallScreenX - 16, wallTop, 16, wallH);
+  ctx.strokeStyle = "#3a4453";
+  const hatchN = Math.max(4, Math.round(wallH / 12));
+  for (let i = 0; i < hatchN; i++) {
+    const yy = wallTop + (i * wallH) / hatchN;
+    ctx.beginPath();
+    ctx.moveTo(wallScreenX - 16, yy);
+    ctx.lineTo(wallScreenX - 28, yy + (wallH / hatchN) * 0.8);
+    ctx.stroke();
+  }
+
+  // cart geometry — sized to leave room for 3 carts in the 0..5 m world
+  const bodyH = Math.max(20, H * 0.06);
+  const bodyW = Math.max(40, bodyH * 2.2);
+  const wheelR = Math.max(6, bodyH * 0.36);
+  const groundLine = groundY + 22;
+  const axleY = groundLine - wheelR;
+  const cartCy = axleY - bodyH / 2;
+
+  viewGeom.W = W; viewGeom.H = H;
+
+  // ---- Bumper spring (wall vs cart 1)
+  const cartSx = state.x.map(xv => world2screen(xv, W));
+  const bumperPlateX = world2screen(Math.min(state.x[0] - CART_HALF_W_M, X_BUMP), W);
+  const bumperHot = state.x[0] < X_BUMP + 0.02;
+  ctx.strokeStyle = bumperHot ? "#ef5350" : "#8a93a3";
+  ctx.lineWidth = Math.max(1.5, fsmall * 0.15);
+  drawSpring(wallScreenX, cartCy + bodyH * 0.30, bumperPlateX, 5, Math.max(3, bodyH * 0.12));
+  ctx.fillStyle = bumperHot ? "#ef5350" : "#5a6575";
+  ctx.fillRect(bumperPlateX - 2, cartCy + bodyH * 0.30 - bodyH * 0.18, 4, bodyH * 0.36);
+
+  // ---- Three spring/damper links: wall→1, 1→2, 2→3
+  const linkAnchors = [
+    { x0: wallScreenX, x1: cartSx[0] - bodyW / 2 - 6 },
+    { x0: cartSx[0] + bodyW / 2 + 6, x1: cartSx[1] - bodyW / 2 - 6 },
+    { x0: cartSx[1] + bodyW / 2 + 6, x1: cartSx[2] - bodyW / 2 - 6 },
+  ];
+  for (const a of linkAnchors) {
+    // spring above centerline
+    ctx.strokeStyle = "#c0c9d8";
+    ctx.lineWidth = Math.max(1.5, fsmall * 0.18);
+    drawSpring(a.x0, cartCy - bodyH * 0.18, a.x1, 8, Math.max(4, bodyH * 0.18));
+    // damper below centerline
+    ctx.strokeStyle = "#8a93a3";
+    ctx.lineWidth = Math.max(1.2, fsmall * 0.14);
+    drawDamper(a.x0, cartCy + bodyH * 0.10, a.x1, Math.max(4, bodyH * 0.16));
+  }
+
+  // ---- Reference marker (vertical line, applies to cart 3)
+  const refSx = world2screen(P.ref.value, W);
+  ctx.strokeStyle = "#66bb6a";
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(refSx, wallTop - 12); ctx.lineTo(refSx, groundY + 22);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#66bb6a";
+  ctx.beginPath();
+  ctx.moveTo(refSx, wallTop - 14);
+  ctx.lineTo(refSx - 6, wallTop - 24);
+  ctx.lineTo(refSx + 6, wallTop - 24);
+  ctx.closePath();
+  ctx.fill();
+  ctx.font = `${fsmall}px ui-sans-serif`;
+  ctx.textAlign = "center";
+  ctx.fillText("ref " + P.ref.value.toFixed(2) + " (target x₃)", refSx, wallTop - 28);
+
+  // ---- Equilibrium tick marks (faint)
+  ctx.strokeStyle = "#2e3642";
+  ctx.setLineDash([2, 4]);
+  ctx.lineWidth = 1;
+  for (const e of EQ) {
+    const sx = world2screen(e, W);
+    ctx.beginPath();
+    ctx.moveTo(sx, groundY - 4); ctx.lineTo(sx, groundY + 22);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  // ---- Carts
+  const wheelR_m = wheelR / scale;
+  for (let i = 0; i < N_CARTS; i++) {
+    const sx = cartSx[i];
+
+    viewGeom.carts[i] = {
+      cartSx: sx, cartCy, bodyW, bodyH, wheelR, axleY,
+    };
+
+    // cart center marker (subtle)
+    ctx.strokeStyle = CART_WIN[i];
+    ctx.setLineDash([3, 4]);
+    ctx.beginPath();
+    ctx.moveTo(sx, wallTop - 4); ctx.lineTo(sx, groundY + 22);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // body
+    ctx.fillStyle = CART_FILLS[i];
+    ctx.strokeStyle = CART_STROKES[i];
+    ctx.lineWidth = Math.max(1, fsmall * 0.12);
+    ctx.beginPath();
+    ctx.moveTo(sx - bodyW/2, cartCy - bodyH/2);
+    ctx.lineTo(sx + bodyW/2, cartCy - bodyH/2);
+    ctx.lineTo(sx + bodyW/2 + 6, cartCy + bodyH/2);
+    ctx.lineTo(sx - bodyW/2 - 6, cartCy + bodyH/2);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+
+    // window strip
+    ctx.fillStyle = CART_WIN[i] + "33";
+    ctx.strokeStyle = CART_WIN[i] + "88";
+    ctx.beginPath();
+    ctx.rect(sx - bodyW/2 + 6, cartCy - bodyH/2 + 4, bodyW - 12, bodyH * 0.35);
+    ctx.fill(); ctx.stroke();
+
+    // cart label
+    ctx.fillStyle = CART_WIN[i];
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = `${Math.max(10, fbase)}px ui-sans-serif`;
+    ctx.fillText("" + (i + 1), sx, cartCy + bodyH * 0.28);
+
+    // hook stubs (left and right) so springs visually attach
+    ctx.strokeStyle = "#9aa4b4";
+    ctx.lineWidth = Math.max(1, fsmall * 0.12);
+    ctx.beginPath();
+    ctx.moveTo(sx - bodyW/2 - 6, cartCy - bodyH * 0.18);
+    ctx.lineTo(sx - bodyW/2,    cartCy - bodyH * 0.18);
+    ctx.moveTo(sx + bodyW/2,     cartCy - bodyH * 0.18);
+    ctx.lineTo(sx + bodyW/2 + 6, cartCy - bodyH * 0.18);
+    // damper hook stubs (lower line)
+    ctx.moveTo(sx - bodyW/2 - 6, cartCy + bodyH * 0.10);
+    ctx.lineTo(sx - bodyW/2,    cartCy + bodyH * 0.10);
+    ctx.moveTo(sx + bodyW/2,     cartCy + bodyH * 0.10);
+    ctx.lineTo(sx + bodyW/2 + 6, cartCy + bodyH * 0.10);
+    ctx.stroke();
+
+    // wheels — rolling
+    const wheelAngle = state.x[i] / Math.max(1e-6, wheelR_m);
+    const wxs = [sx - bodyW/3, sx + bodyW/3];
+    for (const wx of wxs) {
+      ctx.fillStyle = "#12161c";
+      ctx.strokeStyle = CART_STROKES[i];
+      ctx.lineWidth = Math.max(1, fsmall * 0.12);
+      ctx.beginPath();
+      ctx.arc(wx, axleY, wheelR, 0, Math.PI * 2);
+      ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = "#e6e9ef";
+      ctx.lineWidth = Math.max(1.2, fsmall * 0.14);
+      ctx.beginPath();
+      ctx.moveTo(wx, axleY);
+      ctx.lineTo(
+        wx + Math.cos(wheelAngle) * (wheelR - 2),
+        axleY + Math.sin(wheelAngle) * (wheelR - 2)
+      );
+      ctx.moveTo(wx, axleY);
+      ctx.lineTo(
+        wx + Math.cos(wheelAngle + Math.PI / 2) * (wheelR - 2),
+        axleY + Math.sin(wheelAngle + Math.PI / 2) * (wheelR - 2)
+      );
+      ctx.stroke();
+    }
+  }
+
+  // ---- Force arrows on cart 1 (where u is applied)
+  const F_PX_PER_N = Math.min(0.8, (W * 0.18) / 200);
+  const F_CAP_PX = Math.min(W * 0.35, 300);
+  function fxDx(F) {
+    let dx = F * F_PX_PER_N;
+    if (Math.abs(dx) > F_CAP_PX) dx = Math.sign(dx) * F_CAP_PX;
+    return dx;
+  }
+  const topY = cartCy - bodyH / 2;
+  const slotGap = Math.max(13, fbase * 1.25);
+  const slots = [
+    { y: topY - slotGap * 1, color: getVar("--cU"), F: lastU,        label: "u → cart 1" },
+    { y: topY - slotGap * 2, color: getVar("--cP"), F: lastUP,       label: "P" },
+    { y: topY - slotGap * 3, color: getVar("--cI"), F: lastUI,       label: "I" },
+    { y: topY - slotGap * 4, color: getVar("--cD"), F: lastUD,       label: "D" },
+    { y: topY - slotGap * 5, color: getVar("--cW"), F: P.wind.value, label: "wind" },
+  ];
+  for (const s of slots) {
+    drawArrow(cartSx[0], s.y, fxDx(s.F), s.color, `${s.label} ${s.F.toFixed(0)}`, fsmall);
+  }
+
+  // wind arrow on cart 3 (so the disturbance on the controlled output is visible)
+  drawArrow(cartSx[2], topY - slotGap * 1, fxDx(P.wind.value), getVar("--cW"),
+            `wind ${P.wind.value.toFixed(0)}`, fsmall);
+}
+
+function getVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#fff";
+}
+
+// ---------- Plot rendering --------------------------------------------------
+function drawPlotGrid(px, py, pw, ph, yMin, yMax, tMin, tMax, title, fsize) {
+  pctx.fillStyle = "#0d1013";
+  pctx.fillRect(px, py, pw, ph);
+  pctx.strokeStyle = "#2a313c";
+  pctx.lineWidth = 1;
+  pctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+
+  pctx.fillStyle = "#55606f";
+  pctx.font = `${fsize}px ui-sans-serif`;
+  pctx.textBaseline = "middle";
+  pctx.textAlign = "right";
+  const yTicks = 3;
+  for (let i = 0; i <= yTicks; i++) {
+    const frac = i / yTicks;
+    const yv = yMax - frac * (yMax - yMin);
+    const yy = py + frac * ph;
+    pctx.strokeStyle = "#1e252f";
+    pctx.beginPath();
+    pctx.moveTo(px + 34, yy); pctx.lineTo(px + pw, yy);
+    pctx.stroke();
+    pctx.fillStyle = "#55606f";
+    pctx.fillText(yv.toFixed(1), px + 32, yy);
+  }
+  pctx.textAlign = "center";
+  pctx.textBaseline = "top";
+  const xTicks = 4;
+  for (let i = 0; i <= xTicks; i++) {
+    const frac = i / xTicks;
+    const tv = tMin + frac * (tMax - tMin);
+    const xx = px + 34 + frac * (pw - 38);
+    pctx.strokeStyle = "#1e252f";
+    pctx.beginPath();
+    pctx.moveTo(xx, py); pctx.lineTo(xx, py + ph - 14);
+    pctx.stroke();
+    pctx.fillStyle = "#55606f";
+    pctx.fillText(tv.toFixed(1) + "s", xx, py + ph - 12);
+  }
+  pctx.fillStyle = "#8a93a3";
+  pctx.font = `${fsize}px ui-sans-serif`;
+  pctx.textAlign = "left"; pctx.textBaseline = "top";
+  pctx.fillText(title, px + 6, py + 4);
+}
+
+function plotLine(px, py, pw, ph, yMin, yMax, tMin, tMax, pts, color, lw, dash) {
+  if (!pts || pts.length < 2) return;
+  pctx.strokeStyle = color;
+  pctx.lineWidth = lw || 1.5;
+  pctx.setLineDash(dash || []);
+  pctx.beginPath();
+  const x0 = px + 34;
+  const usableW = pw - 38;
+  const yRange = (yMax - yMin) || 1;
+  const tRange = (tMax - tMin) || 1;
+  let started = false;
+  for (const p of pts) {
+    const xx = x0 + ((p.t - tMin) / tRange) * usableW;
+    const yy = py + (1 - (p.y - yMin) / yRange) * ph;
+    if (!started) { pctx.moveTo(xx, yy); started = true; }
+    else pctx.lineTo(xx, yy);
+  }
+  pctx.stroke();
+  pctx.setLineDash([]);
+}
+
+function renderPlots() {
+  const sz = fitCanvas(plot, pctx);
+  const W = sz.w, H = sz.h;
+  pctx.fillStyle = "#0d1013";
+  pctx.fillRect(0, 0, W, H);
+
+  const fsize = Math.max(9, Math.min(W, H) * 0.03);
+  const pad = 6;
+  const topH = Math.floor((H - pad * 3) / 2);
+  const botH = H - pad * 3 - topH;
+
+  const tMax = Math.max(state.t, HIST_WINDOW_S);
+  const tMin = tMax - HIST_WINDOW_S;
+
+  // --- Top plot: ref & x1, x2, x3 vs time
+  let dMin = 0, dMax = WORLD_X_MAX;
+  const showBand = state.mode === "bangbang";
+  for (const h of hist) {
+    if (h.t < tMin) continue;
+    for (const v of [h.ref, h.x1, h.x2, h.x3]) {
+      if (v < dMin) dMin = v;
+      if (v > dMax) dMax = v;
+    }
+    if (showBand) {
+      if (h.deadLo < dMin) dMin = h.deadLo; if (h.deadHi > dMax) dMax = h.deadHi;
+    }
+  }
+  const yLo = Math.min(0, Math.floor(dMin));
+  const yHi = Math.max(WORLD_X_MAX, Math.ceil(dMax));
+
+  const px = pad, py = pad;
+  const pw = W - pad * 2;
+  drawPlotGrid(px, py, pw, topH, yLo, yHi, tMin, tMax, "position vs time (m)", fsize);
+  {
+    const legend = [
+      { color: getVar("--cRef"), label: "ref" },
+      { color: getVar("--cX3"),  label: "x₃ (controlled)" },
+      { color: getVar("--cX2"),  label: "x₂" },
+      { color: getVar("--cX1"),  label: "x₁ (driven)" },
+    ];
+    if (showBand) legend.push({ color: "#ef5350", label: "deadband" });
+    drawLegend(px + pw - 6, py + 4, fsize, legend);
+  }
+  const winHist = hist.filter(h => h.t >= tMin);
+  const refPts = winHist.map(h => ({ t: h.t, y: h.ref }));
+  const x1Pts  = winHist.map(h => ({ t: h.t, y: h.x1  }));
+  const x2Pts  = winHist.map(h => ({ t: h.t, y: h.x2  }));
+  const x3Pts  = winHist.map(h => ({ t: h.t, y: h.x3  }));
+  if (showBand) {
+    const hiPts = winHist.map(h => ({ t: h.t, y: h.deadHi }));
+    const loPts = winHist.map(h => ({ t: h.t, y: h.deadLo }));
+    plotLine(px, py, pw, topH, yLo, yHi, tMin, tMax, hiPts, "#ef5350", 1, [4, 4]);
+    plotLine(px, py, pw, topH, yLo, yHi, tMin, tMax, loPts, "#ef5350", 1, [4, 4]);
+  }
+  plotLine(px, py, pw, topH, yLo, yHi, tMin, tMax, refPts, getVar("--cRef"), 1.5);
+  plotLine(px, py, pw, topH, yLo, yHi, tMin, tMax, x1Pts,  getVar("--cX1"),  1.4);
+  plotLine(px, py, pw, topH, yLo, yHi, tMin, tMax, x2Pts,  getVar("--cX2"),  1.4);
+  plotLine(px, py, pw, topH, yLo, yHi, tMin, tMax, x3Pts,  getVar("--cX3"),  2);
+
+  // --- Bottom plot: effort vs time
+  const py2 = py + topH + pad;
+  let fAbs = 0;
+  for (const h of hist) {
+    if (h.t < tMin) continue;
+    for (const v of [h.uP, h.uI, h.uD, h.u, h.wind]) {
+      const a = Math.abs(v);
+      if (a > fAbs) fAbs = a;
+    }
+  }
+  const STEP = 50;
+  const fHi = Math.max(STEP, Math.ceil(fAbs / STEP) * STEP);
+  const fLo = -fHi;
+  drawPlotGrid(px, py2, pw, botH, fLo, fHi, tMin, tMax, "control effort on cart 1 (N)", fsize);
+  drawLegend(px + pw - 6, py2 + 4, fsize, [
+    { color: getVar("--cU"), label: "u" },
+    { color: getVar("--cP"), label: "P" },
+    { color: getVar("--cI"), label: "I" },
+    { color: getVar("--cD"), label: "D" },
+    { color: getVar("--cW"), label: "wind" },
+  ]);
+  const pick = (key) => hist.filter(h => h.t >= tMin).map(h => ({ t: h.t, y: h[key] }));
+  plotLine(px, py2, pw, botH, fLo, fHi, tMin, tMax, pick("uP"),   getVar("--cP"), 1.2);
+  plotLine(px, py2, pw, botH, fLo, fHi, tMin, tMax, pick("uI"),   getVar("--cI"), 1.2);
+  plotLine(px, py2, pw, botH, fLo, fHi, tMin, tMax, pick("uD"),   getVar("--cD"), 1.2);
+  plotLine(px, py2, pw, botH, fLo, fHi, tMin, tMax, pick("wind"), getVar("--cW"), 1.2);
+  plotLine(px, py2, pw, botH, fLo, fHi, tMin, tMax, pick("u"),    getVar("--cU"), 2);
+}
+
+function drawLegend(rightX, topY, fsize, entries) {
+  pctx.font = `${fsize}px ui-sans-serif`;
+  pctx.textAlign = "right"; pctx.textBaseline = "top";
+  let y = topY;
+  for (const e of entries) {
+    pctx.fillStyle = e.color;
+    pctx.fillText("■ " + e.label, rightX, y);
+    y += fsize + 2;
+  }
+}
+
+// ---------- Pointer drag on any cart ----------------------------------------
+function screenXToWorld(sx, W) {
+  const usable = W - WALL_MARGIN_PX * 2;
+  const scale = usable / (WORLD_X_MAX - WORLD_X_MIN);
+  return (sx - WALL_MARGIN_PX) / scale + WORLD_X_MIN;
+}
+function hitTestCart(mx, my, i) {
+  const g = viewGeom.carts[i];
+  if (!g || !g.bodyW) return false;
+  const halfW = g.bodyW / 2 + 8;
+  const top = g.cartCy - g.bodyH / 2 - 4;
+  const bot = g.axleY + g.wheelR + 2;
+  return mx >= g.cartSx - halfW && mx <= g.cartSx + halfW && my >= top && my <= bot;
+}
+function pickCart(mx, my) {
+  for (let i = 0; i < N_CARTS; i++) if (hitTestCart(mx, my, i)) return i;
+  return -1;
+}
+function clientToCanvas(ev) {
+  const r = cv.getBoundingClientRect();
+  return { mx: ev.clientX - r.left, my: ev.clientY - r.top };
+}
+cv.addEventListener("pointermove", (ev) => {
+  const { mx, my } = clientToCanvas(ev);
+  if (state.dragging >= 0) {
+    const i = state.dragging;
+    const wx = screenXToWorld(mx, viewGeom.W) - state.dragOffsetM;
+    // Keep in world and prevent overlap with neighbors (or wall) by cart half-widths.
+    const minX = i === 0 ? CART_HALF_W_M : state.x[i - 1] + 2 * CART_HALF_W_M;
+    const maxX = i === N_CARTS - 1 ? WORLD_X_MAX - CART_HALF_W_M : state.x[i + 1] - 2 * CART_HALF_W_M;
+    state.x[i] = Math.max(minX, Math.min(maxX, wx));
+    state.v[i] = 0;
+    ev.preventDefault();
+  } else {
+    cv.style.cursor = pickCart(mx, my) >= 0 ? "grab" : "default";
+  }
+});
+cv.addEventListener("pointerdown", (ev) => {
+  const { mx, my } = clientToCanvas(ev);
+  const i = pickCart(mx, my);
+  if (i < 0) return;
+  state.dragging = i;
+  const pointerWorldX = screenXToWorld(mx, viewGeom.W);
+  state.dragOffsetM = pointerWorldX - state.x[i];
+  state.v[i] = 0;
+  cv.setPointerCapture(ev.pointerId);
+  cv.classList.add("grabbing");
+  cv.style.cursor = "grabbing";
+  ev.preventDefault();
+});
+function endDrag(ev) {
+  if (state.dragging < 0) return;
+  state.v[state.dragging] = 0;
+  state.dragging = -1;
+  try { cv.releasePointerCapture(ev.pointerId); } catch {}
+  cv.classList.remove("grabbing");
+  cv.style.cursor = "default";
+}
+cv.addEventListener("pointerup", endDrag);
+cv.addEventListener("pointercancel", endDrag);
+cv.addEventListener("pointerleave", (ev) => { if (state.dragging >= 0) endDrag(ev); });
+
+// ---------- Go ---------------------------------------------------------------
+resetState();
+requestAnimationFrame(step);
+</script>
+</body>
+</html>
