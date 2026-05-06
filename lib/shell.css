@@ -1,0 +1,238 @@
+/* ===========================================================================
+   shell.css — chrome and layout for the spec-driven lesson shell.
+
+   Loaded by every lesson HTML alongside the lib/* JS files. Provides:
+     • CSS custom properties (colour tokens, per-wheel palette)
+     • Body / scroll-host (so file:// + iframe-in-Moodle both scroll)
+     • Header with title and shell-owned buttons (Reset / Pause / Drive / …)
+     • .stage grid: canvas + right pane (plots stack + readout)
+     • Bottom slider panels (.sub-panels with .box children)
+     • Tab strips (.ex-tabs for top-level, .sub-tabs for in-lesson)
+     • .row inputs (label / range / number) and .pair button rows
+
+   Lifted from motionapp/index.html’s <style> block. Lesson-specific
+   selectors (#wheel-rows, .wheel-card) stayed there because no other
+   lesson reuses them; the spec author can always inline lesson CSS in
+   the lesson HTML.
+   =========================================================================== */
+
+:root {
+  --bg:     #111418;
+  --panel:  #1b1f25;
+  --panel2: #232932;
+  --ink:    #e6e9ef;
+  --muted:  #8a93a3;
+  --accent: #4ea1ff;
+  --good:   #66bb6a;
+  --grid:   #2a313c;
+  --cP:     #ef5350;
+  --cI:     #f6c945;
+  --cD:     #26c6da;
+  --cU:     #ffffff;
+  --cW:     #f6a623;
+  --cRef:   #66bb6a;
+  --cX:     #4ea1ff;
+  --cY:     #ab47bc;
+  /* per-series palette, cycled by index */
+  --w0: #4ea1ff; --w1: #66bb6a; --w2: #ef5350; --w3: #f6c945;
+  --w4: #26c6da; --w5: #ab47bc; --w6: #ff9f43; --w7: #c0c9d8;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  height: 100%; overflow: hidden;
+  background: var(--bg); color: var(--ink);
+  font: 13px/1.35 ui-sans-serif, system-ui, Segoe UI, Roboto, Helvetica, Arial;
+}
+
+/* iOS Safari refuses to scroll an iframe document directly, but it WILL
+   scroll an explicitly-sized overflow container inside. Lock body to the
+   viewport, then let .scroll-host be the scroll surface. */
+.scroll-host {
+  position: absolute; inset: 0;
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  background: var(--bg);
+}
+
+.app {
+  display: flex; flex-direction: column;
+  gap: 10px; padding: 10px;
+  min-height: 100vh;     /* fallback */
+  min-height: 100dvh;    /* mobile chrome-aware */
+}
+
+header {
+  display: flex; align-items: center; gap: 12px;
+  padding: 6px 10px; background: var(--panel); border-radius: 8px;
+  flex-wrap: wrap;
+}
+header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
+header .subtitle { font-size: 12px; color: var(--muted); margin-left: 6px; }
+header .sp { flex: 1; }
+header button, .ex-tabs button {
+  background: var(--panel2); color: var(--ink);
+  border: 1px solid #2e3642; border-radius: 6px;
+  padding: 5px 10px; cursor: pointer; font-size: 12px;
+}
+header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
+
+.ex-tabs { display: flex; gap: 4px; }
+.ex-tabs button.active { border-color: var(--accent); color: var(--accent); }
+
+.lesson {
+  flex: 1;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.lesson > .sub-tabs { flex: 0 0 auto; }
+.lesson > .stage    { flex: 1; }
+.lesson[hidden] { display: none; }
+
+.sub-tabs {
+  display: flex; gap: 2px;
+  border-bottom: 1px solid #2a313c;
+  padding: 0 4px;
+  background: var(--panel); border-radius: 8px 8px 0 0;
+}
+.sub-tabs button {
+  background: transparent; color: var(--muted);
+  border: 0; border-bottom: 2px solid transparent;
+  padding: 7px 12px; cursor: pointer; font: inherit;
+  text-transform: uppercase; letter-spacing: 0.8px;
+  font-size: 11px; font-weight: 600;
+}
+.sub-tabs button:hover { color: var(--ink); }
+.sub-tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+/* Main grid: scene canvas + right pane (plots + readout). Bottom rows are
+   slider panels and notes, sized to content. */
+.stage {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  grid-template-rows: minmax(280px, 1fr) auto auto;
+  gap: 10px;
+}
+
+.cv-box {
+  background: var(--panel); border-radius: 8px; padding: 8px;
+  display: flex; position: relative;
+  grid-column: 1; grid-row: 1; min-height: 280px;
+}
+.cv-box canvas {
+  width: 100%; height: 100%; display: block; border-radius: 6px;
+  background: #0d1013;
+  touch-action: none; cursor: default;
+}
+.cv-box canvas.grabbing { cursor: grabbing; }
+
+.right-pane {
+  grid-column: 2; grid-row: 1 / span 3;
+  display: flex; flex-direction: column; gap: 0;
+  background: var(--panel); border-radius: 8px;
+  overflow: hidden; min-height: 280px;
+}
+
+.plot-stack {
+  flex: 1 1 0; min-height: 200px;
+  display: flex; flex-direction: column; gap: 0;
+}
+.plot-box {
+  flex: 1 1 0; min-height: 100px;
+  padding: 0; display: flex; position: relative;
+}
+.plot-box canvas {
+  width: 100%; height: 100%; display: block;
+  background: var(--panel);
+}
+.plot-box:first-child canvas { border-radius: 8px 8px 0 0; }
+
+.readout {
+  flex: 0 1 auto;
+  border-top: 2px solid var(--bg);
+  padding: 10px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-variant-numeric: tabular-nums;
+  overflow: auto; max-height: 40vh;
+  font-size: 14px;
+}
+.readout h2 {
+  font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px;
+  margin: 8px 0 4px 0; color: var(--muted); font-weight: 600;
+}
+.readout h2:first-child { margin-top: 0; }
+.readout .ln { display: flex; justify-content: space-between; color: var(--muted); }
+.readout .ln b { color: var(--ink); font-weight: 600; }
+.readout .ln .suffix { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.readout .swatch {
+  display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  margin-right: 6px; vertical-align: middle;
+}
+
+/* Slider/notes panels along the bottom. Two columns when both apply, single
+   column on narrow viewports. */
+.sub-panels {
+  grid-column: 1; grid-row: 2 / span 2;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+}
+.sub-panels.single { grid-template-columns: 1fr; }
+/* Opt-in: panel spans every column. Use for the reference-target slider on
+   linear-position-controlled lessons (always full-width across the top). */
+.sub-panels .box.span-full { grid-column: 1 / -1; }
+@media (max-width: 720px) {
+  .sub-panels { grid-template-columns: 1fr; }
+  .stage { grid-template-columns: 1fr; }
+  .right-pane { grid-column: 1; grid-row: auto; }
+  .cv-box     { grid-column: 1; grid-row: auto; }
+  .sub-panels { grid-column: 1; grid-row: auto; }
+}
+
+.box {
+  background: var(--panel); border-radius: 8px; padding: 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.box h2 {
+  font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px;
+  margin: 0; color: var(--muted); font-weight: 600;
+}
+.box h3 {
+  font-size: 13px; margin: 6px 0 0 0; color: var(--muted); font-weight: 600;
+  border-top: 1px solid #2a313c; padding-top: 6px;
+}
+.box .notes {
+  font-size: 13px; line-height: 1.45; color: var(--ink);
+}
+.box .notes b { color: var(--ink); }
+.box .notes i { color: var(--cI); font-style: normal; }
+
+/* Slider row: label / range / number column. */
+.row {
+  display: grid;
+  grid-template-columns: 64px 1fr 80px;
+  align-items: center; gap: 8px;
+}
+.row label { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; }
+.row label[title] { cursor: help; border-bottom: 1px dotted var(--muted); }
+.row input[type=range] { width: 100%; accent-color: var(--accent); }
+.row input[type=number] {
+  background: var(--panel2); color: var(--ink);
+  border: 1px solid #2e3642; border-radius: 4px;
+  padding: 3px 5px; width: 100%;
+  font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.row input[type=number]:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.row.disabled label { opacity: 0.7; }
+.row.disabled input { pointer-events: none; opacity: 0.55; }
+
+/* Inline action button row (used by spec.actions, e.g. + Add wheel). */
+.pair { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.pair button {
+  background: var(--panel2); color: var(--ink);
+  border: 1px solid #2e3642; border-radius: 4px;
+  padding: 3px 8px; cursor: pointer; font-size: 12px;
+}
+.pair button:hover { border-color: var(--accent); }
+.pair button.active { border-color: var(--accent); color: var(--accent); }
+
+footer { text-align: center; color: var(--muted); font-size: 11px; padding: 4px; }

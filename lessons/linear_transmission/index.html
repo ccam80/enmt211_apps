@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linear Transmission</title>
+<link rel="stylesheet" href="../../lib/shell.css">
+</head>
+<body>
+<!--
+  Multi-tab hub. Each lesson registers its spec on window.LinearLessons via its
+  own *.js file; this page collects them and mounts via LIB.App.runTabs.
+  Standalone lesson HTMLs (lead-screw.html, etc.) still work — they explicitly
+  call LIB.App.run on the same registered spec after loading the lesson script.
+-->
+<script src="../../lib/util.js"></script>
+<script src="../../lib/registry.js"></script>
+<script src="../../lib/plot.js"></script>
+<script src="../../lib/integrate.js"></script>
+<script src="../../lib/draw.js"></script>
+<script src="../../lib/thermal.js"></script>
+<script src="../../lib/end-stop.js"></script>
+<script src="../../lib/match-hint.js"></script>
+<script src="../../lib/pid.js"></script>
+<script src="../../lib/position-torque.js"></script>
+<script src="../../lib/drag-smoother.js"></script>
+<script src="../../lib/layout.js"></script>
+<script src="../../lib/drag.js"></script>
+<script src="../../lib/lash.js"></script>
+<script src="../../lib/screw-render.js"></script>
+<script src="../../lib/belt-render.js"></script>
+<script src="../../lib/header-buttons.js"></script>
+<script src="../../lib/app.js"></script>
+<script src="./lead-screw.js"></script>
+<script src="./ball-screw.js"></script>
+<script src="./conveyor.js"></script>
+<script src="./whole-system.js"></script>
+<script>
+  LIB.App.runTabs({
+    title: "Linear Transmission",
+    persistKey: "linear-transmission-active-lesson",
+    tabs: [
+      { label: "lead-screw",   spec: window.LinearLessons.leadScrew  },
+      { label: "ball-screw",   spec: window.LinearLessons.ballScrew  },
+      { label: "conveyor",     spec: window.LinearLessons.conveyor   },
+      { label: "whole-system", spec: window.LinearLessons.wholeSystem },
+    ],
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Control This System</title>
+<link rel="stylesheet" href="../../lib/shell.css">
+</head>
+<body>
+<!--
+  Multi-tab hub. Each lesson registers its spec on window.ControlLessons via
+  its own *.js file; this page collects them and mounts via LIB.App.runTabs.
+  Standalone lesson HTMLs (car.html, etc.) still work — they explicitly call
+  LIB.App.run on the same registered spec after loading the lesson script.
+-->
+<script src="../../lib/util.js"></script>
+<script src="../../lib/registry.js"></script>
+<script src="../../lib/plot.js"></script>
+<script src="../../lib/integrate.js"></script>
+<script src="../../lib/draw.js"></script>
+<script src="../../lib/layout.js"></script>
+<script src="../../lib/noise.js"></script>
+<script src="../../lib/pid.js"></script>
+<script src="../../lib/hold-detector.js"></script>
+<script src="../../lib/app.js"></script>
+<script src="./car.js"></script>
+<script src="./carwind.js"></script>
+<script src="./heli.js"></script>
+<script src="./rover.js"></script>
+<script>
+  LIB.App.runTabs({
+    title: "Control This System",
+    persistKey: "control-tutorial-active-lesson",
+    tabs: [
+      { label: "Car on Road",                 spec: window.ControlLessons.car      },
+      { label: "Car (average crosswind)",     spec: window.ControlLessons.carWind  },
+      { label: "Helicopter Hover",            spec: window.ControlLessons.heli     },
+      { label: "2D Rover",                    spec: window.ControlLessons.rover    },
+    ],
+  });
+</script>
+</body>
+</html>

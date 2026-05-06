@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PID Control</title>
+<link rel="stylesheet" href="../../lib/shell.css">
+</head>
+<body>
+<!--
+  PID-control lesson hub. Each lesson registers its spec on
+  window.PidControlLessons via its own *.js file; this page collects them
+  and mounts via LIB.App.runTabs.
+-->
+<script src="../../lib/util.js"></script>
+<script src="../../lib/registry.js"></script>
+<script src="../../lib/plot.js"></script>
+<script src="../../lib/integrate.js"></script>
+<script src="../../lib/draw.js"></script>
+<script src="../../lib/pid.js"></script>
+<script src="../../lib/drag-smoother.js"></script>
+<script src="../../lib/layout.js"></script>
+<script src="../../lib/drag.js"></script>
+<script src="../../lib/cart-render.js"></script>
+<script src="../../lib/app.js"></script>
+<script src="./single-cart.js"></script>
+<script src="./three-cart.js"></script>
+<script>
+  LIB.App.runTabs({
+    title: "PID Control",
+    persistKey: "pidcontrol-active-lesson",
+    tabs: [
+      { label: "single-cart", spec: window.PidControlLessons.singleCart },
+      { label: "three-cart",  spec: window.PidControlLessons.threeCart  },
+    ],
+  });
+</script>
+</body>
+</html>
