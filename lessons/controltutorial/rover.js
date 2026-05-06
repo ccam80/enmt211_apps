@@ -5,8 +5,9 @@
 //  PID picks how unequal the motors should be; the drive PID picks how
 //  strong on average. Click anywhere on the canvas to set a new target.
 //
-//  Two LIB.PID loops, one per axis: state.yawLoop and state.driveLoop. Both
-//  shut off inside the arrival radius (8 cm) so the rover coasts to rest.
+//  Two declarative LIB.ControlBlock entries (yaw + drive). Both share an
+//  `enable` predicate that shuts them off inside the arrival radius (8 cm)
+//  so the rover coasts to rest with both integrators reset.
 // =============================================================================
 
 (function () {
@@ -16,14 +17,12 @@
   const WORLD_R  = 6;
   const ARRIVE_R = 0.08;
 
-  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
-  function wrapAngle(a) {
-    while (a >  Math.PI) a -= 2 * Math.PI;
-    while (a <= -Math.PI) a += 2 * Math.PI;
-    return a;
-  }
-
   let holdDetector = null;
+
+  function active(s) {
+    const dx = s.tx - s.x, dy = s.ty - s.y;
+    return Math.hypot(dx, dy) > ARRIVE_R;
+  }
 
   const SPEC = {
     id: "rover",
@@ -40,19 +39,20 @@
     state: () => ({
       x: 0, y: 0, theta: 0, v: 0, omega: 0,
       tx: 2.5, ty: 0,
-      yawLoop:   { I: 0, ePrev: 0 },
-      driveLoop: { I: 0, ePrev: 0 },
-      lastYE: 0, lastDE: 0,
-      lastYP: 0, lastYI: 0, lastYD: 0, lastImb: 0,
-      lastDP: 0, lastDI: 0, lastDD: 0, lastAvg: 0,
-      lastUL: 0, lastUR: 0,
+      yawLoop:   { I: 0, ePrev: 0, bbDir: 0 },
+      driveLoop: { I: 0, ePrev: 0, bbDir: 0 },
+      yawOut:    { e: 0, u: 0, uP: 0, uI: 0, uD: 0 },
+      driveOut:  { e: 0, u: 0, uP: 0, uI: 0, uD: 0 },
+      lastDist: 0,
       t: 0,
     }),
 
     onReset: (s) => {
       s.tx = 2.5; s.ty = 0;
-      s.yawLoop   = { I: 0, ePrev: 0 };
-      s.driveLoop = { I: 0, ePrev: 0 };
+      s.yawLoop   = { I: 0, ePrev: 0, bbDir: 0 };
+      s.driveLoop = { I: 0, ePrev: 0, bbDir: 0 };
+      s.yawOut    = { e: 0, u: 0, uP: 0, uI: 0, uD: 0 };
+      s.driveOut  = { e: 0, u: 0, uP: 0, uI: 0, uD: 0 };
       if (holdDetector) holdDetector.reset();
     },
 
@@ -89,9 +89,10 @@
         { key: "arm",     label: "L",  min: 0.05, max: 1,  step: 0.01, value: ARM, disabled: true,
           tip: "Distance from centre to each motor (m)." },
       ],
+      // Buttons-only panel: the actions mutate target state directly. The
+      // shell renders these without any sliders.
       Targets: {
-        kind: "dynamic", title: "Targets",
-        items: () => [],
+        title: "Targets",
         actions: [
           { label: "(2.5, 0)", run: (s) => { s.tx = 2.5; s.ty = 0;  if (holdDetector) holdDetector.reset(); } },
           { label: "(-2, 2)",  run: (s) => { s.tx = -2;  s.ty = 2;  if (holdDetector) holdDetector.reset(); } },
@@ -107,15 +108,19 @@
         series: [
           { label: "ref",  color: LIB.Util.getVar("--cRef"), lw: 1.4, source: () => 0 },
           { label: "dist", color: LIB.Util.getVar("--cX"),   lw: 2.0,
-            source: (s) => s.lastDE },
+            source: (s) => s.driveOut.e },
         ] },
       { title: "motor command (N)",
         yFmt: (v) => v.toFixed(0),
         series: [
-          { label: "uL",  color: LIB.Util.getVar("--cY"), lw: 1.6, source: (s) => s.lastUL },
-          { label: "uR",  color: LIB.Util.getVar("--cW"), lw: 1.6, source: (s) => s.lastUR },
-          { label: "imb", color: LIB.Util.getVar("--cU"), lw: 1.0, source: (s) => s.lastImb },
-          { label: "avg", color: LIB.Util.getVar("--cD"), lw: 1.4, source: (s) => s.lastAvg },
+          { label: "uL",  color: LIB.Util.getVar("--cY"), lw: 1.6,
+            source: (s) => s.driveOut.u - s.yawOut.u },
+          { label: "uR",  color: LIB.Util.getVar("--cW"), lw: 1.6,
+            source: (s) => s.driveOut.u + s.yawOut.u },
+          { label: "imb", color: LIB.Util.getVar("--cU"), lw: 1.0,
+            source: (s) => s.yawOut.u },
+          { label: "avg", color: LIB.Util.getVar("--cD"), lw: 1.4,
+            source: (s) => s.driveOut.u },
         ] },
     ],
 
@@ -125,60 +130,52 @@
       { label: "θ",     units: "°",     value: (s) => (s.theta * 180 / Math.PI).toFixed(1) },
       { label: "v",     units: "m/s",   value: (s) => s.v.toFixed(2) },
       { label: "ω",     units: "rad/s", value: (s) => s.omega.toFixed(2) },
-      { label: "dist",  units: "m",     value: (s) => s.lastDE.toFixed(2) },
-      { label: "yaw e", units: "°",     value: (s) => (s.lastYE * 180 / Math.PI).toFixed(1) },
-      { label: "uL",    units: "N",     value: (s) => s.lastUL.toFixed(1) },
-      { label: "uR",    units: "N",     value: (s) => s.lastUR.toFixed(1) },
+      { label: "dist",  units: "m",     value: (s) => s.driveOut.e.toFixed(2) },
+      { label: "yaw e", units: "°",     value: (s) => (s.yawOut.e * 180 / Math.PI).toFixed(1) },
+      { label: "uL",    units: "N",     value: (s) => (s.driveOut.u - s.yawOut.u).toFixed(1) },
+      { label: "uR",    units: "N",     value: (s) => (s.driveOut.u + s.yawOut.u).toFixed(1) },
+    ],
+
+    controllers: [
+      // Yaw — motor imbalance.
+      {
+        slot: "yawLoop", output: "yawOut",
+        enable: active,
+        pid: {
+          err:   (s) => {
+            const dx = s.tx - s.x, dy = s.ty - s.y;
+            return LIB.Util.wrapAngle(Math.atan2(dy, dx) - s.theta);
+          },
+          dmeas: (s) => s.omega,
+          gains: (s, p) => ({
+            kp: +p.yKp || 0, ki: +p.yKi || 0, kd: +p.yKd || 0,
+            iClamp: +p.yImax, uCap: +p.yUmax,
+          }),
+        },
+      },
+      // Drive — motor average.
+      {
+        slot: "driveLoop", output: "driveOut",
+        enable: active,
+        pid: {
+          err:   (s) => Math.hypot(s.tx - s.x, s.ty - s.y),
+          dmeas: (s) => s.v,
+          gains: (s, p) => ({
+            kp: +p.dKp || 0, ki: +p.dKi || 0, kd: +p.dKd || 0,
+            iClamp: +p.dImax, uCap: +p.dUmax,
+          }),
+        },
+      },
     ],
 
     physics: {
       dof: ["x", "y", "theta", "v", "omega"],
-      preStep: (s, p, dt) => {
-        if (!s.yawLoop)   s.yawLoop   = { I: 0, ePrev: 0 };
-        if (!s.driveLoop) s.driveLoop = { I: 0, ePrev: 0 };
-        const dx = s.tx - s.x, dy = s.ty - s.y;
-        const dist = Math.hypot(dx, dy);
-        const desiredHeading = Math.atan2(dy, dx);
-        const yE = wrapAngle(desiredHeading - s.theta);
-        const dE = dist;
-        const inArrive = dist <= ARRIVE_R;
-        const active   = !inArrive;
-
-        // Yaw PID
-        let yP = 0, yD = 0, imb = 0;
-        if (active) {
-          LIB.PID.advance(s.yawLoop, yE, dt,
-            { ki: +p.yKi || 0, iClamp: +p.yImax });
-          const out = LIB.PID.effort(s.yawLoop, yE, s.omega,
-            { kp: +p.yKp || 0, kd: +p.yKd || 0, uCap: +p.yUmax });
-          yP = out.uP; yD = out.uD; imb = out.u;
-        } else {
-          s.yawLoop.I = 0;
-        }
-
-        // Drive PID
-        let dP = 0, dD = 0, avg = 0;
-        if (active) {
-          LIB.PID.advance(s.driveLoop, dE, dt,
-            { ki: +p.dKi || 0, iClamp: +p.dImax });
-          const out = LIB.PID.effort(s.driveLoop, dE, s.v,
-            { kp: +p.dKp || 0, kd: +p.dKd || 0, uCap: +p.dUmax });
-          dP = out.uP; dD = out.uD; avg = out.u;
-        } else {
-          s.driveLoop.I = 0;
-        }
-
-        const uL = avg - imb;
-        const uR = avg + imb;
-        s.lastYE = yE; s.lastDE = dE;
-        s.lastYP = yP; s.lastYI = s.yawLoop.I;   s.lastYD = yD; s.lastImb = imb;
-        s.lastDP = dP; s.lastDI = s.driveLoop.I; s.lastDD = dD; s.lastAvg = avg;
-        s.lastUL = uL; s.lastUR = uR;
-      },
       dxdt: (s, p) => {
         const m = +p.mass, c = +p.drag, J = +p.inertia, cw = +p.angDrag;
-        const F = s.lastUL + s.lastUR;
-        const M = (s.lastUR - s.lastUL) * (+p.arm);
+        const uL = s.driveOut.u - s.yawOut.u;
+        const uR = s.driveOut.u + s.yawOut.u;
+        const F = uL + uR;
+        const M = (uR - uL) * (+p.arm);
         return {
           x:     s.v * Math.cos(s.theta),
           y:     s.v * Math.sin(s.theta),
@@ -189,9 +186,8 @@
       },
       integrator: "rk4",
       postStep: (s, p, dt) => {
-        s.x = clamp(s.x, -WORLD_R, WORLD_R);
-        s.y = clamp(s.y, -WORLD_R, WORLD_R);
-        s.theta = wrapAngle(s.theta);
+        LIB.Saturate.box2D(s, "x", "y", WORLD_R, WORLD_R);
+        s.theta = LIB.Util.wrapAngle(s.theta);
         if (holdDetector) holdDetector.step(dt, s, p);
       },
     },
@@ -244,45 +240,18 @@
       ctx.beginPath(); ctx.moveTo(cur.px, cur.py); ctx.lineTo(tgt.px, tgt.py); ctx.stroke();
       ctx.setLineDash([]);
 
-      // Cart body
-      ctx.save(); ctx.translate(cur.px, cur.py); ctx.rotate(-state.theta);
-      const bodyW = scale * 0.7, bodyH = scale * 0.55;
-      ctx.fillStyle = "#2b3340"; ctx.strokeStyle = "#6a7384"; ctx.lineWidth = 1.5;
-      roundRect(ctx, -bodyW / 2, -bodyH / 2, bodyW, bodyH, 6);
-      ctx.fill(); ctx.stroke();
-      ctx.fillStyle = "#4ea1ff";
-      ctx.beginPath();
-      ctx.moveTo( bodyW / 2 - 2, 0);
-      ctx.lineTo( bodyW / 2 - 12, -bodyH * 0.32);
-      ctx.lineTo( bodyW / 2 - 12,  bodyH * 0.32);
-      ctx.closePath(); ctx.fill();
-      const motW = bodyW * 0.30, motH = bodyH * 0.22;
-      ctx.fillStyle = "#3a4453"; ctx.strokeStyle = "#6a7384";
-      ctx.fillRect(-motW / 2, -bodyH / 2 - motH, motW, motH);
-      ctx.strokeRect(-motW / 2, -bodyH / 2 - motH, motW, motH);
-      ctx.fillRect(-motW / 2,  bodyH / 2,         motW, motH);
-      ctx.strokeRect(-motW / 2, bodyH / 2,        motW, motH);
-
-      const motorScaleMax = Math.max(1,
-        Math.abs(state.lastUL) + Math.abs(state.lastUR));
-      const uS = scale * 0.6 / motorScaleMax;
-      LIB.Draw.arrow(ctx, 0, -bodyH / 2 - motH / 2,
-                          state.lastUL * uS, -bodyH / 2 - motH / 2, {
-        color: LIB.Util.getVar("--cP"), width: 2, head: 6,
-        label: "L " + state.lastUL.toFixed(0), fontSize: 10,
-      });
-      LIB.Draw.arrow(ctx, 0,  bodyH / 2 + motH / 2,
-                          state.lastUR * uS,  bodyH / 2 + motH / 2, {
-        color: LIB.Util.getVar("--cI"), width: 2, head: 6,
-        label: "R " + state.lastUR.toFixed(0), fontSize: 10,
-      });
-      ctx.restore();
+      // Rover body — centralised renderer with motor-arrow overlay.
+      const uL = state.driveOut.u - state.yawOut.u;
+      const uR = state.driveOut.u + state.yawOut.u;
+      LIB.VehicleRender.rover(ctx, cur.px, cur.py, state.theta, {
+        bodyW: scale * 0.7, bodyH: scale * 0.55,
+      }, { uL, uR, scale });
 
       // Status
       ctx.fillStyle = "#aab2c0"; ctx.font = "12px ui-sans-serif";
       ctx.textAlign = "left"; ctx.textBaseline = "top";
-      ctx.fillText("dist " + state.lastDE.toFixed(2) +
-                   " m   yaw err " + (state.lastYE * 180 / Math.PI).toFixed(1) + "°", 10, 8);
+      ctx.fillText("dist " + state.driveOut.e.toFixed(2) +
+                   " m   yaw err " + (state.yawOut.e * 180 / Math.PI).toFixed(1) + "°", 10, 8);
       ctx.fillText("Click anywhere to set the target.", 10, 24);
 
       if (holdDetector) LIB.Draw.holdBadge(ctx, W, H, holdDetector);
@@ -291,34 +260,20 @@
     onPointer: (type, mx, my, L, state /*, params*/) => {
       if (type !== "down") return;
       const w = L.toWorld({ px: mx, py: my });
-      state.tx = clamp(w.x, -WORLD_R + 0.2, WORLD_R - 0.2);
-      state.ty = clamp(w.y, -WORLD_R + 0.2, WORLD_R - 0.2);
+      state.tx = LIB.Util.clamp(w.x, -WORLD_R + 0.2, WORLD_R - 0.2);
+      state.ty = LIB.Util.clamp(w.y, -WORLD_R + 0.2, WORLD_R - 0.2);
       if (holdDetector) holdDetector.reset();
     },
 
     init: () => {
       holdDetector = LIB.HoldDetector.create({
         thresholdFrac: 0.02, durationS: 10,
-        metric: (s) => ({ error: s.lastDE, scale: WORLD_R }),
+        metric: (s) => ({ error: s.driveOut.e, scale: WORLD_R }),
       });
     },
 
     physHz: 240,
   };
-
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.lineTo(x + w - r, y);
-    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
-    ctx.lineTo(x + w, y + h - r);
-    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
-    ctx.lineTo(x + r, y + h);
-    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
-    ctx.lineTo(x, y + r);
-    ctx.quadraticCurveTo(x, y, x + r, y);
-    ctx.closePath();
-  }
 
   ControlLessons.rover = SPEC;
 })();

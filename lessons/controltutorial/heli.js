@@ -10,8 +10,9 @@
 //  30 / 40 m). The "controlled" badge appears after holding within ±2 % of
 //  the reference for 10 s.
 //
-//  Controller: state.ctrlLoop = { I, ePrev, bbDir }, advanced through the
-//  shared LIB.PID and LIB.BangBang.flip primitives.
+//  Controller is declarative (spec.controllers); the bang-bang offset around
+//  hover is folded into preStep (Tcmd = m·g + bb.u) since the controller's
+//  raw "u above hover" doesn't know the plant's gravity bias.
 // =============================================================================
 
 (function () {
@@ -26,8 +27,6 @@
   const ALT_MAX = 60;
   const SIGMA_W = 6;
   const TAU_W   = 2.0;
-
-  function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
   let holdDetector  = null;
   let mountedHandle = null;
@@ -54,16 +53,17 @@
     state: () => ({
       h: 0, vh: 0, T: T_HOVER,
       ctrlLoop: { I: 0, ePrev: 0, bbDir: 0 },
+      ctrlOut:  { e: 0, u: 0, uP: 0, uI: 0, uD: 0 },
       wind: 0,
       ref: 20,            // persisted across mode switches; mirrors the slider
-      lastE: 0, lastUP: 0, lastUI: 0, lastUD: 0,
-      lastU: 0, lastFw: 0, lastTcmd: T_HOVER, lastT: T_HOVER,
+      lastFw: 0, lastTcmd: T_HOVER,
       t: 0,
     }),
 
     onReset: (s) => {
-      s.T = T_HOVER; s.lastTcmd = T_HOVER; s.lastT = T_HOVER;
+      s.T = T_HOVER; s.lastTcmd = T_HOVER;
       s.ctrlLoop = { I: 0, ePrev: 0, bbDir: 0 };
+      s.ctrlOut  = { e: 0, u: 0, uP: 0, uI: 0, uD: 0 };
       s.wind = 0;
       if (holdDetector) holdDetector.reset();
     },
@@ -111,16 +111,16 @@
       ];
       return {
         Reference: {
-          kind: "dynamic", title: "Reference",
-          items: (s) => [[
+          title: "Reference",
+          items: [
             { key: "ref", label: "h*", min: 1, max: 50, step: 0.1,
-              value: (s && s.ref != null) ? s.ref : 20,
+              value: (state && state.ref != null) ? state.ref : 20,
               tip: "Target altitude (m).",
               onChange: (v, st) => {
                 st.ref = v;
                 if (holdDetector) holdDetector.reset();
               } },
-          ]],
+          ],
           actions: [5, 10, 20, 30, 40].map(v => ({
             label: v + " m", run: () => setRef(v),
           })),
@@ -150,12 +150,7 @@
           source: (s) => s.h },
       ];
       if (state.mode === "bangbang") {
-        series.push(
-          { label: "deadHi", color: "#ef5350", lw: 1.0, dash: [4, 4],
-            source: (s, p) => (+p.ref || 0) + (+p.dead || 0) / 2 },
-          { label: "deadLo", color: "#ef5350", lw: 1.0, dash: [4, 4],
-            source: (s, p) => (+p.ref || 0) - (+p.dead || 0) / 2 },
-        );
+        series.push(...LIB.Plot.deadbandSeries({ refKey: "ref", deadKey: "dead" }));
       }
       return [
         { title: "altitude (m)", yMin: 0, yMax: ALT_MAX, yFmt: (v) => v.toFixed(1),
@@ -164,15 +159,16 @@
           yFmt: (v) => v.toFixed(0),
           series: [
             { label: "P",    color: LIB.Util.getVar("--cP"), lw: 1.2,
-              source: (s) => s.lastUP },
+              source: (s) => s.ctrlOut.uP },
             { label: "I",    color: LIB.Util.getVar("--cI"), lw: 1.2,
-              source: (s) => s.lastUI },
+              source: (s) => s.ctrlOut.uI },
             { label: "D",    color: LIB.Util.getVar("--cD"), lw: 1.2,
-              source: (s) => s.lastUD },
+              source: (s) => s.ctrlOut.uD },
             { label: "wind", color: LIB.Util.getVar("--cW"), lw: 1.2,
               source: (s) => s.lastFw },
             { label: "u",    color: LIB.Util.getVar("--cU"), lw: 2.0,
-              source: (s) => s.lastU },
+              // u plots as Tcmd − m·g so it reads as "extra above hover"
+              source: (s, p) => s.lastTcmd - (+p.mass) * (+p.g) },
           ] },
       ];
     },
@@ -181,74 +177,88 @@
       { label: "h",     units: "m",   value: (s) => s.h.toFixed(3) },
       { label: "ḣ",    units: "m/s", value: (s) => s.vh.toFixed(3) },
       { label: "T",     units: "N",   value: (s) => s.T.toFixed(2) },
-      { label: "err",   units: "m",   value: (s) => s.lastE.toFixed(3) },
+      { label: "err",   units: "m",   value: (s) => s.ctrlOut.e.toFixed(3) },
       { label: "∫err",                value: (s) => (s.ctrlLoop ? s.ctrlLoop.I : 0).toFixed(3) },
-      { label: "P",     units: "N",   value: (s) => s.lastUP.toFixed(2) },
-      { label: "I",     units: "N",   value: (s) => s.lastUI.toFixed(2) },
-      { label: "D",     units: "N",   value: (s) => s.lastUD.toFixed(2) },
-      { label: "u",     units: "N",   value: (s) => s.lastU.toFixed(2) },
+      { label: "P",     units: "N",   value: (s) => s.ctrlOut.uP.toFixed(2) },
+      { label: "I",     units: "N",   value: (s) => s.ctrlOut.uI.toFixed(2) },
+      { label: "D",     units: "N",   value: (s) => s.ctrlOut.uD.toFixed(2) },
+      { label: "u",     units: "N",   value: (s, p) => (s.lastTcmd - (+p.mass) * (+p.g)).toFixed(2) },
       { label: "wind",  units: "N",   value: (s) => s.lastFw.toFixed(2) },
+    ],
+
+    controllers: [
+      {
+        slot: "ctrlLoop", output: "ctrlOut",
+        modeKey: "mode",
+        pid: {
+          err:   (s, p) => (+p.ref || 0) - s.h,
+          dmeas: (s)    => s.vh,
+          gains: (s, p) => ({
+            kp: +p.kp || 0, ki: +p.ki || 0, kd: +p.kd || 0,
+            iClamp: +p.iClamp, uCap: +p.uMax,
+          }),
+        },
+        bangbang: {
+          flavor: "flip",
+          err:   (s, p) => (+p.ref || 0) - s.h,
+          gains: (s, p) => ({
+            dead: +p.dead || 0, effort: +p.effort || 0,
+          }),
+        },
+      },
     ],
 
     physics: {
       dof: ["h", "vh", "T"],
       preStep: (s, p, dt) => {
-        if (!s.ctrlLoop) s.ctrlLoop = { I: 0, ePrev: 0, bbDir: 0 };
         s.wind = LIB.Noise.ouStep(s.wind, SIGMA_W, TAU_W, dt);
-        const ref = +p.ref || 0;
-        const e = ref - s.h;
-        const m = +p.mass, g = +p.g;
-        let Tcmd, uP = 0, uI = 0, uD = 0;
-        if (p.mode === "bangbang") {
-          LIB.BangBang.flip.advance(s.ctrlLoop, e, { dead: +p.dead || 0 });
-          const out = LIB.BangBang.flip.effort(s.ctrlLoop,
-            { effort: +p.effort || 0 });
-          Tcmd = clamp(m * g + out.u, 0, +p.Tmax);
-        } else {
-          LIB.PID.advance(s.ctrlLoop, e, dt,
-            { ki: +p.ki || 0, iClamp: +p.iClamp });
-          const out = LIB.PID.effort(s.ctrlLoop, e, s.vh,
-            { kp: +p.kp || 0, kd: +p.kd || 0, uCap: +p.uMax });
-          uP = out.uP; uI = out.uI; uD = out.uD;
-          Tcmd = clamp((+p.offset || 0) + out.u, 0, +p.Tmax);
-        }
-        s.lastE    = e;
-        s.lastUP   = uP; s.lastUI = uI; s.lastUD = uD;
-        s.lastU    = Tcmd - m * g;
-        s.lastFw   = s.wind;
-        s.lastTcmd = Tcmd;
+        s.lastFw = s.wind;
       },
-      dxdt: (s, p /*, t*/) => {
+      // dxdt sees Tcmd through state.lastTcmd. We compute it from ctrlOut.u
+      // here in postStep AFTER the controller block runs — but that means
+      // dxdt during the FIRST integrator stage of this tick would read the
+      // PREVIOUS Tcmd. Better: compute Tcmd inside dxdt using a small helper
+      // that also writes to state for plot/readout.
+      //
+      // Simpler approach: compute Tcmd on read inside dxdt, and update
+      // state.lastTcmd in postStep so plots/readouts see the freshest value.
+      dxdt: (s, p) => {
         const m = +p.mass, g = +p.g, c = +p.drag, tau = +p.tau;
+        const Tcap = +p.Tmax;
+        const Tcmd_raw = (p.mode === "bangbang")
+          ? (m * g + s.ctrlOut.u)
+          : ((+p.offset || 0) + s.ctrlOut.u);
+        const Tcmd = LIB.Util.clamp(Tcmd_raw, 0, Tcap);
         return {
           h:  s.vh,
           vh: (s.T - m * g - c * s.vh + s.wind) / m,
-          T:  (s.lastTcmd - s.T) / Math.max(1e-3, tau),
+          T:  (Tcmd - s.T) / Math.max(1e-3, tau),
         };
       },
       integrator: "rk4",
       postStep: (s, p, dt) => {
-        s.T = clamp(s.T, 0, +p.Tmax);
-        if (s.h < 0)        { s.h = 0;        if (s.vh < 0) s.vh = 0; }
-        if (s.h > ALT_MAX)  { s.h = ALT_MAX;  if (s.vh > 0) s.vh = 0; }
-        s.lastT = s.T;
+        s.T = LIB.Util.clamp(s.T, 0, +p.Tmax);
+        LIB.Saturate.box1D(s, "h", 0, ALT_MAX, "vh");
+        // refresh lastTcmd for plot/readout consumers
+        const m = +p.mass, g = +p.g;
+        const Tcmd_raw = (p.mode === "bangbang")
+          ? (m * g + s.ctrlOut.u)
+          : ((+p.offset || 0) + s.ctrlOut.u);
+        s.lastTcmd = LIB.Util.clamp(Tcmd_raw, 0, +p.Tmax);
         if (holdDetector) holdDetector.step(dt, s, p);
       },
     },
 
-    layout: (W, H) => {
-      const groundY   = H - 28;
-      const topMargin = 30;
-      const altPxPerM = (groundY - topMargin) / ALT_MAX;
-      return {
-        W, H, groundY, topMargin, altPxPerM,
-        altToY: (a) => groundY - a * altPxPerM,
-        heliX:  W * 0.55,
-      };
-    },
+    // Altitude maps to pixel-Y via vertical linearTrack. The shell builds L
+    // each frame — render reads trackX/H/usableH directly.
+    layout: { kind: "linearTrack", axis: "vertical",
+              xMin: 0, xMax: ALT_MAX,
+              padX: 0, padY: 30, trackFrac: 0.55 },
 
     render: (ctx, L, state, params) => {
-      const { W, H, groundY, altToY, heliX } = L;
+      const { W, H } = L;
+      const groundY = L.xToPx(0);          // px-y of altitude 0
+      const heliX   = L.trackX;             // vertical-track column
 
       // Sky gradient
       const grad = ctx.createLinearGradient(0, 0, 0, H);
@@ -269,14 +279,14 @@
       ctx.fillStyle = "#55606f"; ctx.font = "11px ui-sans-serif";
       ctx.textAlign = "right"; ctx.textBaseline = "middle";
       for (let a = 0; a <= ALT_MAX; a += 10) {
-        const y = altToY(a);
+        const y = L.xToPx(a);
         ctx.beginPath(); ctx.moveTo(28, y); ctx.lineTo(W, y); ctx.stroke();
         ctx.fillText(a + " m", 26, y);
       }
 
       // Reference line + ±2 % band
       const ref = +params.ref || 0;
-      const refY = altToY(ref);
+      const refY = L.xToPx(ref);
       ctx.strokeStyle = LIB.Util.getVar("--cRef");
       ctx.setLineDash([6, 4]); ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(34, refY); ctx.lineTo(W - 6, refY); ctx.stroke();
@@ -287,15 +297,15 @@
 
       const halfBand = ref * 0.02;
       ctx.fillStyle = "rgba(102,187,106,0.10)";
-      ctx.fillRect(34, altToY(ref + halfBand),
-                   W - 40, altToY(ref - halfBand) - altToY(ref + halfBand));
+      ctx.fillRect(34, L.xToPx(ref + halfBand),
+                   W - 40, L.xToPx(ref - halfBand) - L.xToPx(ref + halfBand));
 
       // Helicopter
-      const heliY = altToY(state.h);
-      drawHelicopter(ctx, heliX, heliY, state.t, state.T / Math.max(1e-3, T_HOVER));
+      const heliY = L.xToPx(state.h);
+      LIB.VehicleRender.heli(ctx, heliX, heliY, state.t, state.T / Math.max(1e-3, T_HOVER));
 
       // Downwash
-      const downwashLen = clamp((state.T / T_HOVER) * 30, 6, 80);
+      const downwashLen = LIB.Util.clamp((state.T / T_HOVER) * 30, 6, 80);
       ctx.strokeStyle = "rgba(78,161,255,0.4)"; ctx.lineWidth = 1.5;
       for (let i = -3; i <= 3; i++) {
         ctx.beginPath();
@@ -313,7 +323,8 @@
         });
       }
 
-      // Weight + offset arrows side-by-side
+      // Weight + offset arrows side-by-side (still inline — they're plant-
+      // specific labels and the geometry is bespoke).
       const F_PX = 1.0;
       const cap = (v) => {
         const C = 80; return Math.sign(v) * Math.min(Math.abs(v), C);
@@ -330,30 +341,17 @@
         });
       }
 
-      // PID component arrows (PID mode only)
+      // PID component arrows (PID mode only) — vertical stack, displayed as
+      // column of arrows aligned to the right of the heli.
       if (params.mode !== "bangbang") {
-        const fy = (F) => {
-          const CAP = 70; let dy = -F * F_PX;
-          if (Math.abs(dy) > CAP) dy = Math.sign(dy) * CAP;
-          return dy;
-        };
-        const baseY = heliY + 30;
-        const colDx = 30;
-        const colX0 = heliX + 70;
         const items = [
-          { F: state.lastUP, color: LIB.Util.getVar("--cP"), label: "P" },
-          { F: state.lastUI, color: LIB.Util.getVar("--cI"), label: "I" },
-          { F: state.lastUD, color: LIB.Util.getVar("--cD"), label: "D" },
-          { F: state.lastU,  color: LIB.Util.getVar("--cU"), label: "u" },
+          { F: state.ctrlOut.uP, color: LIB.Util.getVar("--cP"), label: "P" },
+          { F: state.ctrlOut.uI, color: LIB.Util.getVar("--cI"), label: "I" },
+          { F: state.ctrlOut.uD, color: LIB.Util.getVar("--cD"), label: "D" },
+          { F: state.lastTcmd - weight, color: LIB.Util.getVar("--cU"), label: "u" },
         ];
-        for (let i = 0; i < items.length; i++) {
-          const it = items[i];
-          const x  = colX0 + colDx * i;
-          LIB.Draw.arrow(ctx, x, baseY, x, baseY + fy(it.F), {
-            color: it.color, width: 2, head: 8,
-            label: it.label + " " + it.F.toFixed(0), fontSize: 10,
-          });
-        }
+        LIB.Draw.componentArrows(ctx, heliX + 70, heliY + 30, items,
+          { axis: "y", gap: 30, pxPerN: F_PX, cap: 70, head: 8, fontSize: 10 });
       }
 
       // Telemetry
@@ -377,46 +375,6 @@
 
     physHz: 240,
   };
-
-  function drawHelicopter(ctx, cx, cy, t, thrustRatio) {
-    ctx.fillStyle = "#2b3340"; ctx.strokeStyle = "#6a7384"; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.ellipse(cx, cy, 28, 14, 0, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = "#4ea1ff44"; ctx.strokeStyle = "#4ea1ff88";
-    ctx.beginPath(); ctx.ellipse(cx + 12, cy - 2, 10, 7, 0, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = "#2b3340"; ctx.strokeStyle = "#6a7384";
-    ctx.beginPath();
-    ctx.moveTo(cx - 18, cy - 3);
-    ctx.lineTo(cx - 70, cy - 1);
-    ctx.lineTo(cx - 70, cy + 1);
-    ctx.lineTo(cx - 18, cy + 4);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(cx - 65, cy);
-    ctx.lineTo(cx - 75, cy - 10);
-    ctx.lineTo(cx - 70, cy);
-    ctx.closePath(); ctx.fill(); ctx.stroke();
-    const tt = t * 18;
-    ctx.strokeStyle = "#aab2c0"; ctx.lineWidth = 1.5;
-    ctx.save(); ctx.translate(cx - 73, cy - 4); ctx.rotate(tt);
-    ctx.beginPath(); ctx.moveTo(-7, 0); ctx.lineTo(7, 0); ctx.stroke();
-    ctx.restore();
-    ctx.strokeStyle = "#6a7384"; ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(cx - 24, cy + 14); ctx.lineTo(cx + 22, cy + 14);
-    ctx.moveTo(cx - 18, cy + 12); ctx.lineTo(cx - 22, cy + 14);
-    ctx.moveTo(cx + 16, cy + 12); ctx.lineTo(cx + 20, cy + 14);
-    ctx.stroke();
-    ctx.save(); ctx.translate(cx, cy - 10);
-    const rotSpd = 30 + thrustRatio * 10;
-    ctx.rotate((t * rotSpd) % (2 * Math.PI));
-    ctx.strokeStyle = "rgba(230,233,239,0.35)"; ctx.lineWidth = 4;
-    ctx.beginPath(); ctx.moveTo(-44, 0); ctx.lineTo(44, 0); ctx.stroke();
-    ctx.strokeStyle = "rgba(230,233,239,0.85)"; ctx.lineWidth = 1.2;
-    ctx.beginPath(); ctx.arc(0, 0, 44, 0, 2 * Math.PI); ctx.stroke();
-    ctx.restore();
-    ctx.strokeStyle = "#6a7384"; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(cx, cy - 5); ctx.lineTo(cx, cy - 14); ctx.stroke();
-  }
 
   ControlLessons.heli = SPEC;
 })();
