@@ -25,3 +25,23 @@ Progress is recorded here by implementation agents. Each completed task appends 
 - **Files created**: package.json, tests/_shim.js, tests/smoke.test.js
 - **Files modified**: (none)
 - **Tests**: 2/2 passing
+
+## Task T1.2.1: airgap-grid.js — polar FV operator, sliding band, field & flux
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: lib/airgap-grid.js
+- **Files modified**: (none)
+- **Tests**: 2/2 passing (smoke suite; engine tests authored in T1.4.2)
+- **Verified**:
+  - All API members present: setMaterials, setRotorRegion, setRotorAngle, setIronScale, getReluctivity, setIronReluctivity, matvec, diagonal, assembleRHS, field, fluxLinkage, setGapBand, plus public properties ell/r/dr/dtheta/Nr/Ntheta/gapBand/dA
+  - matvec(ones) max residual (off-pin) = 2.9e-10 < 1e-9 (constant annihilation)
+  - diagonal() returns aP copy (identity at pin)
+  - getReluctivity() returns a copy (mutations don't affect operator)
+  - setIronReluctivity round-trip: doubles iron cells, leaves non-iron unchanged, matvec changes, restore returns entrywise to within 1e-12
+  - setIronScale(2) doubles iron nu; setIronScale(1) restores
+  - setRotorAngle(dtheta) shifts template by one cell (sub-machine-precision relative diff)
+  - Non-rotor cells unchanged by setRotorAngle
+  - setGapBand stores iInner/iOuter on op.gapBand
+  - fluxLinkage agrees with analytic expectation
+  - assembleRHS({Jz:null, magnetization:null}) returns zero vector (b[pin]=0 enforced)
+  - Module loads under node:test require shim with no DOM access
