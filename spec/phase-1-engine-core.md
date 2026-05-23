@@ -264,7 +264,9 @@ no module in this phase has any knowledge of windings, machines, or the UI.
   - `lib/airgap-torque.js` — IIFE attaching `LIB.AirgapTorque`. API:
     - `LIB.AirgapTorque.arkkio(op, Az, { gapBand=op.gapBand }) → number` —
       `T = (ell / (μ₀·(rOuter_gap − rInner_gap))) · Σ_{i∈gapBand} Σ_j
-      r[i]·Br[idx]·Bt[idx]·dr·dtheta`, where `rOuter_gap` and `rInner_gap`
+      r[i]²·Br[idx]·Bt[idx]·dr·dtheta` — the integrand uses the polar area
+      element `dS = r·dr·dθ`, so the radial factor is `r[i]²` (one `r` is the
+      Maxwell-stress moment arm, one comes from `dS`), where `rOuter_gap` and `rInner_gap`
       are the face-to-face radial extent of the gap-band cells (gapBand covers
       cells `iInner..iOuter-1`): `rOuter_gap = op.r[gapBand.iOuter-1] + op.dr/2`
       and `rInner_gap = op.r[gapBand.iInner] − op.dr/2`. `Br`/`Bt` from
@@ -311,25 +313,58 @@ no module in this phase has any knowledge of windings, machines, or the UI.
   be created first).
 - **Description**: The engine validation suite and the shared analytic-salient
   fixture it is built on. Validates the grid (1.2.1), solver (1.3.1), and torque
-  (1.4.1) against closed-form and convergence criteria. The salient fixture
-  realizes `1/g(θ,θr) ∝ a₀ + a₂cos2(θ−θr)` by modulating the air-gap cells'
-  reluctivity per θ-column (`ν_gap(θ) ∝ g(θ,θr)`, so permeance ∝ `1/g`), with a
-  sinusoidal stator winding mask `n(θ)=N·cosθ`. The gap-modulation cells are
-  declared the rotor region, so `setRotorAngle(θr)` rotates the saliency — this
-  exercises the sliding band and produces the analytic `L(θr)`/`T(θr)` sweep.
+  (1.4.1) against closed-form and convergence criteria.
+
+  **Clarified 2026-05-24 (spec-contradiction resolution, "Real-iron, strict"):**
+  the original "modulate air-gap cell reluctivity" permeance-emulation fixture is
+  REPLACED by a real magnetic machine, because a θ-modulated all-air annulus
+  carries no net Maxwell shear and makes the Arkkio integral identically ~0 —
+  it cannot validate Arkkio. The two Arkkio acceptance tests and their
+  tolerances (`< 0.03`, `< 0.02`) are kept; the Arkkio prefactor is corrected to
+  `r²` (Task 1.4.1); the grid is raised so the gap is radially resolved.
+
+  The salient fixture is a **real magnetic machine**: an iron rotor
+  (`ν = ν_iron`), a genuine air gap (`ν = ν₀`, never modulated), and an iron
+  stator (`ν = ν_iron`), carrying a sinusoidal stator winding mask `n(θ)=N·cosθ`.
+  Saliency is geometric: the rotor iron's outer surface is θ-modulated (a
+  salient/staircase rotor on the polar grid — the radial depth of rotor-iron
+  cells varies per θ-column, with air filling the remainder up to the gap band)
+  so that the effective air-gap permeance realizes
+  `1/g(θ,θr) ∝ a₀ + a₂cos2(θ−θr)`. The dedicated air-gap band
+  `[rGapInner, rGapOuter]` (see `SALIENT_DEFAULTS`) is pure air at EVERY θ-column
+  and sits above the highest rotor-surface excursion; it is the band Arkkio
+  integrates over. The rotor-iron cells (whose θ-dependent depth encodes the
+  saliency) are declared the rotor region, so `setRotorAngle(θr)` rotates the
+  saliency — this exercises the sliding band and produces the analytic
+  `L(θr)`/`T(θr)` sweep, AND a non-zero, physically meaningful Arkkio torque.
 - **Files to create**:
   - `tests/engine/_fixtures.js` — not a test file (no `.test.js`). Exports:
     - `assertClose(actual, expected, tol, msg)` — absolute/relative float helper.
     - `SALIENT_DEFAULTS` — a named export object holding the concrete fixture
       constants used by the analytic-salient tests and any downstream phase
       (e.g. Phase 4's extract tests) as a single source of truth:
-      `{ Nr: 12, Ntheta: 256, rInner: 0.04, rOuter: 0.06, ell: 1,
-         a0: 1.0, a2: 0.3, N: 100, current: 1.0 }`.
+      `{ Nr: 40, Ntheta: 256, rInner: 0.04, rOuter: 0.06, ell: 1,
+         rGapInner: 0.048, rGapOuter: 0.052, a0: 1.0, a2: 0.3, N: 100,
+         current: 1.0 }`.
+      Geometry contract (real iron↔air-gap↔iron machine):
+      - `Nr ≥ 32` and the always-air gap band `[rGapInner, rGapOuter]` MUST span
+        ≥8 radial cells. With these defaults `dr = (rOuter−rInner)/Nr = 0.0005 m`
+        and the gap span `0.004 m` = 8 cells.
+      - Rotor iron occupies `[rInner, rGapInner]`; the salient rotor surface is
+        realized WITHIN that band by per-θ-column modulation of the rotor-iron
+        outer depth (air fills the rest of the band up to `rGapInner`), so the
+        rotor surface never enters the gap band.
+      - Stator iron occupies `[rGapOuter, rOuter]`.
+      - `[rGapInner, rGapOuter]` is pure air at every column and is passed to
+        `op.setGapBand` as the Arkkio integration band.
       Consumers call `buildSalient(SALIENT_DEFAULTS)` rather than hard-coding
       these values.
-    - `buildSalient({ Nr, Ntheta, rInner, rOuter, ell, a0, a2, N, current })
+    - `buildSalient({ Nr, Ntheta, rInner, rOuter, ell, rGapInner, rGapOuter,
+      a0, a2, N, current })
       → { op, Jz, coilMasks, ironMask, sweepThetaR(thetaR) }` — constructs the
-      `GridOperator`, the salient gap mask (rotor region), the sinusoidal stator
+      `GridOperator`, the salient iron rotor (rotor region) with its θ-modulated
+      surface depth, the always-air gap band `[rGapInner, rGapOuter]` registered
+      via `op.setGapBand` as the Arkkio band, the iron stator, the sinusoidal stator
       `Jz`/`coilMasks`, the `ironMask`, and a helper that sets `thetaR`, solves,
       and returns `{ Az, Br, Bt, L11, torqueArkkio }`.
     - `fitCos2(thetaRs, Ls) → { L0, L2, r2 }` — least-squares fit of
@@ -347,9 +382,10 @@ no module in this phase has any knowledge of windings, machines, or the UI.
       `|Σ_j Br[midGapRow, j]·dtheta| < 1e-9`.
   - `tests/engine/convergence.test.js`:
     - › `"torque error decreases with Nθ"` — build the salient fixture at
-      `Ntheta ∈ {64, 128, 256}` (fixed `Nr=12`), compute relative-L∞ Arkkio
-      error vs the closed form at each; assert the error is strictly monotone
-      decreasing in `Ntheta` and `< 0.03` at `Ntheta=256`.
+      `Ntheta ∈ {64, 128, 256}` (fixed `Nr = SALIENT_DEFAULTS.Nr`, i.e. ≥32 with
+      a ≥8-cell air gap), compute relative-L∞ Arkkio error vs the closed form at
+      each; assert the error is strictly monotone decreasing in `Ntheta` and
+      `< 0.03` at `Ntheta=256`.
   - `tests/engine/solver.test.js`:
     - › `"matvec annihilates constants"` — assert `‖op.matvec(ones)‖∞ < 1e-9`
       away from the pinned node.
