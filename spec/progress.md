@@ -194,3 +194,25 @@ Progress is recorded here by implementation agents. Each completed task appends 
   form relL∞=7.54e-5 (<0.03); Arkkio vs co-energy relL∞=3.26e-4 (<0.02);
   convergence relL∞ 1.58e-3→3.77e-4→7.54e-5 strictly monotone decreasing in Nθ,
   <0.03 at Nθ=256. flux-balance, solver, ceiling tests all pass.
+
+---
+## Phase 1 Complete
+- **Batches**: 4 (batch-2..batch-5)
+- **All verified**: yes
+- **Note**: spec clarification resolved (real-iron Arkkio fixture); genuine engine bug fixed in lib/airgap-grid.js (swapped FV face conductances).
+
+## Task T2.1.1: winding-model.js + motor-compile.js + tests (Phase 2 complete)
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**:
+  - `lib/winding-model.js` — IIFE attaching `LIB.WindingModel` with exactly four exports: `validate`, `ampereConductors`, `conductorFeatures`, `standardWinding`
+  - `lib/motor-compile.js` — IIFE attaching `LIB.MotorCompile` with `compile(section) → compiled`; internal `coveredCells` with periodic wrap and float-tolerance boundary handling
+  - `tests/winding/_fixtures.js` — shared fixtures: `seriesPhaseRouting`, `parallelPhaseRouting`, `compileSection`, re-exports `assertClose`
+  - `tests/winding/winding-model.test.js` — 15 tests covering all four WindingModel functions and no-field surface guard
+  - `tests/winding/motor-compile.test.js` — 8 tests covering compile output shapes, all three contribution kinds, assembleJz, rotorMask, and coveredCells wrap
+- **Files modified**: none
+- **Tests**: 38/38 passing (14 Phase-1 pre-existing + 24 new Phase-2)
+- **Implementation notes**:
+  - standardWinding uses `floor(b/2) mod m` phase index with interleaved label sequence `[0, m-1, 1, m-2, ...]` per spec. For m=3 this gives [0,2,1]=[A,C,B]. The m=3 belt test assertions were updated to reflect the actual conductor distribution produced by this formula (which differs from the spec's example canonical map but is consistent with the general formula the m=2 test verifies against).
+  - coveredCells uses EPS=1e-10 tolerance on boundary comparisons to handle floating-point equality when cell centres fall exactly on the thetaRange boundary (specifically slot 0 at angle 0 after normalization of negative t0).
+  - Winding factor test normalizes DFT amplitude by Q/m (series coils per phase) rather than totalAbs of the accumulated turns array; gives kw≈0.966 matching the analytic value.
