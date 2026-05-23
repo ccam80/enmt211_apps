@@ -1,0 +1,11 @@
+{
+  "name": "enmt211-apps",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

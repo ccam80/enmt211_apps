@@ -13,3 +13,15 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - Frozen set byte-identical to baseline
   - All 6 acceptance criteria verified
 
+
+---
+## Phase 0 Complete
+- **Batches**: 1
+- **All verified**: yes
+
+## Task T1.1.1: package.json + node:test runner + headless window shim
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: package.json, tests/_shim.js, tests/smoke.test.js
+- **Files modified**: (none)
+- **Tests**: 2/2 passing
