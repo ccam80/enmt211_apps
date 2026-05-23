@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AC Motors</title>
+<link rel="stylesheet" href="../../lib/shell.css">
+</head>
+<body>
+<!--
+  AC-motor lesson hub. Each lesson registers its spec on
+  window.AcMotorLessons via its own *.js file; this page collects them
+  and mounts via LIB.App.runTabs. As more sub-lessons land
+  (two-phase, three-phase, squirrel cage, shaded pole, aux winding) they
+  get added here as additional tabs.
+-->
+<script src="../../lib/util.js"></script>
+<script src="../../lib/canvas-type.js"></script>
+<script src="../../lib/registry.js"></script>
+<script src="../../lib/plot.js"></script>
+<script src="../../lib/integrate.js"></script>
+<script src="../../lib/draw.js"></script>
+<script src="../../lib/drag-smoother.js"></script>
+<script src="../../lib/drag.js"></script>
+<script src="../../lib/header-buttons.js"></script>
+<script src="../../lib/layout3d.js"></script>
+<script src="../../lib/em-physics.js"></script>
+<script src="../../lib/field-render.js"></script>
+<script src="../../lib/coil-render.js"></script>
+<script src="../../lib/app.js"></script>
+<script src="../../lib/layout.js"></script>
+<script src="../../lib/three-phase.js"></script>
+<script src="./coaxial-loops.js"></script>
+<script src="./squirrel-cage.js"></script>
+<script src="./rotating-field.js"></script>
+<script src="./three-phase-rotor.js"></script>
+<script src="./three-phase-cage.js"></script>
+<script src="./pole-pairs.js"></script>
+<script>
+  LIB.App.runTabs({
+    title: "AC Motors",
+    persistKey: "ac-motor-active-lesson",
+    tabs: [
+      { label: "coaxial-loops",     spec: window.AcMotorLessons.coaxialLoops    },
+      { label: "rotating-field",    spec: window.AcMotorLessons.rotatingField   },
+      { label: "three-phase-rotor", spec: window.AcMotorLessons.threePhaseRotor },
+      { label: "three-phase-cage",  spec: window.AcMotorLessons.threePhaseCage  },
+      { label: "squirrel-cage",     spec: window.AcMotorLessons.squirrelCage    },
+      { label: "pole-pairs",        spec: window.AcMotorLessons.polePairs       },
+    ],
+  });
+</script>
+</body>
+</html>

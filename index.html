@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ENMT211 Lesson Apps</title>
+<link rel="stylesheet" href="./lib/shell.css">
+<style>
+  /* shell.css locks html/body to 100% with overflow:hidden for lesson pages.
+     The landing page is a vertically-scrolling card grid, so re-enable normal
+     document flow here. Card styles themselves come from shell.css. */
+  html, body { height: auto; overflow: visible; }
+  body {
+    padding: 24px clamp(16px, 4vw, 48px) 64px;
+    background: var(--bg); color: var(--ink);
+  }
+  .landing-header {
+    max-width: 1200px;
+    margin: 0 auto 28px;
+  }
+  .landing-header h1 {
+    font-size: clamp(20px, 3.2vw, 30px);
+    margin: 0 0 6px;
+    letter-spacing: 0.2px;
+  }
+  .landing-header p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  /* Tighter card grid sizing on the landing page only — slightly larger
+     minmax so each topic gets a more prominent tile. */
+  .card-grid {
+    max-width: 1200px;
+    margin: 0 auto;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 18px;
+  }
+</style>
+</head>
+<body>
+
+<div class="landing-header">
+  <h1>ENMT211 Lesson Apps</h1>
+  <p>Pick a lesson group. Each tile previews the first activity in that group.</p>
+</div>
+
+<div class="card-grid" id="cards"></div>
+
+<!-- ---------------------------------------------------------------------------
+     Load every shared lib so any lesson spec can render. Order matches the
+     dependency layering used by the per-topic index pages.
+     --------------------------------------------------------------------------- -->
+<script src="./lib/util.js"></script>
+<script src="./lib/canvas-type.js"></script>
+<script src="./lib/registry.js"></script>
+<script src="./lib/plot.js"></script>
+<script src="./lib/integrate.js"></script>
+<script src="./lib/draw.js"></script>
+<script src="./lib/thermal.js"></script>
+<script src="./lib/end-stop.js"></script>
+<script src="./lib/match-hint.js"></script>
+<script src="./lib/noise.js"></script>
+<script src="./lib/pid.js"></script>
+<script src="./lib/control-block.js"></script>
+<script src="./lib/saturate.js"></script>
+<script src="./lib/hold-detector.js"></script>
+<script src="./lib/position-torque.js"></script>
+<script src="./lib/drag-smoother.js"></script>
+<script src="./lib/layout.js"></script>
+<script src="./lib/drag.js"></script>
+<script src="./lib/lash.js"></script>
+<script src="./lib/contact.js"></script>
+<script src="./lib/screw-render.js"></script>
+<script src="./lib/screw-physics.js"></script>
+<script src="./lib/belt-render.js"></script>
+<script src="./lib/wheel-chain.js"></script>
+<script src="./lib/wheel-chain-view.js"></script>
+<script src="./lib/gear-render.js"></script>
+<script src="./lib/gear-pair.js"></script>
+<script src="./lib/rigid-coupling.js"></script>
+<script src="./lib/stepper-drive.js"></script>
+<script src="./lib/cart-render.js"></script>
+<script src="./lib/vehicle-render.js"></script>
+<script src="./lib/header-buttons.js"></script>
+<script src="./lib/layout3d.js"></script>
+<script src="./lib/em-physics.js"></script>
+<script src="./lib/field-render.js"></script>
+<script src="./lib/coil-render.js"></script>
+<script src="./lib/three-phase.js"></script>
+<script src="./lib/app.js"></script>
+
+<!-- Each lesson .js IIFE registers its spec on a topic-specific window
+     namespace (LinearLessons, RotationalLessons, ControlLessons,
+     PidControlLessons, TutorialLessons). It does not auto-mount. -->
+<script src="./lessons/linear_transmission/lead-screw.js"></script>
+<script src="./lessons/linear_transmission/ball-screw.js"></script>
+<script src="./lessons/linear_transmission/conveyor.js"></script>
+<script src="./lessons/linear_transmission/whole-system.js"></script>
+<script src="./lessons/rotational_transmission/gears.js"></script>
+<script src="./lessons/rotational_transmission/backlash.js"></script>
+<script src="./lessons/rotational_transmission/belt-and-pulley.js"></script>
+<script src="./lessons/rotational_transmission/whole-system.js"></script>
+<script src="./lessons/controltutorial/car.js"></script>
+<script src="./lessons/controltutorial/carwind.js"></script>
+<script src="./lessons/controltutorial/heli.js"></script>
+<script src="./lessons/controltutorial/rover.js"></script>
+<script src="./lessons/pidcontrol/single-cart.js"></script>
+<script src="./lessons/pidcontrol/three-cart.js"></script>
+<script src="./lessons/transmission_tutorial/gear-belt-payload.js"></script>
+<script src="./lessons/transmission_tutorial/lead-screw-stepper.js"></script>
+<script src="./lessons/ac_motor/coaxial-loops.js"></script>
+<script src="./lessons/ac_motor/rotating-field.js"></script>
+<script src="./lessons/ac_motor/three-phase-rotor.js"></script>
+<script src="./lessons/ac_motor/squirrel-cage.js"></script>
+
+<script>
+"use strict";
+(function () {
+
+  // ---- Card definitions ---------------------------------------------------
+  // Each entry: { href, title, subtitle, getSpec }. getSpec is a getter
+  // (rather than a direct ref) so a missing namespace doesn't blow up the
+  // whole page — the card just falls back to its placeholder.
+  const CARDS = [
+    {
+      href: "./lessons/linear_transmission/index.html",
+      title: "Linear Transmission",
+      subtitle: "lead-screw, ball-screw, conveyor, whole-system",
+      getSpec: () => window.LinearLessons && window.LinearLessons.leadScrew,
+    },
+    {
+      href: "./lessons/rotational_transmission/index.html",
+      title: "Rotational Transmission",
+      subtitle: "gears, backlash, belt-and-pulley, whole-system",
+      getSpec: () => window.RotationalLessons && window.RotationalLessons.gears,
+    },
+    {
+      href: "./lessons/controltutorial/index.html",
+      title: "Control This System",
+      subtitle: "car, car + crosswind, helicopter, 2D rover",
+      getSpec: () => window.ControlLessons && window.ControlLessons.car,
+    },
+    {
+      href: "./lessons/pidcontrol/index.html",
+      title: "PID Control",
+      subtitle: "single-cart, three-cart",
+      getSpec: () => window.PidControlLessons && window.PidControlLessons.singleCart,
+    },
+    {
+      href: "./lessons/transmission_tutorial/index.html",
+      title: "Tutorial 2 — Motion Transmission",
+      subtitle: "Q1 gear-pair → belt, Q2 lead-screw stepper",
+      getSpec: () => window.TutorialLessons && window.TutorialLessons.gearBeltPayload,
+    },
+    {
+      href: "./lessons/ac_motor/index.html",
+      title: "AC Motors",
+      subtitle: "coaxial-loops, rotating-field, three-phase-rotor, squirrel-cage",
+      getSpec: () => window.AcMotorLessons && window.AcMotorLessons.coaxialLoops,
+    },
+  ];
+
+  // ---- Spec → icon -------------------------------------------------------
+  //
+  // Each lesson spec can expose an optional `icon(ctx, W, H)` that draws a
+  // viewport-agnostic glyph. The function should size everything in terms of
+  // Math.min(W, H) so it scales to any thumbnail size. We do NOT fall back to
+  // spec.render for cards — the live renderers assume lesson-canvas
+  // dimensions and font tokens, and they render badly at thumbnail scale.
+
+  function renderThumb(canvas, spec) {
+    const ctx = canvas.getContext("2d");
+    const layoutPx = LIB.Util.fitCanvas(canvas, ctx);
+    const W = layoutPx.w, H = layoutPx.h;
+
+    // Background — match the lesson canvas fill.
+    ctx.fillStyle = "#0d1013";
+    ctx.fillRect(0, 0, W, H);
+
+    if (!spec || typeof spec.icon !== "function") return false;
+    spec.icon(ctx, W, H);
+    return true;
+  }
+
+  // ---- DOM build ----------------------------------------------------------
+
+  function buildCard(def) {
+    const a = document.createElement("a");
+    a.className = "card";
+    a.href = def.href;
+
+    const thumb = document.createElement("div");
+    thumb.className = "card-thumb";
+    const cv = document.createElement("canvas");
+    thumb.appendChild(cv);
+
+    const body = document.createElement("div");
+    body.className = "card-body";
+    const t = document.createElement("div");
+    t.className = "card-title";
+    t.textContent = def.title;
+    const s = document.createElement("div");
+    s.className = "card-sub";
+    s.textContent = def.subtitle;
+    body.appendChild(t);
+    body.appendChild(s);
+
+    a.appendChild(thumb);
+    a.appendChild(body);
+    return { a, thumb, canvas: cv };
+  }
+
+  function paintCard(card, def) {
+    const spec = def.getSpec();
+    let ok = false;
+    try { ok = renderThumb(card.canvas, spec); }
+    catch (e) { console.warn("[index] thumbnail render failed for", def.title, e); }
+    if (!ok) {
+      const ph = document.createElement("div");
+      ph.className = "placeholder";
+      ph.textContent = "preview unavailable";
+      card.thumb.appendChild(ph);
+    }
+  }
+
+  function init() {
+    const grid = document.getElementById("cards");
+    const built = CARDS.map((def) => {
+      const card = buildCard(def);
+      grid.appendChild(card.a);
+      return { def, card };
+    });
+    // Paint after layout settles so the canvas has a real bounding rect.
+    requestAnimationFrame(() => {
+      built.forEach(({ def, card }) => paintCard(card, def));
+    });
+
+    // Re-paint on viewport resize so the thumbnails stay crisp at any DPR.
+    let resizeRaf = 0;
+    window.addEventListener("resize", () => {
+      if (resizeRaf) return;
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = 0;
+        built.forEach(({ def, card }) => {
+          // Clear any stale placeholder before repainting.
+          const ph = card.thumb.querySelector(".placeholder");
+          if (ph) ph.remove();
+          paintCard(card, def);
+        });
+      });
+    });
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+
+})();
+</script>
+
+</body>
+</html>
