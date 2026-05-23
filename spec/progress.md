@@ -45,3 +45,18 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - fluxLinkage agrees with analytic expectation
   - assembleRHS({Jz:null, magnetization:null}) returns zero vector (b[pin]=0 enforced)
   - Module loads under node:test require shim with no DOM access
+
+## Task T1.3.1: airgap-solve.js — Jacobi-PCG, warm-start, global ceiling
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: lib/airgap-solve.js
+- **Files modified**: (none)
+- **Tests**: 2/2 passing (smoke suite; engine tests authored in T1.4.2)
+- **Verified**:
+  - LIB.AirgapSolve.pcg and LIB.AirgapSolve.solveSaturated both present as functions
+  - pcg converges to residual ≤ 1e-6 on a 6×32 polar grid with sinusoidal Jz source (206 iters, residual 8.2e-7)
+  - Warm-start with exact solution x0 converges in 0 iters (residual identical)
+  - solveSaturated with ironMask all-zeros returns satScale=1 (identity below knee)
+  - solveSaturated with interior iron and strong source: satScale=245 (>>1), Bpeak in iron reduced from 25.07 to 22.14 (ceiling active)
+  - setIronScale(1) restore confirmed (solveSaturated calls setIronScale(1) after corrective solve)
+  - Module loads under node:test require shim with no DOM access
