@@ -28,11 +28,13 @@
   const END_K_BUMP       = 5000;
   const END_C_BUMP       = 50;
   const K_LASH           = 2.0e5;
-  const C_LASH           = 1.0e3;
+  const C_LASH           = 2.5e3;
   const K_RIGID          = 2.0e5;
   const C_RIGID          = 1.0e3;
-  const K_LOAD_DRAG      = 2.0e5;
-  const C_LOAD_DRAG      = 1.0e3;
+  // Compliant pointer-on-load penalty + heavy damping (ζ≈2) so the collar
+  // feels the motor's reflected inertia without the drag spring oscillating.
+  const K_LOAD_DRAG      = 5.0e3;
+  const C_LOAD_DRAG      = 800;
   const K_SHAFT_DRAG     = 500;
   const C_SHAFT_DRAG     = 10;
   const K_PULLEY_DRAG    = 500;
@@ -88,7 +90,13 @@
   // ---------------------------------------------------------------------------
 
   function loadHit(state, params, L, mx, my) {
-    return Math.abs(mx - L.xToPx(state.x))           < 65
+    // For conv mode the belt now insets pulleys by their radii — use
+    // BeltRender's geom.loadXToPx so the hit-test follows the visual
+    // placement. Lead/ball still place the nut at L.xToPx(state.x).
+    const lx = (params.mode === "conv")
+      ? LIB.BeltRender.layout(L, params).loadXToPx(state.x)
+      : L.xToPx(state.x);
+    return Math.abs(mx - lx)                          < 65
         && Math.abs(my - shaftCenterY(L, params.mode)) < 60;
   }
   function shaftHit(state, params, L, mx, my) {
@@ -187,19 +195,13 @@
     const m = Math.max(1e-9, p.mLoad);
     const J = Math.max(1e-9, p.Jmotor);
 
-    let F_couple = 0;
+    const psi    = state.x - state.theta * r;
+    const psiDot = state.v - state.omega * r;
+    let F_couple;
     if (p.mode === "lead") {
-      const H = p.lash / 2;
-      const psiTarget = state.engaged > 0 ? +H : (state.engaged < 0 ? -H : 0);
-      const inLash = state.engaged !== 0;
-      const psi    = state.x - state.theta * r;
-      const psiDot = state.v - state.omega * r;
-      const Klash = inLash ? K_LASH : 0;
-      const Clash = inLash ? C_LASH : 0;
-      F_couple = -Klash * (psi - psiTarget) - Clash * psiDot;
+      F_couple = LIB.Lash.contactForce(psi, psiDot, p.lash / 2,
+                                       K_LASH, C_LASH);
     } else {
-      const psi    = state.x - state.theta * r;
-      const psiDot = state.v - state.omega * r;
       F_couple = -K_RIGID * psi - C_RIGID * psiDot;
     }
 
@@ -229,7 +231,9 @@
 
     let Kc, Cc;
     if (p.mode === "lead") {
-      const inLash = state.engaged !== 0;
+      const H_J   = p.lash / 2;
+      const psi_J = state.x - state.theta * r;
+      const inLash = (H_J <= 1e-9) || (psi_J > H_J) || (psi_J < -H_J);
       Kc = inLash ? K_LASH : 0;
       Cc = inLash ? C_LASH : 0;
     } else {
@@ -290,41 +294,6 @@
         { ki: p.KiPos, vCap: p.wTarget });
     }
 
-    if (p.mode === "lead") {
-      // Engagement latch (matches standalone lead-screw).
-      const r = reff(p);
-      const H = p.lash / 2;
-      const psi    = state.x - state.theta * r;
-      const psiDot = state.v - state.omega * r;
-      let engaged = state.engaged || 0;
-      const eps = Math.max(1e-7, H * 1e-3);
-      if (H <= 1e-9) {
-        engaged = (psiDot >= 0) ? +1 : -1;
-      } else {
-        const omegaTargetMotor = !state.exploded ? vDemand(state, p, p.wTarget) : state.omega;
-        const omegaWanted = (Math.abs(r) > 1e-9) ? state.v / r : 0;
-        const tau   = motorTorque(state, p);
-        const ddth  = (tau - LIN_DRAG_MOTOR * state.omega) / Math.max(1e-9, p.Jmotor);
-        const dragging = loadDragger.isActive(state);
-        const omegaFree = state.omega + dt * ddth;
-        const xFree     = dragging ? state.x : state.x + state.v * dt;
-        const psiEnd    = xFree - (state.theta + omegaFree * dt) * r;
-        if (engaged !== +1 && (psi >= H - eps || psiEnd >= H)) engaged = +1;
-        else if (engaged !== -1 && (psi <= -H + eps || psiEnd <= -H)) engaged = -1;
-        const tol = 0.05;
-        if (engaged === -1) {
-          if (omegaTargetMotor < omegaWanted - tol) engaged = 0;
-          else if (psi > -H * 0.5) engaged = 0;
-        } else if (engaged === +1) {
-          if (omegaTargetMotor > omegaWanted + tol) engaged = 0;
-          else if (psi < H * 0.5) engaged = 0;
-        }
-      }
-      state.engaged = engaged;
-    } else {
-      state.engaged = 0;
-    }
-
     state.lastTau = motorTorque(state, p);
   }
 
@@ -336,6 +305,9 @@
     }
     const r = reff(p);
     state.psi = state.x - state.theta * r;
+    state.engaged = (p.mode === "lead")
+      ? LIB.Lash.engagementOf(state.psi, p.lash / 2)
+      : 0;
   }
 
   // ---------------------------------------------------------------------------
@@ -366,7 +338,7 @@
         { key: "starts", label: "starts", min: 1, max: 6, step: 1, value: 1,
           onChange: (v) => { currentStarts = v; } },
         { key: "pitch",  label: "pitch",  min: 0.002, max: 0.10, step: 0.0005, value: 0.05, log: true,
-          dynMin: () => LIB.ScrewRender.minRenderablePitch(cachedCanvas, currentStarts, X_LIMIT, 0.002) },
+          dynMin: () => LIB.ScrewRender.minRenderablePitch(cachedCanvas, currentStarts, X_LIMIT, 0.002, 2 * 28 + 16) },
         { key: "lash",   label: "lash",   min: 0, max: 0.005, step: 0.0001, value: 0.0008 },
       );
     } else if (mode === "ball") {
@@ -374,7 +346,7 @@
         { key: "starts", label: "starts", min: 1, max: 6, step: 1, value: 2,
           onChange: (v) => { currentStarts = v; } },
         { key: "pitch",  label: "pitch",  min: 0.002, max: 0.10, step: 0.0005, value: 0.04, log: true,
-          dynMin: () => LIB.ScrewRender.minRenderablePitch(cachedCanvas, currentStarts, X_LIMIT, 0.002) },
+          dynMin: () => LIB.ScrewRender.minRenderablePitch(cachedCanvas, currentStarts, X_LIMIT, 0.002, 2 * 28 + 16) },
       );
     } else if (mode === "conv") {
       Mech.push(
@@ -389,12 +361,16 @@
     return [
       { title: "x(t) — load position (m), yellow = target",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -X_LIMIT, hi: X_LIMIT },
+        yChunk: 0.2,
         series: [
           { label: "target", color: "#f6c945", lw: 1.4, source: (s, p) => p.xTarget },
           { label: "x",      color: "#4ea1ff", lw: 2.2, source: (s)    => s.x },
         ] },
       { title: "τ motor (N·m)",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -2, hi: 2 },
+        yChunk: 1,
         series: [
           { label: "tau", color: "#4ea1ff", lw: 2.0, source: (s) => s.lastTau || 0 },
         ] },
@@ -489,19 +465,126 @@
 
     layout: { kind: "linearTrack", xMin: -X_LIMIT, xMax: X_LIMIT },
 
-    // Mode-aware motor: in lead/ball modes the shell paints it pre-render;
-    // in conv mode LIB.BeltRender draws its own (so we return null and let
-    // drawScene hand BeltRender the same thermal motorOpts).
+    // Mode-aware motor: in lead/ball modes the shell paints it pre-render
+    // (the shell auto-extends marginLeftPx so the disc fits without
+    // clipping); in conv mode LIB.BeltRender draws its own and we return
+    // null so the shell skips both the motor paint and the auto-margin.
     motor: (state, params) => params.mode === "conv" ? null : ({
-      place: (L) => ({ cx: L.xToPx(L.xMin) - 28 - 8,
+      place: (L) => ({ cx: L.motorCx,
                        cy: shaftCenterY(L, params.mode) }),
       r: 28,
       thermalAware: true,
     }),
 
+    // dragControls is static per spec contract. This lesson exposes
+    // different gestures per mode (shaft for screws, pulleys for conveyor)
+    // — list them all once with the mode noted in parens, so students see
+    // every affordance regardless of which mode they pick first.
+    dragControls: [
+      { label: "Load",          desc: "drag horizontally" },
+      { label: "Shaft",         desc: "drag up/down (lead/ball)" },
+      { label: "Drive pulley",  desc: "click rim, rotate (conv)" },
+      { label: "Idler pulley",  desc: "click rim, rotate (conv)" },
+    ],
+
     positionRail: { field: "x", target: "xTarget" },
 
     render: drawScene,
+
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const ink    = LIB.Util.getVar("--ink");
+      const muted  = LIB.Util.getVar("--muted");
+      const cI     = LIB.Util.getVar("--cI");
+      const good   = LIB.Util.getVar("--good");
+
+      // Whole-system = controller + multi-mode mechanism + load. Show a
+      // PID block on the left feeding a motor that drives an upper screw
+      // (lead/ball mode) and a lower belt-pulley (conv mode), both ending
+      // at the same load on the right.
+      const ctrlW = S * 0.20, ctrlH = S * 0.30;
+      const ctrlCx = W * 0.10, ctrlCy = H / 2;
+      const motorR = S * 0.10;
+      const motorCx = W * 0.30, motorCy = H / 2;
+
+      // Controller block
+      ctx.fillStyle = "#2a313c";
+      ctx.fillRect(ctrlCx - ctrlW / 2, ctrlCy - ctrlH / 2, ctrlW, ctrlH);
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.005);
+      ctx.strokeRect(ctrlCx - ctrlW / 2, ctrlCy - ctrlH / 2, ctrlW, ctrlH);
+      ctx.fillStyle = cI;
+      ctx.font = "600 " + Math.max(10, S * 0.085) + "px ui-sans-serif";
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText("PID", ctrlCx, ctrlCy);
+
+      // Wire ctrl → motor
+      ctx.strokeStyle = ink + "aa"; ctx.lineWidth = Math.max(1, S * 0.004);
+      ctx.beginPath();
+      ctx.moveTo(ctrlCx + ctrlW / 2, ctrlCy);
+      ctx.lineTo(motorCx - motorR, motorCy);
+      ctx.stroke();
+
+      // Motor disc
+      ctx.fillStyle = "#2a313c";
+      ctx.beginPath(); ctx.arc(motorCx, motorCy, motorR, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.005);
+      ctx.stroke();
+
+      // Upper transmission row: threaded shaft → load
+      const upperY = H * 0.32;
+      const lowerY = H * 0.70;
+      const railX0 = motorCx + motorR;
+      const railX1 = W * 0.78;
+
+      ctx.strokeStyle = muted;
+      ctx.lineWidth = Math.max(1, S * 0.004);
+      // Screw (zig pattern)
+      const pitch = S * 0.04;
+      for (let x = railX0; x < railX1; x += pitch) {
+        ctx.beginPath();
+        ctx.moveTo(x, upperY - S * 0.02);
+        ctx.lineTo(x + pitch * 0.5, upperY + S * 0.02);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = ink + "aa";
+      ctx.strokeRect(railX0, upperY - S * 0.022, railX1 - railX0, S * 0.044);
+
+      // Lower transmission row: belt loop between two small pulleys
+      const lpR = S * 0.045;
+      const lp0 = railX0 + lpR;
+      const lp1 = railX1 - lpR;
+      ctx.fillStyle = "#1f242c";
+      ctx.beginPath();
+      ctx.moveTo(lp0, lowerY - lpR);
+      ctx.lineTo(lp1, lowerY - lpR);
+      ctx.arc(lp1, lowerY, lpR, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(lp0, lowerY + lpR);
+      ctx.arc(lp0, lowerY, lpR, Math.PI / 2, -Math.PI / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = ink + "cc"; ctx.lineWidth = Math.max(1.2, S * 0.005);
+      ctx.stroke();
+
+      // Shared load on the right (spans both rows)
+      const loadW = S * 0.13, loadH = S * 0.50;
+      const loadCx = W * 0.86;
+      ctx.fillStyle = accent;
+      ctx.fillRect(loadCx - loadW / 2, H / 2 - loadH / 2, loadW, loadH);
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.005);
+      ctx.strokeRect(loadCx - loadW / 2, H / 2 - loadH / 2, loadW, loadH);
+
+      // Feedback line: dashed reference target above
+      ctx.strokeStyle = good;
+      ctx.lineWidth = Math.max(1, S * 0.004);
+      ctx.setLineDash([S * 0.02, S * 0.02]);
+      ctx.beginPath();
+      ctx.moveTo(loadCx, H * 0.10);
+      ctx.lineTo(ctrlCx, H * 0.10);
+      ctx.lineTo(ctrlCx, ctrlCy - ctrlH / 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    },
 
     onPointer: (type, mx, my, L, state, params) =>
       dragMux.handle(type, mx, my, L, state, params),

@@ -2,24 +2,23 @@
    shell.css — chrome and layout for the spec-driven lesson shell.
 
    Loaded by every lesson HTML alongside the lib/* JS files. Provides:
-     • CSS custom properties (colour tokens, per-wheel palette)
+     • CSS custom properties (colour tokens, per-wheel palette,
+       canvas-font tokens written by app.js each frame)
      • Body / scroll-host (so file:// + iframe-in-Moodle both scroll)
-     • Header with title and shell-owned buttons (Reset / Pause / Drive / …)
+     • Slim outer .app-nav (app title + lesson <select>)
+     • Per-spec <header>: title + modes button group + Reset/Pause/Drive
      • .stage grid: canvas + right pane (plots stack + readout)
-     • Bottom slider panels (.sub-panels with .box children)
-     • Tab strips (.ex-tabs for top-level, .sub-tabs for in-lesson)
+     • Bottom slider panels (.sub-panels with .box children;
+       .span-full hoisted to top, Notes immediately after)
+     • .drag-controls overlay top-left of every animation canvas
      • .row inputs (label / range / number) and .pair button rows
-
-   Lifted from motionapp/index.html’s <style> block. Lesson-specific
-   selectors (#wheel-rows, .wheel-card) stayed there because no other
-   lesson reuses them; the spec author can always inline lesson CSS in
-   the lesson HTML.
    =========================================================================== */
 
 :root {
   --bg:     #111418;
   --panel:  #1b1f25;
   --panel2: #232932;
+  --nav:    #161a20;
   --ink:    #e6e9ef;
   --muted:  #8a93a3;
   --accent: #4ea1ff;
@@ -36,6 +35,12 @@
   /* per-series palette, cycled by index */
   --w0: #4ea1ff; --w1: #66bb6a; --w2: #ef5350; --w3: #f6c945;
   --w4: #26c6da; --w5: #ab47bc; --w6: #ff9f43; --w7: #c0c9d8;
+
+  /* Canvas-text tokens. The shell rewrites these every frame from
+     LIB.Type.current so HTML chrome and canvas overlays scale together. */
+  --canvas-font-sm: 11px;
+  --canvas-font-md: 13px;
+  --canvas-font-lg: 16px;
 }
 
 * { box-sizing: border-box; }
@@ -60,51 +65,162 @@ html, body {
 .app {
   display: flex; flex-direction: column;
   gap: 10px; padding: 10px;
-  min-height: 100vh;     /* fallback */
-  min-height: 100dvh;    /* mobile chrome-aware */
+  min-height: 100vh;     /* base — browsers without dvh */
+  min-height: 100dvh;    /* mobile chrome-aware override */
 }
 
+/* ---------------------------------------------------------------------------
+   Outer app-nav: slim band that hosts the multi-lesson picker. Visually
+   secondary to the per-spec <header> beneath it, so the two never read as
+   peer rows. Used by LIB.App.runTabs.
+   --------------------------------------------------------------------------- */
+.app-nav {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px;
+  background: var(--nav);
+  border: 1px solid #232932;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.app-nav .app-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.app-nav .sp { flex: 1; }
+.app-nav label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+}
+.app-nav .nav-btn {
+  display: inline-block;
+  background: var(--panel2);
+  color: var(--ink);
+  border: 1px solid #2e3642;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+.app-nav .nav-btn + .nav-btn { margin-left: 6px; }
+.app-nav .nav-btn:hover:not(:disabled) { border-color: var(--accent); }
+.app-nav .nav-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ---------------------------------------------------------------------------
+   Splash screen — cards grid shown by runTabs at startup and on Back, and
+   reused as-is by the top-level repo index.html (one card per topic). One
+   card per lesson tab; clicking a card mounts the lesson. Card thumbnails
+   are filled by spec.icon(ctx, W, H).
+   --------------------------------------------------------------------------- */
+.splash-host { flex: 1; display: block; padding: 4px 0; }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.card {
+  display: flex; flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--grid);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  transition: transform 120ms ease, border-color 120ms ease,
+              box-shadow 120ms ease;
+}
+.card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+.card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.card-thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #0d1013;
+  display: block;
+}
+.card-thumb canvas { width: 100%; height: 100%; display: block; }
+.card-thumb .placeholder {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 12px;
+}
+.card-body {
+  padding: 12px 14px 14px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.card-title { font-size: 15px; font-weight: 600; color: var(--ink); }
+.card-sub   { font-size: 12px; color: var(--muted); }
+
+/* ---------------------------------------------------------------------------
+   Per-spec header: this IS the primary control bar. Larger than .app-nav,
+   lives right above the stage. Holds the spec title + the modes button
+   group (folded inline so we never stack two header bars) +
+   Reset/Pause/Drive on the right.
+   --------------------------------------------------------------------------- */
 header {
   display: flex; align-items: center; gap: 12px;
-  padding: 6px 10px; background: var(--panel); border-radius: 8px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-radius: 8px;
   flex-wrap: wrap;
 }
-header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
-header .subtitle { font-size: 12px; color: var(--muted); margin-left: 6px; }
+header h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
+header .subtitle { font-size: 13px; color: var(--muted); margin-left: 6px; }
 header .sp { flex: 1; }
-header button, .ex-tabs button {
+header button {
   background: var(--panel2); color: var(--ink);
   border: 1px solid #2e3642; border-radius: 6px;
   padding: 5px 10px; cursor: pointer; font-size: 12px;
 }
-header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
+header button:hover { border-color: var(--accent); }
 
-.ex-tabs { display: flex; gap: 4px; }
-.ex-tabs button.active { border-color: var(--accent); color: var(--accent); }
+/* In-header modes group — replaces the old separate sub-tabs strip. */
+header .modes {
+  display: inline-flex; gap: 2px;
+  border: 1px solid #2e3642;
+  border-radius: 6px;
+  padding: 2px;
+  background: var(--bg);
+}
+header .modes button {
+  background: transparent; color: var(--muted);
+  border: 0; border-radius: 4px;
+  padding: 4px 10px;
+  text-transform: uppercase; letter-spacing: 0.6px;
+  font-size: 11px; font-weight: 600;
+}
+header .modes button:hover { color: var(--ink); border: 0; }
+header .modes button.active {
+  background: var(--panel2);
+  color: var(--accent);
+  border: 0;
+}
 
 .lesson {
   flex: 1;
   display: flex; flex-direction: column; gap: 10px;
 }
-.lesson > .sub-tabs { flex: 0 0 auto; }
 .lesson > .stage    { flex: 1; }
 .lesson[hidden] { display: none; }
-
-.sub-tabs {
-  display: flex; gap: 2px;
-  border-bottom: 1px solid #2a313c;
-  padding: 0 4px;
-  background: var(--panel); border-radius: 8px 8px 0 0;
-}
-.sub-tabs button {
-  background: transparent; color: var(--muted);
-  border: 0; border-bottom: 2px solid transparent;
-  padding: 7px 12px; cursor: pointer; font: inherit;
-  text-transform: uppercase; letter-spacing: 0.8px;
-  font-size: 11px; font-weight: 600;
-}
-.sub-tabs button:hover { color: var(--ink); }
-.sub-tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
 
 /* Main grid: scene canvas + right pane (plots + readout). Bottom rows are
    slider panels and notes, sized to content. */
@@ -127,6 +243,47 @@ header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
 }
 .cv-box canvas.grabbing { cursor: grabbing; }
 
+/* Drag-controls hint, painted over the top-left of every animation canvas
+   when spec.dragControls is set. Reads canvas font tokens so it scales
+   with the rest of the overlay text. */
+.cv-box .drag-controls {
+  position: absolute;
+  top: 14px; left: 14px;
+  background: rgba(13, 16, 19, 0.78);
+  border: 1px solid #2e3642;
+  border-radius: 6px;
+  padding: 6px 9px;
+  pointer-events: none;
+  max-width: 40%;
+}
+.cv-box .drag-controls h3 {
+  margin: 0 0 4px 0;
+  font-size: var(--canvas-font-sm);
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.cv-box .drag-controls ul {
+  list-style: none;
+  margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.cv-box .drag-controls li {
+  font-size: var(--canvas-font-sm);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.cv-box .drag-controls li b {
+  color: var(--accent);
+  font-weight: 600;
+  margin-right: 4px;
+}
+.cv-box .drag-controls li span {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 .right-pane {
   grid-column: 2; grid-row: 1 / span 3;
   display: flex; flex-direction: column; gap: 0;
@@ -134,19 +291,28 @@ header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
   overflow: hidden; min-height: 280px;
 }
 
+/* Plots: each pane lives inside a padded box and is separated from its
+   neighbour by both a gutter and a thin divider, so the eye doesn't read
+   adjacent plots as one continuous chart. */
 .plot-stack {
   flex: 1 1 0; min-height: 200px;
-  display: flex; flex-direction: column; gap: 0;
+  display: flex; flex-direction: column;
+  gap: 8px;
+  padding: 8px;
 }
 .plot-box {
   flex: 1 1 0; min-height: 100px;
-  padding: 0; display: flex; position: relative;
+  padding: 0;
+  display: flex; position: relative;
+  border-radius: 6px;
+  border: 1px solid #2a313c;
+  overflow: hidden;
+  background: #0d1013;
 }
 .plot-box canvas {
   width: 100%; height: 100%; display: block;
-  background: var(--panel);
+  background: transparent;
 }
-.plot-box:first-child canvas { border-radius: 8px 8px 0 0; }
 
 .readout {
   flex: 0 1 auto;
@@ -155,10 +321,11 @@ header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
   display: flex; flex-direction: column; gap: 4px;
   font-variant-numeric: tabular-nums;
   overflow: auto; max-height: 40vh;
-  font-size: 14px;
+  font-size: var(--canvas-font-md);
 }
 .readout h2 {
-  font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px;
+  font-size: var(--canvas-font-sm);
+  text-transform: uppercase; letter-spacing: 0.8px;
   margin: 8px 0 4px 0; color: var(--muted); font-weight: 600;
 }
 .readout h2:first-child { margin-top: 0; }
@@ -171,14 +338,17 @@ header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
 }
 
 /* Slider/notes panels along the bottom. Two columns when both apply, single
-   column on narrow viewports. */
+   column on narrow viewports. The shell hoists every panel marked
+   `span: "full"` to the front of the panel list (so a Reference / Target
+   panel always sits at the top, full-width across both columns), and
+   inserts the Notes box immediately after the last full-span panel so notes
+   read like commentary on what the target slider does, not as an after-
+   thought below the mechanism panels. */
 .sub-panels {
   grid-column: 1; grid-row: 2 / span 2;
   display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
 }
 .sub-panels.single { grid-template-columns: 1fr; }
-/* Opt-in: panel spans every column. Use for the reference-target slider on
-   linear-position-controlled lessons (always full-width across the top). */
 .sub-panels .box.span-full { grid-column: 1 / -1; }
 @media (max-width: 720px) {
   .sub-panels { grid-template-columns: 1fr; }
@@ -193,15 +363,17 @@ header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
   display: flex; flex-direction: column; gap: 8px;
 }
 .box h2 {
-  font-size: 13px; text-transform: uppercase; letter-spacing: 0.8px;
+  font-size: var(--canvas-font-sm);
+  text-transform: uppercase; letter-spacing: 0.8px;
   margin: 0; color: var(--muted); font-weight: 600;
 }
 .box h3 {
-  font-size: 13px; margin: 6px 0 0 0; color: var(--muted); font-weight: 600;
+  font-size: var(--canvas-font-sm);
+  margin: 6px 0 0 0; color: var(--muted); font-weight: 600;
   border-top: 1px solid #2a313c; padding-top: 6px;
 }
 .box .notes {
-  font-size: 13px; line-height: 1.45; color: var(--ink);
+  font-size: var(--canvas-font-md); line-height: 1.45; color: var(--ink);
 }
 .box .notes b { color: var(--ink); }
 .box .notes i { color: var(--cI); font-style: normal; }
@@ -212,14 +384,20 @@ header button:hover, .ex-tabs button:hover { border-color: var(--accent); }
   grid-template-columns: 64px 1fr 80px;
   align-items: center; gap: 8px;
 }
-.row label { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 14px; }
+.row label {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--canvas-font-md);
+}
 .row label[title] { cursor: help; border-bottom: 1px dotted var(--muted); }
 .row input[type=range] { width: 100%; accent-color: var(--accent); }
 .row input[type=number] {
   background: var(--panel2); color: var(--ink);
   border: 1px solid #2e3642; border-radius: 4px;
   padding: 3px 5px; width: 100%;
-  font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
+  font: inherit;
+  font-size: var(--canvas-font-md);
+  font-variant-numeric: tabular-nums;
 }
 .row input[type=number]:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
 .row.disabled label { opacity: 0.7; }

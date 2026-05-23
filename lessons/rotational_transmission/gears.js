@@ -23,8 +23,8 @@
 
   const PHYS_HZ = 240;
   const HIST_HZ = 60;
-  const K_DRAG  = 2.0e5;
-  const C_DRAG  = 1.0e3;
+  const K_DRAG  = 5.0e3;
+  const C_DRAG  = 60;
 
   function defaultState() {
     const s = LIB.WheelChain.makeState(2);
@@ -166,17 +166,21 @@
       const w = state.wheels[i];
       if (LIB.WheelChain.isCompound(mode, i)) {
         grp.push({ key: `r1_${i}`, label: `r₁ #${i}`, min: 0.05, max: 3.0, step: 0.005,
-                   value: w.r1, onChange: (v) => { w.r1 = v; } });
+                   value: w.r1,
+                   onChange: (v) => { w.r1 = v; LIB.WheelChain.recomputeJ(w); } });
         grp.push({ key: `r2_${i}`, label: `r₂ #${i}`, min: 0.05, max: 3.0, step: 0.005,
-                   value: w.r2, onChange: (v) => { w.r2 = v; } });
+                   value: w.r2,
+                   onChange: (v) => { w.r2 = v; LIB.WheelChain.recomputeJ(w); } });
       } else {
         grp.push({ key: `r_${i}`, label: `r #${i}`, min: 0.05, max: 3.0, step: 0.005,
-                   value: w.r, onChange: (v) => { w.r = v; } });
+                   value: w.r,
+                   onChange: (v) => { w.r = v; LIB.WheelChain.recomputeJ(w); } });
       }
       if (i !== 0) {
-        grp.push({ key: `J_${i}`, label: `J #${i}`, min: 0.001, max: 5.0,
-                   step: 0.001, value: w.J, log: true,
-                   onChange: (v) => { w.J = v; } });
+        grp.push({ key: `m_${i}`, label: `m #${i}`, min: 0.01, max: 50, step: 0.001,
+                   value: w.m, log: true,
+                   tip: "Wheel mass (kg). Solid-disc inertia J = ½·m·r².",
+                   onChange: (v) => { w.m = v; LIB.WheelChain.recomputeJ(w); } });
       }
       groups.push(grp);
     }
@@ -193,10 +197,10 @@
           tip: "Peak drive torque on wheel #0 (N·m)." },
         { key: "Kp",      label: "K_p",   min: 0.01, max: 200, step: 0.01, value: 5.0, log: true,
           tip: "Drive-loop proportional gain (N·m·s/rad)." },
-        { key: "Jmotor",  label: "J #0",  min: 0.001, max: 5.0, step: 0.001,
-          value: w0.J, log: true,
-          tip: "Wheel-#0 (motor) inertia (kg·m²).",
-          onChange: (v) => { w0.J = v; } },
+        { key: "mmotor",  label: "m #0",  min: 0.01, max: 50, step: 0.001,
+          value: w0.m, log: true,
+          tip: "Wheel-#0 (motor) mass (kg). J #0 = ½·m·r².",
+          onChange: (v) => { w0.m = v; LIB.WheelChain.recomputeJ(w0); } },
       ],
       Mechanism: [
         { key: "drag", label: "c", min: 0, max: 2, step: 0.001, value: 0.02,
@@ -227,6 +231,8 @@
     return [
       { title: "ω per wheel (rad/s)",
         yFmt: (v) => v.toFixed(1),
+        yFloor: { lo: -2, hi: 2 },
+        yChunk: 2,
         series: state.wheels.map((_, i) => ({
           label: `w${i}`,
           color: LIB.WheelChainView.color(i),
@@ -235,6 +241,8 @@
         })) },
       { title: "τ per wheel (N·m)",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -1, hi: 1 },
+        yChunk: 1,
         series: state.wheels.map((_, i) => ({
           label: `t${i}`,
           color: LIB.WheelChainView.color(i),
@@ -325,6 +333,39 @@
     layout: (W, H) => ({ W, H }),
     render,
     onPointer,
+
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const good   = LIB.Util.getVar("--good");
+      const ink    = LIB.Util.getVar("--ink");
+
+      // Two meshing gears, pitch circles touching at the centerline.
+      const r1 = S * 0.26;
+      const r2 = S * 0.18;
+      const cy = H / 2;
+      const sep = r1 + r2;
+      const cx1 = W / 2 - sep / 2 + r1 * 0.05;
+      const cx2 = cx1 + sep;
+
+      LIB.GearRender.drawGearShape(ctx,
+        { cx: cx1, cy }, { r: r1, theta: 0 },
+        accent, { phase: 0 });
+      // Offset the second gear's tooth phase so its tooth meets the
+      // neighbour's gap at the contact point — visually meshes.
+      LIB.GearRender.drawGearShape(ctx,
+        { cx: cx2, cy }, { r: r2, theta: 0 },
+        good, { phase: Math.PI });
+
+      // Arbour dots
+      ctx.fillStyle = ink;
+      ctx.beginPath(); ctx.arc(cx1, cy, S * 0.022, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx2, cy, S * 0.022, 0, Math.PI * 2); ctx.fill();
+    },
+
+    dragControls: [
+      { label: "Any wheel", desc: "click rim, rotate" },
+    ],
 
     modes: {
       default: "simple",

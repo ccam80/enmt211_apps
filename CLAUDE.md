@@ -66,7 +66,7 @@ no fetch).
 | `drag-smoother.js` | `LIB.DragSmoother` class — moving-window pointer-velocity differentiator | —                |
 | `layout.js`      | `LIB.Layout.{linearTrack, world2D, rotational}` — canvas world↔px transform factories | — |
 | `drag.js`        | `LIB.Drag.{hbar, vbar, point2d, angular, chainWheel, mux}` — pointer-drag helpers | `drag-smoother.js` |
-| `lash.js`        | `LIB.Lash.{contactForce, latchEngagement}` — finite-flank contact + latched engagement state machine, used by lead-screw and rotational-backlash | — |
+| `lash.js`        | `LIB.Lash.{contactForce, engagementOf}` — unilateral finite-flank contact (one-sided spring + damper outside ±H, zero force inside) used by lead-screw, whole-system lead mode, and rotational-backlash. `engagementOf(ψ,H)` is a derived `-1\|0\|+1` readout label. | — |
 | `screw-render.js`| `LIB.ScrewRender.{startColor, threadGeom, drawShaft, drawLeadNut, drawBallNut, minRenderablePitch}` — screw-thread + nut renderers shared by lead-screw / ball-screw / whole-system | — |
 | `belt-render.js` | `LIB.BeltRender.{layout, beltPath, drawScene, openBeltPath, drawOpenBelt}` — conveyor renderer + free-floating open-belt renderer (rotational belt-and-pulley) | `draw.js` |
 | `wheel-chain.js` | `LIB.WheelChain.{isCompound, leftR, rightR, outerR, meshSign, pairRatio, cumRatios, reflectedJ, reflectedDrag, layoutCenters, computeDrawOrder, makeState, addWheel, removeLast, dof, meshPsi, meshPsiDot, recomputePsiOffsets, contactDxdt, contactJacobian}` — N-wheel chain math + layout + declarative-physics surface (state factory, dof, dxdt, jacobian) so rotational lessons can run on the shared implicit-Euler integrator | `lash.js` |

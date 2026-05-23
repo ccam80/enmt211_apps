@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial 2 — Motion Transmission</title>
+<link rel="stylesheet" href="../../lib/shell.css">
+</head>
+<body>
+<!--
+  Tutorial 2 hub — accompaniment to the motion-transmission tutorial. Q1 covers
+  a gear-pair driving a belt with a payload (kinematic ratio, torque transfer
+  through finite gear efficiency, reflected inertia at the G2 shaft, peak
+  payload acceleration). Q2 covers a stepper-driven lead screw (resolution per
+  step, holding torque against gravity in vertical orientation, total reflected
+  inertia at the motor, ways to increase peak acceleration).
+-->
+<script src="../../lib/util.js"></script>
+<script src="../../lib/canvas-type.js"></script>
+<script src="../../lib/registry.js"></script>
+<script src="../../lib/plot.js"></script>
+<script src="../../lib/integrate.js"></script>
+<script src="../../lib/draw.js"></script>
+<script src="../../lib/end-stop.js"></script>
+<script src="../../lib/match-hint.js"></script>
+<script src="../../lib/drag-smoother.js"></script>
+<script src="../../lib/layout.js"></script>
+<script src="../../lib/drag.js"></script>
+<script src="../../lib/lash.js"></script>
+<script src="../../lib/gear-render.js"></script>
+<script src="../../lib/belt-render.js"></script>
+<script src="../../lib/screw-render.js"></script>
+<script src="../../lib/gear-pair.js"></script>
+<script src="../../lib/wheel-chain.js"></script>
+<script src="../../lib/rigid-coupling.js"></script>
+<script src="../../lib/screw-physics.js"></script>
+<script src="../../lib/header-buttons.js"></script>
+<script src="../../lib/stepper-drive.js"></script>
+<script src="../../lib/hold-detector.js"></script>
+<script src="../../lib/app.js"></script>
+<script src="./gear-belt-payload.js"></script>
+<script src="./lead-screw-stepper.js"></script>
+<script>
+  LIB.App.runTabs({
+    title: "Tutorial 2 — Motion Transmission",
+    persistKey: "tut2-active-question",
+    tabs: [
+      { label: "Q1 — gear pair → belt", spec: window.TutorialLessons.gearBeltPayload },
+      { label: "Q2 — lead-screw stepper", spec: window.TutorialLessons.leadScrewStepper },
+    ],
+  });
+</script>
+</body>
+</html>

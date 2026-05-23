@@ -112,6 +112,8 @@
         ] },
       { title: "motor command (N)",
         yFmt: (v) => v.toFixed(0),
+        yFloor: { lo: -100, hi: 100 },
+        yChunk: 50,
         series: [
           { label: "uL",  color: LIB.Util.getVar("--cY"), lw: 1.6,
             source: (s) => s.driveOut.u - s.yawOut.u },
@@ -257,6 +259,76 @@
       if (holdDetector) LIB.Draw.holdBadge(ctx, W, H, holdDetector);
     },
 
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const good   = LIB.Util.getVar("--good");
+      const ink    = LIB.Util.getVar("--ink");
+      const muted  = LIB.Util.getVar("--muted");
+
+      // Grid backdrop
+      ctx.strokeStyle = muted + "33";
+      ctx.lineWidth = Math.max(1, S * 0.003);
+      const gridStep = S * 0.10;
+      for (let x = gridStep / 2; x < W; x += gridStep) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      }
+      for (let y = gridStep / 2; y < H; y += gridStep) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      }
+
+      // Target marker (cross + ring) at upper-right
+      const tx = W * 0.78, ty = H * 0.30;
+      const tr = S * 0.06;
+      ctx.strokeStyle = good;
+      ctx.lineWidth = Math.max(1.5, S * 0.006);
+      ctx.beginPath();
+      ctx.arc(tx, ty, tr, 0, Math.PI * 2);
+      ctx.moveTo(tx - tr * 1.4, ty); ctx.lineTo(tx + tr * 1.4, ty);
+      ctx.moveTo(tx, ty - tr * 1.4); ctx.lineTo(tx, ty + tr * 1.4);
+      ctx.stroke();
+
+      // Trajectory dotted line from rover to target
+      ctx.strokeStyle = good + "88";
+      ctx.lineWidth = Math.max(1, S * 0.004);
+      ctx.setLineDash([S * 0.02, S * 0.02]);
+      const rx = W * 0.34, ry = H * 0.62;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry); ctx.lineTo(tx, ty);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Rover — top-down body + two flanking wheel pads, heading toward target
+      const heading = Math.atan2(ty - ry, tx - rx);
+      ctx.save();
+      ctx.translate(rx, ry);
+      ctx.rotate(heading);
+
+      const bodyW = S * 0.20, bodyH = S * 0.14;
+      // Wheels
+      ctx.fillStyle = "#1f242c";
+      ctx.fillRect(-bodyW * 0.45, -bodyH * 0.65, bodyW * 0.90, bodyH * 0.18);
+      ctx.fillRect(-bodyW * 0.45,  bodyH * 0.47, bodyW * 0.90, bodyH * 0.18);
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1, S * 0.004);
+      ctx.strokeRect(-bodyW * 0.45, -bodyH * 0.65, bodyW * 0.90, bodyH * 0.18);
+      ctx.strokeRect(-bodyW * 0.45,  bodyH * 0.47, bodyW * 0.90, bodyH * 0.18);
+
+      // Body
+      ctx.fillStyle = accent;
+      ctx.fillRect(-bodyW / 2, -bodyH / 2, bodyW, bodyH);
+      ctx.strokeRect(-bodyW / 2, -bodyH / 2, bodyW, bodyH);
+
+      // Heading triangle on the front
+      ctx.fillStyle = ink;
+      ctx.beginPath();
+      ctx.moveTo(bodyW / 2, 0);
+      ctx.lineTo(bodyW * 0.30, -bodyH * 0.25);
+      ctx.lineTo(bodyW * 0.30,  bodyH * 0.25);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    },
+
     onPointer: (type, mx, my, L, state /*, params*/) => {
       if (type !== "down") return;
       const w = L.toWorld({ px: mx, py: my });
@@ -264,6 +336,10 @@
       state.ty = LIB.Util.clamp(w.y, -WORLD_R + 0.2, WORLD_R - 0.2);
       if (holdDetector) holdDetector.reset();
     },
+
+    dragControls: [
+      { label: "Anywhere", desc: "click to set target" },
+    ],
 
     init: () => {
       holdDetector = LIB.HoldDetector.create({

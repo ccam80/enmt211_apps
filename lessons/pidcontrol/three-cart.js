@@ -10,18 +10,25 @@
 //  Plant
 //  -----
 //      Three identical-by-default masses linked by springs+dampers (natural
-//      length 1 m). Equilibrium at x = 1, 2, 3. Wall bumper against cart 1.
-//      Cart-cart contact penalty when bodies overlap. Wind is applied to all
-//      three. Control u is applied to cart 1 only.
+//      length 1 m). Equilibrium at x = 1, 2, 3. Wall bumper against cart 1
+//      (LIB.EndStop.force). Cart-cart contact via LIB.Contact.pair1D when
+//      bodies overlap. Wind is applied to all three. Control u is applied
+//      to cart 1 only.
 //
 //      e = ref - x[2]                          (error on cart 3)
 //      dmeas = v[2]                            (derivative on cart 3's velocity)
+//
+//  Controller
+//  ----------
+//    Declarative: spec.controllers feeds LIB.ControlBlock and the shell
+//    stashes the breakdown in state.ctrlOut before the integrator runs.
 //
 //  Pointer drag
 //  ------------
 //      Three LIB.Drag.hbar draggers in a mux, hit-tested per-cart. preStep
 //      and postStep clobber the dragged cart's x/v so the held cart is
-//      completely under pointer control.
+//      completely under pointer control. The controller keeps running so
+//      the I-term builds up against the imposed disturbance.
 // =============================================================================
 
 (function () {
@@ -34,6 +41,7 @@
   const L_LINK        = 1.0;            // natural length of every link spring (m)
   const X_BUMP        = 0.35;           // wall bumper engages when x[0] < X_BUMP
   const K_BUMP        = 5000;           // bumper / contact stiffness (N/m)
+  const C_CONTACT     = K_BUMP * 0.01;  // cart-cart contact damping (N·s/m)
   const CART_HALF_W_M = 0.18;
   const MIN_GAP       = 2 * CART_HALF_W_M;
 
@@ -53,7 +61,7 @@
   }
 
   function hitCart(i, state, L, mx, my) {
-    const g = state._geom && state._geom[i];
+    const g = state._geom;
     if (!g) return false;
     const sx = L.xToPx(state["x" + i]);
     return Math.abs(mx - sx) < g.bodyW / 2 + 8
@@ -94,51 +102,37 @@
     const x1 = state.x1, v1 = state.v1;
     const x2 = state.x2, v2 = state.v2;
 
-    // Wall ↔ cart 0 (link 0)
-    let F0 = -p.k0 * (x0 - L_LINK) - p.c0 * v0;
-    if (x0 < X_BUMP) F0 += K_BUMP * (X_BUMP - x0);
+    // Wall ↔ cart 0 (link 0 + soft bumper at the wall)
+    let F0 = -p.k0 * (x0 - L_LINK) - p.c0 * v0
+           + LIB.EndStop.force(x0, v0, X_BUMP, +Infinity, K_BUMP, 0);
 
     // Cart 0 ↔ cart 1 (link 1)
-    const s01 = (x1 - x0) - L_LINK;
-    const d01 = (v1 - v0);
-    const Flink01 = p.k1 * s01 + p.c1 * d01;
+    const Flink01 = p.k1 * ((x1 - x0) - L_LINK) + p.c1 * (v1 - v0);
     F0 += Flink01;
     let F1 = -Flink01;
 
     // Cart 1 ↔ cart 2 (link 2)
-    const s12 = (x2 - x1) - L_LINK;
-    const d12 = (v2 - v1);
-    const Flink12 = p.k2 * s12 + p.c2 * d12;
+    const Flink12 = p.k2 * ((x2 - x1) - L_LINK) + p.c2 * (v2 - v1);
     F1 += Flink12;
     let F2 = -Flink12;
 
     // Cart-cart contact penalty (carts cannot overlap).
-    const pen01 = MIN_GAP - (x1 - x0);
-    if (pen01 > 0) {
-      const Fc = K_BUMP * pen01 + Math.max(0, -d01) * K_BUMP * 0.01;
-      F0 -= Fc; F1 += Fc;
-    }
-    const pen12 = MIN_GAP - (x2 - x1);
-    if (pen12 > 0) {
-      const Fc = K_BUMP * pen12 + Math.max(0, -d12) * K_BUMP * 0.01;
-      F1 -= Fc; F2 += Fc;
-    }
+    const Fc01 = LIB.Contact.pair1D(x0, v0, x1, v1, MIN_GAP, K_BUMP, C_CONTACT);
+    F0 -= Fc01; F1 += Fc01;
+    const Fc12 = LIB.Contact.pair1D(x1, v1, x2, v2, MIN_GAP, K_BUMP, C_CONTACT);
+    F1 -= Fc12; F2 += Fc12;
 
     // Wind on every cart.
     F0 += w; F1 += w; F2 += w;
 
     // Control u on cart 0 only.
-    F0 += (state._u || 0);
+    F0 += (state.ctrlOut ? state.ctrlOut.u : 0);
 
     return {
       x0: v0, v0: F0 / m0,
       x1: v1, v1: F1 / m1,
       x2: v2, v2: F2 / m2,
     };
-  }
-
-  function dirFromRef(p) {
-    return (p.ref > REF_EQ) ? 1 : (p.ref < REF_EQ ? -1 : 0);
   }
 
   function preStep(state, p, dt) {
@@ -152,26 +146,6 @@
       state["x" + di] = state.drag.value;
       state["v" + di] = 0;
     }
-
-    const e = (p.ref || 0) - state.x2;
-    if (p.mode === "bangbang") {
-      const dir = dirFromRef(p);
-      LIB.BangBang.latch.advance(state.ctrlLoop, e, dir, { dead: p.dead });
-      const out = LIB.BangBang.latch.effort(state.ctrlLoop, dir,
-        { effort: p.effort, uCap: p.uMax });
-      state._u = out.u;
-      state.lastE = e;
-      state.lastUP = 0; state.lastUI = 0; state.lastUD = 0; state.lastU = out.u;
-    } else {
-      LIB.PID.advance(state.ctrlLoop, e, dt,
-        { ki: p.ki, iClamp: p.iClamp });
-      const out = LIB.PID.effort(state.ctrlLoop, e, state.v2,
-        { kp: p.kp, kd: p.kd, uCap: p.uMax });
-      state._u = out.u;
-      state.lastE  = e;
-      state.lastUP = out.uP; state.lastUI = out.uI;
-      state.lastUD = out.uD; state.lastU  = out.u;
-    }
   }
 
   function postStep(state, p, dt) {
@@ -180,11 +154,8 @@
       state["x" + di] = state.drag.value;
       state["v" + di] = 0;
     }
-    // Hard wall safety net for cart 0.
-    if (state.x0 < CART_HALF_W_M) {
-      state.x0 = CART_HALF_W_M;
-      if (state.v0 < 0) state.v0 = 0;
-    }
+    // Hard-wall safety net for cart 0.
+    LIB.Saturate.box1D(state, "x0", CART_HALF_W_M, +Infinity, "v0");
   }
 
   // ---------------------------------------------------------------------------
@@ -204,43 +175,11 @@
 
     const groundY = L.trackY;
     const wallSx  = L.xToPx(0);
-
-    // Ground.
-    ctx.fillStyle = "#1a1f27";
-    ctx.fillRect(0, groundY, W, H - groundY);
-    ctx.strokeStyle = "#2a313c";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(0, groundY); ctx.lineTo(W, groundY);
-    ctx.stroke();
-
-    // X-axis tick labels.
-    ctx.fillStyle = "#55606f";
-    ctx.font = `${fsmall}px ui-sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "top";
-    ctx.strokeStyle = "#1e252f";
-    for (let xm = 0; xm <= X_MAX; xm++) {
-      const sx = L.xToPx(xm);
-      ctx.beginPath();
-      ctx.moveTo(sx, groundY); ctx.lineTo(sx, groundY + 6);
-      ctx.stroke();
-      ctx.fillText(xm + " m", sx, groundY + 8);
-    }
-
-    // Wall.
     const wallTop = groundY - Math.max(80, H * 0.25);
-    const wallH   = groundY - wallTop;
-    ctx.fillStyle = "#2a313c";
-    ctx.fillRect(wallSx - 16, wallTop, 16, wallH);
-    ctx.strokeStyle = "#3a4453";
-    const hatchN = Math.max(4, Math.round(wallH / 12));
-    for (let i = 0; i < hatchN; i++) {
-      const yy = wallTop + (i * wallH) / hatchN;
-      ctx.beginPath();
-      ctx.moveTo(wallSx - 16, yy);
-      ctx.lineTo(wallSx - 28, yy + (wallH / hatchN) * 0.8);
-      ctx.stroke();
-    }
+
+    // Floor + axis ticks, wall block — all centralised.
+    LIB.Draw.cartGround(ctx, L, { fsmall });
+    LIB.Draw.wall(ctx, wallSx, wallTop, groundY);
 
     // Cart geometry — same for all three.
     const bodyH  = Math.max(20, H * 0.06);
@@ -248,15 +187,9 @@
     const wheelR = Math.max(6, bodyH * 0.36);
     const axleY  = groundY - wheelR;
     const cy     = axleY - bodyH / 2;
+    state._geom  = { bodyW, bodyH, wheelR, axleY, cy };
     const cartSx = [
       L.xToPx(state.x0), L.xToPx(state.x1), L.xToPx(state.x2),
-    ];
-
-    // Stash per-cart geometry for hit-tests.
-    state._geom = [
-      { bodyW, bodyH, wheelR, axleY, cy },
-      { bodyW, bodyH, wheelR, axleY, cy },
-      { bodyW, bodyH, wheelR, axleY, cy },
     ];
 
     // Bumper spring (wall vs cart 0).
@@ -287,25 +220,12 @@
                         width: Math.max(1.2, fsmall * 0.14) });
     }
 
-    // Reference vertical (target for cart 3).
-    const refSx = L.xToPx(p.ref || 0);
-    ctx.strokeStyle = LIB.Util.getVar("--cRef");
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(refSx, wallTop - 12); ctx.lineTo(refSx, groundY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = LIB.Util.getVar("--cRef");
-    ctx.beginPath();
-    ctx.moveTo(refSx, wallTop - 14);
-    ctx.lineTo(refSx - 6, wallTop - 24);
-    ctx.lineTo(refSx + 6, wallTop - 24);
-    ctx.closePath();
-    ctx.fill();
-    ctx.font = `${fsmall}px ui-sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
-    ctx.fillText("ref " + (p.ref || 0).toFixed(2) + " (target x₃)",
-                 refSx, wallTop - 28);
+    // Reference marker (target for cart 3).
+    LIB.Draw.refMarker(ctx, L.xToPx(p.ref || 0), wallTop - 12, groundY, {
+      color: LIB.Util.getVar("--cRef"),
+      label: "ref " + (p.ref || 0).toFixed(2) + " (target x₃)",
+      font:  fsmall + "px ui-sans-serif",
+    });
 
     // Equilibrium ticks (faint).
     ctx.strokeStyle = "#2e3642";
@@ -338,17 +258,18 @@
       });
     }
 
-    // Force arrows on cart 0 (where u is applied).
+    // Force arrows on cart 1 (where u is applied).
     const F_PX_PER_N = Math.min(0.8, (W * 0.18) / 200);
     const F_CAP_PX   = Math.min(W * 0.35, 300);
+    const out = state.ctrlOut;
     const slots = [
-      { color: LIB.Util.getVar("--cU"), F: state.lastU || 0,  label: "u → cart 1" },
+      { color: LIB.Util.getVar("--cU"), F: out.u,  label: "u → cart 1" },
     ];
     if (p.mode !== "bangbang") {
       slots.push(
-        { color: LIB.Util.getVar("--cP"), F: state.lastUP || 0, label: "P" },
-        { color: LIB.Util.getVar("--cI"), F: state.lastUI || 0, label: "I" },
-        { color: LIB.Util.getVar("--cD"), F: state.lastUD || 0, label: "D" },
+        { color: LIB.Util.getVar("--cP"), F: out.uP, label: "P" },
+        { color: LIB.Util.getVar("--cI"), F: out.uI, label: "I" },
+        { color: LIB.Util.getVar("--cD"), F: out.uD, label: "D" },
       );
     }
     slots.push(
@@ -380,17 +301,16 @@
       x0: EQ[0], v0: 0,
       x1: EQ[1], v1: 0,
       x2: EQ[2], v2: 0,
-      ctrlLoop: { I: 0, ePrev: 0, bbOn: false },
-      _u: 0,
-      lastE: 0, lastUP: 0, lastUI: 0, lastUD: 0, lastU: 0,
+      ctrlLoop: { I: 0, ePrev: 0, bbDir: 0 },
+      ctrlOut:  { e: 0, u: 0, uP: 0, uI: 0, uD: 0 },
       drag: null,
       t: 0,
     }),
 
     onReset: (s) => {
       s.drag = null;
-      s.ctrlLoop = { I: 0, ePrev: 0, bbOn: false };
-      s.lastE = 0; s.lastUP = 0; s.lastUI = 0; s.lastUD = 0; s.lastU = 0;
+      s.ctrlLoop = { I: 0, ePrev: 0, bbDir: 0 };
+      s.ctrlOut  = { e: 0, u: 0, uP: 0, uI: 0, uD: 0 };
     },
 
     modes: {
@@ -401,7 +321,7 @@
         { id: "bangbang", label: "Bang-bang" },
       ],
       onChange: (state) => {
-        state.ctrlLoop = { I: 0, ePrev: 0, bbOn: false };
+        state.ctrlLoop = { I: 0, ePrev: 0, bbDir: 0 };
       },
     },
 
@@ -470,25 +390,20 @@
           source: (s) => s.x2 },
       ];
       if (state.mode === "bangbang") {
-        positionSeries.push(
-          { label: "deadHi", color: "#ef5350", lw: 1.0,
-            source: (s, p) => (p.ref || 0) + (p.dead || 0) / 2 },
-          { label: "deadLo", color: "#ef5350", lw: 1.0,
-            source: (s, p) => (p.ref || 0) - (p.dead || 0) / 2 },
-        );
+        positionSeries.push(...LIB.Plot.deadbandSeries({ refKey: "ref", deadKey: "dead" }));
       }
       const effortSeries = [
-        { label: "u",    color: LIB.Util.getVar("--cU"), lw: 2.0,
-          source: (s) => s.lastU || 0 },
+        { label: "u", color: LIB.Util.getVar("--cU"), lw: 2.0,
+          source: (s) => s.ctrlOut.u },
       ];
       if (state.mode !== "bangbang") {
         effortSeries.push(
           { label: "P", color: LIB.Util.getVar("--cP"), lw: 1.2,
-            source: (s) => s.lastUP || 0 },
+            source: (s) => s.ctrlOut.uP },
           { label: "I", color: LIB.Util.getVar("--cI"), lw: 1.2,
-            source: (s) => s.lastUI || 0 },
+            source: (s) => s.ctrlOut.uI },
           { label: "D", color: LIB.Util.getVar("--cD"), lw: 1.2,
-            source: (s) => s.lastUD || 0 },
+            source: (s) => s.ctrlOut.uD },
         );
       }
       effortSeries.push(
@@ -498,9 +413,13 @@
       return [
         { title: "position vs time (m)",
           yFmt: (v) => v.toFixed(2),
+          yFloor: { lo: 0, hi: 5 },
+          yChunk: 1,
           series: positionSeries },
         { title: "control effort on cart 1 (N)",
           yFmt: (v) => v.toFixed(0),
+          yFloor: { lo: -400, hi: 400 },
+          yChunk: 200,
           series: effortSeries },
       ];
     },
@@ -510,13 +429,36 @@
       { label: "x₂",    units: "m",   value: (s) => s.x1.toFixed(3) },
       { label: "x₃",    units: "m",   value: (s) => s.x2.toFixed(3) },
       { label: "v₃",    units: "m/s", value: (s) => s.v2.toFixed(3) },
-      { label: "err",   units: "m",   value: (s) => s.lastE.toFixed(3) },
+      { label: "err",   units: "m",   value: (s) => s.ctrlOut.e.toFixed(3) },
       { label: "∫err",                value: (s) => (s.ctrlLoop.I || 0).toFixed(3) },
-      { label: "u",     units: "N",   value: (s) => (s.lastU || 0).toFixed(2) },
-      { label: "P",     units: "N",   value: (s) => (s.lastUP || 0).toFixed(2) },
-      { label: "I",     units: "N",   value: (s) => (s.lastUI || 0).toFixed(2) },
-      { label: "D",     units: "N",   value: (s) => (s.lastUD || 0).toFixed(2) },
+      { label: "u",     units: "N",   value: (s) => s.ctrlOut.u.toFixed(2) },
+      { label: "P",     units: "N",   value: (s) => s.ctrlOut.uP.toFixed(2) },
+      { label: "I",     units: "N",   value: (s) => s.ctrlOut.uI.toFixed(2) },
+      { label: "D",     units: "N",   value: (s) => s.ctrlOut.uD.toFixed(2) },
       { label: "wind",  units: "N",   value: (s, p) => (p.wind || 0).toFixed(2) },
+    ],
+
+    controllers: [
+      {
+        slot: "ctrlLoop", output: "ctrlOut",
+        modeKey: "mode",
+        pid: {
+          err:   (s, p) => (p.ref || 0) - s.x2,
+          dmeas: (s)    => s.v2,
+          gains: (s, p) => ({
+            kp: +p.kp || 0, ki: +p.ki || 0, kd: +p.kd || 0,
+            iClamp: +p.iClamp, uCap: +p.uMax,
+          }),
+        },
+        bangbang: {
+          flavor: "latch",
+          err:  (s, p) => (p.ref || 0) - s.x2,
+          dir:  (s, p) => (p.ref > REF_EQ) ? 1 : (p.ref < REF_EQ ? -1 : 0),
+          gains: (s, p) => ({
+            dead: +p.dead || 0, effort: +p.effort || 0, uCap: +p.uMax,
+          }),
+        },
+      },
     ],
 
     physics: {
@@ -530,9 +472,85 @@
               xMin: X_MIN, xMax: X_MAX,
               padX: 60, padY: 30, trackFrac: 0.7 },
 
+    dragControls: [
+      { label: "Any cart", desc: "drag horizontally to disturb" },
+    ],
+
     render,
     onPointer: (type, mx, my, L, state, params) =>
       dragMux.handle(type, mx, my, L, state, params),
+
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const good   = LIB.Util.getVar("--good");
+      const cP     = LIB.Util.getVar("--cP");
+      const ink    = LIB.Util.getVar("--ink");
+      const muted  = LIB.Util.getVar("--muted");
+
+      const cy = H * 0.55;
+      const padX = W * 0.04;
+      const wallW = S * 0.03;
+      const wallH = S * 0.36;
+
+      // Track + ground hatch
+      ctx.strokeStyle = muted + "aa";
+      ctx.lineWidth = Math.max(2, S * 0.007);
+      ctx.beginPath();
+      ctx.moveTo(padX, cy + S * 0.10);
+      ctx.lineTo(W - padX, cy + S * 0.10);
+      ctx.stroke();
+      ctx.strokeStyle = muted + "66";
+      ctx.lineWidth = Math.max(1, S * 0.004);
+      const hatchStep = S * 0.05;
+      for (let x = padX; x <= W - padX; x += hatchStep) {
+        ctx.beginPath();
+        ctx.moveTo(x, cy + S * 0.10);
+        ctx.lineTo(x - S * 0.025, cy + S * 0.14);
+        ctx.stroke();
+      }
+
+      // Left wall
+      ctx.fillStyle = "#2a313c";
+      ctx.fillRect(padX, cy - wallH * 0.55, wallW, wallH);
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1, S * 0.004);
+      ctx.strokeRect(padX, cy - wallH * 0.55, wallW, wallH);
+
+      // Three carts in series
+      const cartW = S * 0.16, cartH = S * 0.18;
+      const xs = [W * 0.30, W * 0.55, W * 0.80];
+      const colors = [accent, good, cP];
+      const drawCart = (cx, color) => {
+        ctx.fillStyle = color;
+        ctx.fillRect(cx - cartW / 2, cy - cartH / 2, cartW, cartH);
+        ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.005);
+        ctx.strokeRect(cx - cartW / 2, cy - cartH / 2, cartW, cartH);
+        ctx.fillStyle = "#1f242c";
+        const wr = S * 0.020;
+        ctx.beginPath(); ctx.arc(cx - cartW * 0.32, cy + cartH / 2, wr, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(cx + cartW * 0.32, cy + cartH / 2, wr, 0, Math.PI * 2); ctx.fill();
+      };
+      xs.forEach((cx, i) => drawCart(cx, colors[i]));
+
+      // Springs: wall→cart0, cart0→cart1, cart1→cart2
+      const segs = 7, amp = S * 0.03;
+      const drawSpring = (x0, x1) => {
+        ctx.beginPath();
+        ctx.moveTo(x0, cy);
+        for (let i = 1; i < segs; i++) {
+          const x = x0 + ((x1 - x0) * i) / segs;
+          const y = cy + (i % 2 === 0 ? -amp : amp);
+          ctx.lineTo(x, y);
+        }
+        ctx.lineTo(x1, cy);
+        ctx.stroke();
+      };
+      ctx.strokeStyle = ink + "cc";
+      ctx.lineWidth = Math.max(1, S * 0.004);
+      drawSpring(padX + wallW, xs[0] - cartW / 2);
+      drawSpring(xs[0] + cartW / 2, xs[1] - cartW / 2);
+      drawSpring(xs[1] + cartW / 2, xs[2] - cartW / 2);
+    },
 
     physHz: 240,
   };

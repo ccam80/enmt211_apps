@@ -16,8 +16,8 @@
   const PHYS_HZ = 240;
   const HIST_HZ = 60;
   const MODE    = "simple";
-  const K_DRAG  = 2.0e5;
-  const C_DRAG  = 1.0e3;
+  const K_DRAG  = 5.0e3;
+  const C_DRAG  = 60;
   const KI_PID  = 0.6;
 
   function defaultState() {
@@ -197,11 +197,13 @@
       const grp = [];
       const w = state.wheels[i];
       grp.push({ key: `r_${i}`, label: `r #${i}`, min: 0.05, max: 3.0, step: 0.005,
-                 value: w.r, onChange: (v) => { w.r = v; } });
+                 value: w.r,
+                 onChange: (v) => { w.r = v; LIB.WheelChain.recomputeJ(w); } });
       if (i !== 0) {
-        grp.push({ key: `J_${i}`, label: `J #${i}`, min: 0.001, max: 5.0,
-                   step: 0.001, value: w.J, log: true,
-                   onChange: (v) => { w.J = v; } });
+        grp.push({ key: `m_${i}`, label: `m #${i}`, min: 0.01, max: 50,
+                   step: 0.001, value: w.m, log: true,
+                   tip: "Wheel mass (kg). Solid-disc inertia J = ½·m·r².",
+                   onChange: (v) => { w.m = v; LIB.WheelChain.recomputeJ(w); } });
       }
       groups.push(grp);
     }
@@ -221,10 +223,10 @@
         { key: "Kp",      label: "K_p",   min: 0.01, max: 200, step: 0.01,
           value: 5.0, log: true,
           tip: "Velocity-loop proportional gain (N·m·s/rad)." },
-        { key: "Jmotor",  label: "J_motor", min: 0.001, max: 5.0, step: 0.001,
-          value: w0.J, log: true,
-          tip: "Motor rotor inertia (kg·m²).",
-          onChange: (v) => { w0.J = v; } },
+        { key: "mmotor",  label: "m_motor", min: 0.01, max: 50, step: 0.001,
+          value: w0.m, log: true,
+          tip: "Motor rotor mass (kg). J_motor = ½·m·r² for the rotor disc.",
+          onChange: (v) => { w0.m = v; LIB.WheelChain.recomputeJ(w0); } },
       ],
       Mechanism: [
         { key: "drag", label: "c", min: 0, max: 2, step: 0.001, value: 0.02,
@@ -251,6 +253,8 @@
     return [
       { title: "ω per wheel (rad/s) — yellow = target",
         yFmt: (v) => v.toFixed(1),
+        yFloor: { lo: -2, hi: 2 },
+        yChunk: 2,
         series: [
           { label: "target", color: "#f6c945", lw: 1.4,
             source: (s, p) => p.wTarget },
@@ -260,6 +264,8 @@
         }))) },
       { title: "τ motor (N·m) — orange = thermal load",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -1, hi: 1 },
+        yChunk: 1,
         series: [
           { label: "tau",        color: "#4ea1ff", lw: 2.0,
             source: (s) => s.lastT || 0 },
@@ -355,6 +361,57 @@
     layout: (W, H) => ({ W, H }),
     render,
     onPointer,
+
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const good   = LIB.Util.getVar("--good");
+      const cP     = LIB.Util.getVar("--cP");
+      const cW     = LIB.Util.getVar("--cW");
+      const ink    = LIB.Util.getVar("--ink");
+
+      // 3-wheel chain — driver (left) + idler + driven, with thermal plumes
+      // above the driver to flag the closed-loop / thermal modeling layer.
+      const cy = H * 0.58;
+      const r1 = S * 0.18, r2 = S * 0.22, r3 = S * 0.14;
+      const totalW = (r1 * 2) + (r2 * 2) + (r3 * 2) - r1 * 0.4 - r3 * 0.4;
+      const cx1 = (W - totalW) / 2 + r1;
+      const cx2 = cx1 + r1 + r2;
+      const cx3 = cx2 + r2 + r3;
+
+      LIB.GearRender.drawGearShape(ctx,
+        { cx: cx1, cy }, { r: r1, theta: 0 }, accent, { phase: 0 });
+      LIB.GearRender.drawGearShape(ctx,
+        { cx: cx2, cy }, { r: r2, theta: 0 }, good,   { phase: Math.PI });
+      LIB.GearRender.drawGearShape(ctx,
+        { cx: cx3, cy }, { r: r3, theta: 0 }, cP,     { phase: 0 });
+
+      // Thermal plumes
+      ctx.strokeStyle = cW;
+      ctx.lineWidth = Math.max(1, S * 0.005);
+      const plumeBase = cy - r2 - S * 0.02;
+      for (let k = 0; k < 3; k++) {
+        const x0 = cx2 - S * 0.07 + k * S * 0.07;
+        ctx.beginPath();
+        ctx.moveTo(x0, plumeBase);
+        ctx.bezierCurveTo(
+          x0 - S * 0.025, plumeBase - S * 0.06,
+          x0 + S * 0.025, plumeBase - S * 0.13,
+          x0,             plumeBase - S * 0.20
+        );
+        ctx.stroke();
+      }
+
+      // Arbour dots
+      ctx.fillStyle = ink;
+      ctx.beginPath(); ctx.arc(cx1, cy, S * 0.018, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx2, cy, S * 0.018, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx3, cy, S * 0.018, 0, Math.PI * 2); ctx.fill();
+    },
+
+    dragControls: [
+      { label: "Any wheel", desc: "click rim, rotate" },
+    ],
 
     headerButtons: [LIB.HeaderButtons.driveToggle()],
 

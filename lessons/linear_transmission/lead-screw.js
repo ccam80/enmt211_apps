@@ -32,9 +32,13 @@
   const END_K_BUMP       = 5000;         // end-stop spring (N/m)
   const END_C_BUMP       = 50;           // end-stop damping (N·s/m)
   const K_LASH           = 2.0e5;        // lash contact spring (N/m)
-  const C_LASH           = 1.0e3;        // lash contact damping (N·s/m)
-  const K_LOAD_DRAG      = 2.0e5;        // pointer-on-load penalty spring (N/m)
-  const C_LOAD_DRAG      = 1.0e3;        // pointer-on-load penalty damping (N·s/m)
+  const C_LASH           = 2.5e3;        // lash contact damping (N·s/m) — ζ≈1 vs reduced mass through the screw.
+  // Pointer-on-load penalty: compliant spring so the collar feels the motor's
+  // reflected inertia through the screw rather than tracking pointer position
+  // rigidly. Damper sized for ζ≈2 against the load mass — dead enough that
+  // the spring doesn't add visible oscillation on top of the contact dynamics.
+  const K_LOAD_DRAG      = 5.0e3;
+  const C_LOAD_DRAG      = 800;
   const K_SHAFT_DRAG     = 500;          // pointer-on-shaft penalty (N·m/rad)
   const C_SHAFT_DRAG     = 10;           //                          (N·m·s/rad)
   const SHAFT_RAD_PER_PX = 0.03;         // ~200 px per revolution
@@ -139,8 +143,7 @@
     const H      = p.lash / 2;
     const psi    = state.x - state.theta * r;
     const psiDot = state.v - state.omega * r;
-    const Flash  = LIB.Lash.contactForce(psi, psiDot, state.engaged, H,
-                                         K_LASH, C_LASH);
+    const Flash  = LIB.Lash.contactForce(psi, psiDot, H, K_LASH, C_LASH);
 
     const Fdrag    = loadDragger.spring1D (state, state.x,     state.v,
                                            K_LOAD_DRAG,  C_LOAD_DRAG);
@@ -165,7 +168,9 @@
     const m = Math.max(1e-9, p.mLoad);
     const J = Math.max(1e-9, p.Jmotor);
 
-    const inLash = state.engaged !== 0;
+    const H_J    = p.lash / 2;
+    const psi_J  = state.x - state.theta * r;
+    const inLash = (H_J <= 1e-9) || (psi_J > H_J) || (psi_J < -H_J);
     const Kl = inLash ? K_LASH : 0;
     const Cl = inLash ? C_LASH : 0;
 
@@ -224,33 +229,6 @@
         { ki: p.KiPos, vCap: p.wTarget });
     }
 
-    const r      = reff(p);
-    const H      = p.lash / 2;
-    const psi    = state.x - state.theta * r;
-    const psiDot = state.v - state.omega * r;
-
-    // Predicted ψ at end of step under free acceleration — drives the engage
-    // test forward by one dt so a rapid reversal can't sail through the lash
-    // window in a single tick.
-    const tau       = motorTorque(state, p);
-    const ddth      = (tau - LIN_DRAG_MOTOR * state.omega) / Math.max(1e-9, p.Jmotor);
-    const dragging  = loadDragger.isActive(state);
-    const omegaFree = state.omega + dt * ddth;
-    const xFree     = dragging ? state.x : state.x + state.v * dt;
-    const psiEnd    = xFree - (state.theta + omegaFree * dt) * r;
-
-    // Release predicate: motor's commanded ω points opposite the engaged flank.
-    const omegaTargetMotor = motorActive(state, p)
-      ? vDemand(state, p, p.wTarget) : state.omega;
-    const omegaWanted = (Math.abs(r) > 1e-9) ? state.v / r : 0;
-    const SLIP_TOL = 0.05;
-
-    state.engaged = LIB.Lash.latchEngagement(state.engaged || 0, {
-      psi, psiDot, psiEnd, H,
-      releaseAtPos: () => omegaTargetMotor > omegaWanted + SLIP_TOL,
-      releaseAtNeg: () => omegaTargetMotor < omegaWanted - SLIP_TOL,
-    });
-
     state.lastTau = motorTorque(state, p);
   }
 
@@ -262,6 +240,7 @@
     }
     const r = reff(p);
     state.psi = state.x - state.theta * r;
+    state.engaged = LIB.Lash.engagementOf(state.psi, p.lash / 2);
   }
 
   // ---------------------------------------------------------------------------
@@ -316,7 +295,7 @@
           onChange: (v) => { currentStarts = v; } },
         { key: "pitch",  label: "pitch",  min: 0.002, max: 0.10, step: 0.0005, value: 0.05, log: true,
           tip: "Distance the nut travels per revolution per start (m).",
-          dynMin: () => LIB.ScrewRender.minRenderablePitch(cachedCanvas, currentStarts, X_LIMIT, 0.002) },
+          dynMin: () => LIB.ScrewRender.minRenderablePitch(cachedCanvas, currentStarts, X_LIMIT, 0.002, 2 * 28 + 16) },
         { key: "lash",   label: "lash",   min: 0,    max: 0.005, step: 0.0001, value: 0.0008,
           tip: "Axial backlash between the screw and nut threads (m)." },
       ],
@@ -325,6 +304,8 @@
     plots: [
       { title: "x(t) — load position (m), yellow = target",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -X_LIMIT, hi: X_LIMIT },
+        yChunk: 0.2,
         series: [
           { label: "target", color: "#f6c945", lw: 1.4,
             source: (s, p) => p.xTarget },
@@ -333,6 +314,8 @@
         ] },
       { title: "τ motor (N·m)",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -2, hi: 2 },
+        yChunk: 1,
         series: [
           { label: "tau", color: "#4ea1ff", lw: 2.0,
             source: (s) => s.lastTau || 0 },
@@ -367,18 +350,87 @@
 
     layout: { kind: "linearTrack", xMin: -X_LIMIT, xMax: X_LIMIT },
 
-    // Plain motor disc anchored at the left of the track. The thermal
-    // halo / explosion visuals live only in the whole-system lesson —
-    // there the motor itself is the subject, here it's just a torque
-    // source connected to the screw.
+    // Plain motor disc anchored to the left of the track. The shell
+    // auto-reserves marginLeftPx so the disc sits clear of the canvas
+    // edge — `place` only fixes the y so the motor aligns with the
+    // shaft band, not with the rail.
     motor: {
-      place: (L) => ({ cx: L.xToPx(L.xMin) - 28 - 8, cy: shaftCenterY(L) }),
+      place: (L) => ({ cx: L.motorCx, cy: shaftCenterY(L) }),
       r: 28,
     },
+
+    dragControls: [
+      { label: "Load",  desc: "drag horizontally" },
+      { label: "Shaft", desc: "drag up/down to spin" },
+    ],
 
     positionRail: { field: "x", target: "xTarget" },
 
     render: drawScene,
+
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const ink    = LIB.Util.getVar("--ink");
+      const muted  = LIB.Util.getVar("--muted");
+      const cy = H / 2;
+
+      const motorR  = S * 0.18;
+      const motorCx = W * 0.16;
+      const shaftX0 = motorCx + motorR;
+      const shaftX1 = W * 0.94;
+      const shaftHalfH = S * 0.05;
+      const nutCx = W * 0.62;
+      const nutW  = S * 0.18;
+      const nutH  = S * 0.30;
+
+      ctx.lineCap = "round";
+
+      // Motor disc + cross
+      ctx.fillStyle = "#2a313c";
+      ctx.beginPath(); ctx.arc(motorCx, cy, motorR, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.006);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(motorCx - motorR * 0.5, cy);
+      ctx.lineTo(motorCx + motorR * 0.5, cy);
+      ctx.moveTo(motorCx, cy - motorR * 0.5);
+      ctx.lineTo(motorCx, cy + motorR * 0.5);
+      ctx.stroke();
+
+      // Shaft body
+      ctx.fillStyle = "#1f242c";
+      ctx.fillRect(shaftX0, cy - shaftHalfH, shaftX1 - shaftX0, shaftHalfH * 2);
+      ctx.strokeStyle = ink + "aa"; ctx.lineWidth = Math.max(1, S * 0.004);
+      ctx.strokeRect(shaftX0, cy - shaftHalfH, shaftX1 - shaftX0, shaftHalfH * 2);
+
+      // Thread V notches
+      ctx.strokeStyle = muted;
+      const pitch = S * 0.05;
+      for (let x = shaftX0 + pitch * 0.5; x < shaftX1 - pitch * 0.2; x += pitch) {
+        ctx.beginPath();
+        ctx.moveTo(x, cy - shaftHalfH);
+        ctx.lineTo(x + pitch * 0.5, cy + shaftHalfH);
+        ctx.stroke();
+      }
+
+      // Lead nut
+      ctx.fillStyle = accent;
+      ctx.fillRect(nutCx - nutW / 2, cy - nutH / 2, nutW, nutH);
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.005);
+      ctx.strokeRect(nutCx - nutW / 2, cy - nutH / 2, nutW, nutH);
+
+      // Travel arrow
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.5, S * 0.007);
+      const ay = cy - nutH * 0.85;
+      const ax0 = nutCx - S * 0.10, ax1 = nutCx + S * 0.10;
+      ctx.beginPath();
+      ctx.moveTo(ax0, ay); ctx.lineTo(ax1, ay);
+      ctx.lineTo(ax1 - S * 0.025, ay - S * 0.020);
+      ctx.moveTo(ax1, ay);
+      ctx.lineTo(ax1 - S * 0.025, ay + S * 0.020);
+      ctx.stroke();
+    },
 
     onPointer: (type, mx, my, L, state, params) =>
       dragMux.handle(type, mx, my, L, state, params),

@@ -258,19 +258,23 @@
           onChange: (v) => { currentStarts = v; } },
         { key: "pitch",  label: "pitch",  min: 0.002, max: 0.10, step: 0.0005, value: 0.04, log: true,
           tip: "Distance the nut travels per revolution per start (m).",
-          dynMin: () => LIB.ScrewRender.minRenderablePitch(cachedCanvas, currentStarts, X_LIMIT, 0.002) },
+          dynMin: () => LIB.ScrewRender.minRenderablePitch(cachedCanvas, currentStarts, X_LIMIT, 0.002, 2 * 28 + 16) },
       ],
     },
 
     plots: [
       { title: "x(t) — load position (m), yellow = target",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -X_LIMIT, hi: X_LIMIT },
+        yChunk: 0.2,
         series: [
           { label: "target", color: "#f6c945", lw: 1.4, source: (s, p) => p.xTarget },
           { label: "x",      color: "#4ea1ff", lw: 2.2, source: (s)    => s.x },
         ] },
       { title: "τ motor (N·m)",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -2, hi: 2 },
+        yChunk: 1,
         series: [
           { label: "tau", color: "#4ea1ff", lw: 2.0, source: (s) => s.lastTau || 0 },
         ] },
@@ -302,16 +306,96 @@
 
     layout: { kind: "linearTrack", xMin: -X_LIMIT, xMax: X_LIMIT },
 
-    // Plain motor disc — see lead-screw.js for the rationale on why this
-    // lesson doesn't enable thermal styling.
+    // Plain motor disc. The shell auto-extends marginLeftPx so the disc
+    // fits clear of the canvas edge; `place` only fixes y so the motor
+    // aligns with the shaft band (above the position rail).
     motor: {
-      place: (L) => ({ cx: L.xToPx(L.xMin) - 28 - 8, cy: shaftCenterY(L) }),
+      place: (L) => ({ cx: L.motorCx, cy: shaftCenterY(L) }),
       r: 28,
     },
+
+    dragControls: [
+      { label: "Load",  desc: "drag horizontally" },
+      { label: "Shaft", desc: "drag up/down to spin" },
+    ],
 
     positionRail: { field: "x", target: "xTarget" },
 
     render: drawScene,
+
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const ink    = LIB.Util.getVar("--ink");
+      const muted  = LIB.Util.getVar("--muted");
+      const good   = LIB.Util.getVar("--good");
+      const cy = H / 2;
+
+      const motorR  = S * 0.18;
+      const motorCx = W * 0.16;
+      const shaftX0 = motorCx + motorR;
+      const shaftX1 = W * 0.94;
+      const shaftHalfH = S * 0.04;
+      const nutCx = W * 0.62;
+      const nutW  = S * 0.22;
+      const nutH  = S * 0.32;
+
+      ctx.lineCap = "round";
+
+      ctx.fillStyle = "#2a313c";
+      ctx.beginPath(); ctx.arc(motorCx, cy, motorR, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.006);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(motorCx - motorR * 0.5, cy);
+      ctx.lineTo(motorCx + motorR * 0.5, cy);
+      ctx.moveTo(motorCx, cy - motorR * 0.5);
+      ctx.lineTo(motorCx, cy + motorR * 0.5);
+      ctx.stroke();
+
+      ctx.fillStyle = "#1f242c";
+      ctx.fillRect(shaftX0, cy - shaftHalfH, shaftX1 - shaftX0, shaftHalfH * 2);
+      ctx.strokeStyle = ink + "aa"; ctx.lineWidth = Math.max(1, S * 0.004);
+      ctx.strokeRect(shaftX0, cy - shaftHalfH, shaftX1 - shaftX0, shaftHalfH * 2);
+
+      // Finer-pitch helical groove than lead-screw to read as a ball-screw.
+      ctx.strokeStyle = muted;
+      const pitch = S * 0.03;
+      for (let x = shaftX0 + pitch * 0.5; x < shaftX1 - pitch * 0.2; x += pitch) {
+        ctx.beginPath();
+        ctx.moveTo(x, cy - shaftHalfH);
+        ctx.lineTo(x + pitch * 0.4, cy + shaftHalfH);
+        ctx.stroke();
+      }
+
+      // Ball-nut block + visible recirculating balls
+      ctx.fillStyle = accent;
+      ctx.fillRect(nutCx - nutW / 2, cy - nutH / 2, nutW, nutH);
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.005);
+      ctx.strokeRect(nutCx - nutW / 2, cy - nutH / 2, nutW, nutH);
+
+      ctx.fillStyle = good;
+      const ballR = S * 0.018;
+      const rowY1 = cy - nutH * 0.18;
+      const rowY2 = cy + nutH * 0.18;
+      const nBalls = 6;
+      for (let i = 0; i < nBalls; i++) {
+        const f = (i + 0.5) / nBalls;
+        const bx = nutCx - nutW / 2 + f * nutW;
+        ctx.beginPath(); ctx.arc(bx, rowY1, ballR, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(bx, rowY2, ballR, 0, Math.PI * 2); ctx.fill();
+      }
+
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.5, S * 0.007);
+      const ay = cy - nutH * 0.85;
+      const ax0 = nutCx - S * 0.10, ax1 = nutCx + S * 0.10;
+      ctx.beginPath();
+      ctx.moveTo(ax0, ay); ctx.lineTo(ax1, ay);
+      ctx.lineTo(ax1 - S * 0.025, ay - S * 0.020);
+      ctx.moveTo(ax1, ay);
+      ctx.lineTo(ax1 - S * 0.025, ay + S * 0.020);
+      ctx.stroke();
+    },
 
     onPointer: (type, mx, my, L, state, params) =>
       dragMux.handle(type, mx, my, L, state, params),

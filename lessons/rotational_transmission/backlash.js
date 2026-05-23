@@ -4,14 +4,14 @@
 //  Backlash lesson — gear chain with finite tooth lash.
 //
 //  Each mesh has a free-play arc B = `lash` at the pitch circle. Inside the
-//  arc, gears coast independently; at the boundary, the loaded flank carries
-//  torque rigidly via a stiff penalty spring (same shape as lead-screw's lash
-//  but applied N−1 times across the chain).
+//  arc, gears coast independently with zero contact force; outside it, the
+//  loaded flank carries torque via a unilateral spring + one-sided damper
+//  (LIB.Lash.contactForce). The contact can only push the flanks apart, so
+//  decelerating the driver lets the driven inertia drift away naturally
+//  rather than dragging it through a two-sided damper.
 //
-//  Per-mesh state (state.meshEngaged[i] ∈ {-1, 0, +1}, state.meshPsiOffset[i])
-//  is latched by LIB.Lash.latchEngagement in preStep. Release predicate is
-//  the same "free acceleration of ψ pushes apart" test the original stateless
-//  detector used; latching it removes the chatter near boundaries.
+//  state.meshEngaged[i] ∈ {-1, 0, +1} survives only as a derived readout
+//  label (sign of ψ outside the lash window), written by contactDxdt.
 //
 //  Tooth count is the primary parameter — radii are derived from N so all
 //  gears in the chain share the same module (real teeth must be the same
@@ -27,9 +27,11 @@
   const N_MIN     = 6, N_MAX = 60;
   const K_LASH    = LIB.WheelChain.K_RIGID;     // 2.0e5
   const C_LASH    = LIB.WheelChain.C_RIGID;     // 1.0e3
-  const K_DRAG    = 2.0e5;
-  const C_DRAG    = 1.0e3;
-  const SLIP_TOL  = 1e-9;
+  // Compliant wheel-drag spring + heavy damping (ζ≈2 against the wheel
+  // inertia) so the wheel's own inertia is visible against the pointer pull
+  // without the drag spring itself ringing on top of the contact dynamics.
+  const K_DRAG    = 5.0e3;
+  const C_DRAG    = 60;
 
   function snappedR() {
     return LIB.GearRender.snapRadiusToTeeth(0.5, N_MIN, N_MAX, PITCH_ARC);
@@ -60,47 +62,6 @@
   function driveSaturated(state, p) {
     if (!state.driveOn) return true;
     return Math.abs(p.Kp * (p.wTarget - state.omega_0)) >= p.Tmax;
-  }
-
-  // ---------------------------------------------------------------------------
-  //  Per-mesh latched engagement update
-  //
-  //  Release predicate matches the original stateless detector's
-  //  "stay-engaged" criterion inverted: release when ψ̇ has gone the wrong
-  //  way AND the free acceleration of ψ would also pull apart.
-  // ---------------------------------------------------------------------------
-
-  function meshFreeAcc(state, params, i) {
-    const wA = state.wheels[i];
-    const wB = state.wheels[i + 1];
-    const omA = state[`omega_${i}`];
-    const omB = state[`omega_${i + 1}`];
-    let T_A = -params.drag * omA;
-    let T_B = -params.drag * omB;
-    if (i === 0) T_A += driveTorque(state, params);
-    // ψ = rA·θA + ms·rB·θB → ψ̈_free = rA·αA + ms·rB·αB
-    //   For backlash mode, ms = +1.
-    const rA = wA.r, rB = wB.r;
-    return rA * (T_A / Math.max(1e-9, wA.J))
-         + rB * (T_B / Math.max(1e-9, wB.J));
-  }
-
-  function updateEngagement(state, params, dt) {
-    const N = state.N;
-    const H = params.lash / 2;
-    for (let i = 0; i < N - 1; i++) {
-      const psi    = LIB.WheelChain.meshPsi   (state, MODE, i);
-      const psiDot = LIB.WheelChain.meshPsiDot(state, MODE, i);
-      const ddFree = meshFreeAcc(state, params, i);
-      // Predicted ψ at end of step under free acc (same look-ahead lead-screw uses).
-      const psiEnd = psi + psiDot * dt + 0.5 * ddFree * dt * dt;
-
-      state.meshEngaged[i] = LIB.Lash.latchEngagement(state.meshEngaged[i] || 0, {
-        psi, psiDot, psiEnd, H,
-        releaseAtPos: () => (psiDot <=  1e-6) && (ddFree <= -SLIP_TOL),
-        releaseAtNeg: () => (psiDot >= -1e-6) && (ddFree >=  SLIP_TOL),
-      });
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -136,6 +97,7 @@
     const J  = LIB.WheelChain.contactJacobian(state, params, t, {
       mode: MODE, c: params.drag,
       meshK: K_LASH, meshC: C_LASH,
+      meshH: params.lash / 2,
     });
     const n  = 2 * state.N;
     const wi = (i) => 2 * i + 1;
@@ -154,7 +116,6 @@
   }
   function preStep(state, params, dt) {
     dragger.preStep(state, dt);
-    updateEngagement(state, params, dt);
   }
   function postStep(state, params) {
     state.lastT = driveTorque(state, params);
@@ -226,6 +187,7 @@
     for (let i = 0; i < state.N; i++) {
       const w = state.wheels[i];
       w.r = LIB.GearRender.snapRadiusToTeeth(w.r, N_MIN, N_MAX, PITCH_ARC);
+      LIB.WheelChain.recomputeJ(w);
       w.theta = 0; w.omega = 0;
     }
     LIB.WheelChain.recomputePsiOffsets(state, MODE);
@@ -247,9 +209,10 @@
         },
       });
       if (i !== 0) {
-        grp.push({ key: `J_${i}`, label: `J #${i}`, min: 0.001, max: 5.0,
-                   step: 0.001, value: w.J, log: true,
-                   onChange: (v) => { w.J = v; } });
+        grp.push({ key: `m_${i}`, label: `m #${i}`, min: 0.01, max: 50,
+                   step: 0.001, value: w.m, log: true,
+                   tip: "Gear mass (kg). Solid-disc inertia J = ½·m·r².",
+                   onChange: (v) => { w.m = v; LIB.WheelChain.recomputeJ(w); } });
       }
       groups.push(grp);
     }
@@ -266,14 +229,15 @@
           tip: "Peak drive torque (N·m)." },
         { key: "Kp",      label: "K_p",    min: 0.01, max: 200, step: 0.01, value: 5.0, log: true,
           tip: "Drive-loop gain." },
-        { key: "Jmotor",  label: "J #0",   min: 0.001, max: 5.0, step: 0.001,
-          value: w0.J, log: true,
-          onChange: (v) => { w0.J = v; } },
+        { key: "mmotor",  label: "m #0",   min: 0.01, max: 50, step: 0.001,
+          value: w0.m, log: true,
+          tip: "Wheel-#0 (motor) mass (kg). J #0 = ½·m·r².",
+          onChange: (v) => { w0.m = v; LIB.WheelChain.recomputeJ(w0); } },
       ],
       Mechanism: [
         { key: "drag", label: "c", min: 0, max: 2, step: 0.001, value: 0.02,
           tip: "Viscous damping per wheel (N·m·s/rad)." },
-        { key: "lash", label: "lash", min: 0, max: 0.30, step: 0.001, value: 0.04,
+        { key: "lash", label: "lash", min: 0, max: 0.30, step: 0.001, value: 0.10,
           tip: "Free-play arc per mesh at the pitch circle (m). Reverse direction → chain crosses every mesh's lash before the far end moves." },
       ],
       Wheels: {
@@ -303,6 +267,8 @@
     return [
       { title: "ω per wheel (rad/s)",
         yFmt: (v) => v.toFixed(1),
+        yFloor: { lo: -2, hi: 2 },
+        yChunk: 2,
         series: state.wheels.map((_, i) => ({
           label: `w${i}`, color: LIB.WheelChainView.color(i),
           lw: i === 0 ? 2.4 : 1.6,
@@ -310,6 +276,8 @@
         })) },
       { title: "ψ per mesh (m) — clamped to ±lash/2",
         yFmt: (v) => v.toFixed(3),
+        yFloor: { lo: -0.05, hi: 0.05 },
+        yChunk: 0.05,
         series: state.wheels.slice(0, -1).map((_, i) => ({
           label: `psi${i}`, color: LIB.WheelChainView.color(i + 1), lw: 1.6,
           source: (s) => s.N > i + 1 ? LIB.WheelChain.meshPsi(s, MODE, i) : 0,
@@ -318,21 +286,11 @@
   }
 
   function readoutsSpec(state) {
-    const fixed = [
+    return [
       { label: "τ applied", units: "N·m", value: (s) => (s.lastT || 0).toFixed(3) },
       { label: "J_motor",   units: "kg·m²", value: (s) => s.wheels[0].J.toFixed(4) },
       { label: "sim t",     units: "s", value: (s) => s.t.toFixed(2) },
     ];
-    const meshes = state.wheels.slice(0, -1).map((_, i) => ({
-      label: `mesh ${i}-${i + 1}`,
-      value: (s) => {
-        const psi = LIB.WheelChain.meshPsi(s, MODE, i);
-        const eng = (s.meshEngaged && s.meshEngaged[i]) || 0;
-        const tag = eng > 0 ? "+H" : eng < 0 ? "−H" : "free";
-        return `ψ=${psi.toFixed(4)} ${tag}`;
-      },
-    }));
-    return fixed.concat(meshes);
   }
 
   // ---------------------------------------------------------------------------
@@ -371,6 +329,50 @@
     layout: (W, H) => ({ W, H }),
     render,
     onPointer,
+
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const cI     = LIB.Util.getVar("--cI");
+      const ink    = LIB.Util.getVar("--ink");
+
+      // Two gears with a visible lash gap between them (offset > r1+r2).
+      const r1 = S * 0.26, r2 = S * 0.18;
+      const cy = H / 2;
+      const lashGap = S * 0.06;
+      const sep = r1 + r2 + lashGap;
+      const cx1 = W / 2 - sep / 2 + r1 * 0.05;
+      const cx2 = cx1 + sep;
+
+      LIB.GearRender.drawGearShape(ctx,
+        { cx: cx1, cy }, { r: r1, theta: 0 }, accent, { phase: 0 });
+      LIB.GearRender.drawGearShape(ctx,
+        { cx: cx2, cy }, { r: r2, theta: 0 }, cI,     { phase: 0 });
+
+      // Lash double-arrow between the pitch circles
+      const lashY = cy + r1 * 0.15;
+      const lx0 = cx1 + r1, lx1 = cx2 - r2;
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1, S * 0.005);
+      ctx.beginPath();
+      ctx.moveTo(lx0, lashY); ctx.lineTo(lx1, lashY);
+      ctx.lineTo(lx1 - S * 0.014, lashY - S * 0.014);
+      ctx.moveTo(lx1, lashY);
+      ctx.lineTo(lx1 - S * 0.014, lashY + S * 0.014);
+      ctx.moveTo(lx0, lashY);
+      ctx.lineTo(lx0 + S * 0.014, lashY - S * 0.014);
+      ctx.moveTo(lx0, lashY);
+      ctx.lineTo(lx0 + S * 0.014, lashY + S * 0.014);
+      ctx.stroke();
+
+      // Arbour dots
+      ctx.fillStyle = ink;
+      ctx.beginPath(); ctx.arc(cx1, cy, S * 0.022, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx2, cy, S * 0.022, 0, Math.PI * 2); ctx.fill();
+    },
+
+    dragControls: [
+      { label: "Any gear", desc: "click rim, rotate (reverse to feel lash)" },
+    ],
 
     headerButtons: [LIB.HeaderButtons.driveToggle()],
 

@@ -157,6 +157,8 @@
           series },
         { title: "command above hover & updraft (N)",
           yFmt: (v) => v.toFixed(0),
+          yFloor: { lo: -100, hi: 100 },
+          yChunk: 50,
           series: [
             { label: "P",    color: LIB.Util.getVar("--cP"), lw: 1.2,
               source: (s) => s.ctrlOut.uP },
@@ -363,6 +365,91 @@
                    10, 24);
 
       if (holdDetector) LIB.Draw.holdBadge(ctx, W, H, holdDetector);
+    },
+
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const ink    = LIB.Util.getVar("--ink");
+      const muted  = LIB.Util.getVar("--muted");
+      const cRef   = LIB.Util.getVar("--cRef");
+
+      // Sky gradient (top to bottom)
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, "#1b2530");
+      grad.addColorStop(1, "#16191e");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Ground
+      ctx.fillStyle = "#1f2630";
+      ctx.fillRect(0, H * 0.85, W, H * 0.15);
+      ctx.strokeStyle = muted + "aa";
+      ctx.lineWidth = Math.max(1, S * 0.005);
+      ctx.beginPath();
+      ctx.moveTo(0, H * 0.85); ctx.lineTo(W, H * 0.85);
+      ctx.stroke();
+
+      // Vertical altitude rail with ref tick
+      const railX = W * 0.15;
+      ctx.strokeStyle = muted + "55";
+      ctx.lineWidth = Math.max(1, S * 0.004);
+      ctx.beginPath();
+      ctx.moveTo(railX, H * 0.10); ctx.lineTo(railX, H * 0.85);
+      ctx.stroke();
+      // Reference altitude line
+      const refY = H * 0.42;
+      ctx.strokeStyle = cRef;
+      ctx.lineWidth = Math.max(1.5, S * 0.006);
+      ctx.setLineDash([S * 0.02, S * 0.02]);
+      ctx.beginPath();
+      ctx.moveTo(railX - S * 0.04, refY); ctx.lineTo(W * 0.95, refY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Helicopter — side view at slightly below ref
+      const heliX = W * 0.55;
+      const heliY = refY + S * 0.10;
+      const bodyW = S * 0.32, bodyH = S * 0.16;
+      ctx.fillStyle = accent;
+      ctx.beginPath();
+      const r = bodyH * 0.45;
+      ctx.moveTo(heliX - bodyW / 2 + r, heliY - bodyH / 2);
+      ctx.arcTo(heliX + bodyW / 2, heliY - bodyH / 2, heliX + bodyW / 2, heliY + bodyH / 2, r);
+      ctx.arcTo(heliX + bodyW / 2, heliY + bodyH / 2, heliX - bodyW / 2, heliY + bodyH / 2, r);
+      ctx.arcTo(heliX - bodyW / 2, heliY + bodyH / 2, heliX - bodyW / 2, heliY - bodyH / 2, r);
+      ctx.arcTo(heliX - bodyW / 2, heliY - bodyH / 2, heliX + bodyW / 2, heliY - bodyH / 2, r);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.005);
+      ctx.stroke();
+
+      // Tail boom + tail rotor
+      ctx.strokeStyle = ink;
+      ctx.lineWidth = Math.max(1.2, S * 0.006);
+      ctx.beginPath();
+      ctx.moveTo(heliX + bodyW / 2, heliY);
+      ctx.lineTo(heliX + bodyW * 0.95, heliY - bodyH * 0.15);
+      ctx.stroke();
+
+      // Main rotor disc (thin ellipse)
+      const rotorW = bodyW * 1.6, rotorH = bodyH * 0.18;
+      const rotorY = heliY - bodyH * 0.6;
+      ctx.fillStyle = ink + "cc";
+      ctx.beginPath();
+      ctx.ellipse(heliX, rotorY, rotorW / 2, rotorH / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1, S * 0.004);
+      ctx.beginPath();
+      ctx.moveTo(heliX, rotorY); ctx.lineTo(heliX, heliY - bodyH / 2);
+      ctx.stroke();
+
+      // Skid
+      ctx.strokeStyle = muted;
+      ctx.beginPath();
+      ctx.moveTo(heliX - bodyW * 0.45, heliY + bodyH * 0.7);
+      ctx.lineTo(heliX + bodyW * 0.45, heliY + bodyH * 0.7);
+      ctx.stroke();
     },
 
     init: (handle) => {

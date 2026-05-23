@@ -59,12 +59,12 @@
 
   function loadHit(state, params, L, mx, my) {
     // Hit-test against the load body, which sits ABOVE the belt's top
-    // tangent (g.loadTopY), not at the belt centre. The trapezoid extends
-    // upward from loadTopY by ~40 px for a typical mass.
+    // tangent (g.loadTopY), not at the belt centre. Use g.loadXToPx so the
+    // hit-test follows the inset-pulley load placement.
     const g = LIB.BeltRender.layout(L, params);
     const loadCy = g.loadTopY - 25;
-    return Math.abs(mx - L.xToPx(state.x)) < 60
-        && Math.abs(my - loadCy)           < 45;
+    return Math.abs(mx - g.loadXToPx(state.x)) < 60
+        && Math.abs(my - loadCy)               < 45;
   }
 
   function pulleyHit(which) {
@@ -297,12 +297,16 @@
     plots: [
       { title: "x(t) — load position (m), yellow = target",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -X_LIMIT, hi: X_LIMIT },
+        yChunk: 0.2,
         series: [
           { label: "target", color: "#f6c945", lw: 1.4, source: (s, p) => p.xTarget },
           { label: "x",      color: "#4ea1ff", lw: 2.2, source: (s)    => s.x },
         ] },
       { title: "τ motor (N·m)",
         yFmt: (v) => v.toFixed(2),
+        yFloor: { lo: -2, hi: 2 },
+        yChunk: 1,
         series: [
           { label: "tau", color: "#4ea1ff", lw: 2.0, source: (s) => s.lastTau || 0 },
         ] },
@@ -338,6 +342,12 @@
     // so the standalone conveyor lesson shows just the belt + pulleys.
     // The motor reappears in the whole-system lesson.
 
+    dragControls: [
+      { label: "Load",          desc: "drag horizontally" },
+      { label: "Drive pulley",  desc: "click rim, rotate" },
+      { label: "Idler pulley",  desc: "click rim, rotate" },
+    ],
+
     // The belt sits 60 px above L.trackY (BeltRender's yMid default) and
     // the pulleys extend down to roughly L.trackY itself, so the default
     // 30 px gap to the rail leaves it tucked too close to the belt body.
@@ -345,6 +355,67 @@
     positionRail: { field: "x", target: "xTarget", yOffset: 60 },
 
     render: drawScene,
+
+    icon: (ctx, W, H) => {
+      const S = Math.min(W, H);
+      const accent = LIB.Util.getVar("--accent");
+      const ink    = LIB.Util.getVar("--ink");
+      const muted  = LIB.Util.getVar("--muted");
+
+      const cy = H * 0.58;
+      const pR = S * 0.16;
+      const pLx = W * 0.18;
+      const pRx = W * 0.82;
+
+      ctx.lineCap = "round";
+
+      // Belt loop — capsule shape around the two pulleys.
+      ctx.fillStyle = "#1f242c";
+      ctx.beginPath();
+      ctx.moveTo(pLx, cy - pR);
+      ctx.lineTo(pRx, cy - pR);
+      ctx.arc(pRx, cy, pR, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(pLx, cy + pR);
+      ctx.arc(pLx, cy, pR, Math.PI / 2, -Math.PI / 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = ink + "cc";
+      ctx.lineWidth = Math.max(1.5, S * 0.006);
+      ctx.stroke();
+
+      // Belt tread marks
+      ctx.strokeStyle = muted;
+      ctx.lineWidth = Math.max(1, S * 0.004);
+      const treadStep = S * 0.05;
+      for (let x = pLx + treadStep * 0.5; x < pRx; x += treadStep) {
+        ctx.beginPath();
+        ctx.moveTo(x, cy - pR + 2);
+        ctx.lineTo(x - S * 0.02, cy - pR + S * 0.04);
+        ctx.stroke();
+      }
+
+      // Pulleys (drive on left, idler on right)
+      const drawPulley = (cx) => {
+        ctx.fillStyle = "#2a313c";
+        ctx.beginPath(); ctx.arc(cx, cy, pR, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.005);
+        ctx.stroke();
+        // Hub
+        ctx.fillStyle = ink;
+        ctx.beginPath(); ctx.arc(cx, cy, pR * 0.18, 0, Math.PI * 2); ctx.fill();
+      };
+      drawPulley(pLx);
+      drawPulley(pRx);
+
+      // Load box riding the top of the belt
+      const boxW = S * 0.30, boxH = S * 0.22;
+      const boxCx = W * 0.50;
+      const boxBottom = cy - pR;
+      ctx.fillStyle = accent;
+      ctx.fillRect(boxCx - boxW / 2, boxBottom - boxH, boxW, boxH);
+      ctx.strokeStyle = ink; ctx.lineWidth = Math.max(1.2, S * 0.005);
+      ctx.strokeRect(boxCx - boxW / 2, boxBottom - boxH, boxW, boxH);
+    },
 
     onPointer: (type, mx, my, L, state, params) =>
       dragMux.handle(type, mx, my, L, state, params),
