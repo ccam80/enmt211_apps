@@ -1,5 +1,5 @@
 {
-  "_note": "Task IDs carry a 'T' prefix corresponding to the bare numeric IDs in plan.md and the phase-spec headings (e.g. manifest 'T1.1.1' == spec 'Task 1.1.1').",
+  "_note": "Task IDs carry a 'T' prefix corresponding to the bare numeric IDs in plan.md and the phase-spec headings (e.g. manifest 'T1.1.1' == spec 'Task 1.1.1'). MERGED PHASES: phases 3+4 are bundled under one manifest phase (phase 3, 'core-rest') and phases 6+7+8 under one (phase 6, 'feature-layers') so implement-hybrid runs their independent sub-phases concurrently (cross-phase task_groups share a wave). Group/task IDs keep their ORIGIN-phase prefix (3.x, 4.x, 6.x, 7.x, 8.x). The merged phase's spec_file is a ROUTER STUB (spec/phase-34-core-rest.md, spec/phase-678-feature-layers.md) that redirects each task ID to its authoritative original spec (spec/phase-3-*.md, phase-4-*.md, phase-6-*.md, phase-7-*.md, phase-8-*.md), which are unchanged. The stub is only consumed by the implementer/verifier prompt; review-spec's 'task ID exists in spec_file' invariant is therefore satisfied via the router redirect, not by inlining tasks. Wave ordering within a merged phase preserves each origin phase's internal chain; the two index.html appenders in the feature phase (7.5.a, 8.3.a) are split across waves 6.3 and 6.4 so no two implementers write index.html in the same wave.",
   "test_command": "npm test",
   "verification": [
     "npm test (node --test) exits 0 across the whole Phase-1-9 suite.",
@@ -130,8 +130,8 @@
     },
     {
       "phase": 3,
-      "name": "excitation-commutation",
-      "spec_file": "spec/phase-3-excitation-commutation.md",
+      "name": "core-rest",
+      "spec_file": "spec/phase-34-core-rest.md",
       "waves": [
         {
           "wave": "3.1",
@@ -140,6 +140,13 @@
               "group_id": "3.1.a",
               "tasks": [
                 { "id": "T3.1.1", "complexity": "L" }
+              ],
+              "user_required_tasks": []
+            },
+            {
+              "group_id": "4.1.a",
+              "tasks": [
+                { "id": "T4.1.1", "complexity": "L" }
               ],
               "user_required_tasks": []
             }
@@ -154,31 +161,7 @@
                 { "id": "T3.1.2", "complexity": "M" }
               ],
               "user_required_tasks": []
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "phase": 4,
-      "name": "circuit-ode",
-      "spec_file": "spec/phase-4-circuit-ode.md",
-      "waves": [
-        {
-          "wave": "4.1",
-          "task_groups": [
-            {
-              "group_id": "4.1.a",
-              "tasks": [
-                { "id": "T4.1.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            }
-          ]
-        },
-        {
-          "wave": "4.2",
-          "task_groups": [
+            },
             {
               "group_id": "4.2.a",
               "tasks": [
@@ -273,8 +256,8 @@
     },
     {
       "phase": 6,
-      "name": "machine-fixtures",
-      "spec_file": "spec/phase-6-machine-fixtures.md",
+      "name": "feature-layers",
+      "spec_file": "spec/phase-678-feature-layers.md",
       "waves": [
         {
           "wave": "6.1",
@@ -299,6 +282,34 @@
                 { "id": "T6.1.3", "complexity": "S" }
               ],
               "user_required_tasks": []
+            },
+            {
+              "group_id": "7.1.a",
+              "tasks": [
+                { "id": "T7.1.1", "complexity": "L" }
+              ],
+              "user_required_tasks": []
+            },
+            {
+              "group_id": "7.3.a",
+              "tasks": [
+                { "id": "T7.3.1", "complexity": "L" }
+              ],
+              "user_required_tasks": []
+            },
+            {
+              "group_id": "7.4.a",
+              "tasks": [
+                { "id": "T7.4.1", "complexity": "M" }
+              ],
+              "user_required_tasks": []
+            },
+            {
+              "group_id": "8.1.a",
+              "tasks": [
+                { "id": "T8.1.1", "complexity": "L" }
+              ],
+              "user_required_tasks": []
             }
           ]
         },
@@ -309,6 +320,27 @@
               "group_id": "6.2.a",
               "tasks": [
                 { "id": "T6.2.1", "complexity": "M" }
+              ],
+              "user_required_tasks": []
+            },
+            {
+              "group_id": "7.2.a",
+              "tasks": [
+                { "id": "T7.2.1", "complexity": "L" }
+              ],
+              "user_required_tasks": []
+            },
+            {
+              "group_id": "8.2.a",
+              "tasks": [
+                { "id": "T8.2.1", "complexity": "L" }
+              ],
+              "user_required_tasks": []
+            },
+            {
+              "group_id": "8.2.b",
+              "tasks": [
+                { "id": "T8.2.2", "complexity": "M" }
               ],
               "user_required_tasks": []
             }
@@ -330,66 +362,18 @@
                 { "id": "T6.3.2", "complexity": "L" }
               ],
               "user_required_tasks": []
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "phase": 7,
-      "name": "editors",
-      "spec_file": "spec/phase-7-editors.md",
-      "waves": [
-        {
-          "wave": "7.1",
-          "task_groups": [
+            },
             {
-              "group_id": "7.1.a",
+              "group_id": "8.3.a",
               "tasks": [
-                { "id": "T7.1.1", "complexity": "L" }
+                { "id": "T8.3.1", "complexity": "M" }
               ],
-              "user_required_tasks": []
+              "user_required_tasks": ["T8.3.1"]
             }
           ]
         },
         {
-          "wave": "7.2",
-          "task_groups": [
-            {
-              "group_id": "7.2.a",
-              "tasks": [
-                { "id": "T7.2.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            }
-          ]
-        },
-        {
-          "wave": "7.3",
-          "task_groups": [
-            {
-              "group_id": "7.3.a",
-              "tasks": [
-                { "id": "T7.3.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            }
-          ]
-        },
-        {
-          "wave": "7.4",
-          "task_groups": [
-            {
-              "group_id": "7.4.a",
-              "tasks": [
-                { "id": "T7.4.1", "complexity": "M" }
-              ],
-              "user_required_tasks": []
-            }
-          ]
-        },
-        {
-          "wave": "7.5",
+          "wave": "6.4",
           "task_groups": [
             {
               "group_id": "7.5.a",
@@ -397,56 +381,6 @@
                 { "id": "T7.5.1", "complexity": "M" }
               ],
               "user_required_tasks": ["T7.5.1"]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "phase": 8,
-      "name": "detailed-mode",
-      "spec_file": "spec/phase-8-detailed-mode.md",
-      "waves": [
-        {
-          "wave": "8.1",
-          "task_groups": [
-            {
-              "group_id": "8.1.a",
-              "tasks": [
-                { "id": "T8.1.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            }
-          ]
-        },
-        {
-          "wave": "8.2",
-          "task_groups": [
-            {
-              "group_id": "8.2.a",
-              "tasks": [
-                { "id": "T8.2.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "8.2.b",
-              "tasks": [
-                { "id": "T8.2.2", "complexity": "M" }
-              ],
-              "user_required_tasks": []
-            }
-          ]
-        },
-        {
-          "wave": "8.3",
-          "task_groups": [
-            {
-              "group_id": "8.3.a",
-              "tasks": [
-                { "id": "T8.3.1", "complexity": "M" }
-              ],
-              "user_required_tasks": ["T8.3.1"]
             }
           ]
         }

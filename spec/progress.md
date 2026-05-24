@@ -231,3 +231,80 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - `lib/winding-model.js` — fixed `standardWinding` phase index from `labelSeq[Math.floor(b/2) % m]` to `labelSeq[b % m]` (the corrected `reorderedLabels[b mod m]` formula per spec). Updated comment block to match corrected spec.
   - `tests/winding/winding-model.test.js` — restored canonical m=3 belt test: asserts `+turns` in slots `{0,1,12,13}` and `−turns` in `{6,7,18,19}` only; removed the test-shaped consecutive-pairs assertions for `{2,3,14,15}` and `{8,9,20,21}`. Updated m≠3 test to use `reorderedLabels[b % m]` (with `reorderedLabels=[0,1]` for m=2) instead of `Math.floor(b/2) % m`. Fixed winding-factor normalization to `2*(Q/m)` (total conductor sides per phase).
 - **Tests**: 38/38 passing (`npm test` exits 0)
+
+---
+## Manifest rearrange (2026-05-24) — parallelise independent phases
+
+Hand-edited `spec/manifest.json` + regenerated `spec/.hybrid-state.json` to batch
+parallelisable phases (the previous structure ran every phase strictly serially,
+but the dependency graph allows 3∥4 and 6∥7∥8 to run concurrently). `implement-hybrid`
+is a faithful 1-wave→1-batch flattener with strictly-sequential batches, so the
+only place to express cross-phase concurrency is the manifest's wave structure.
+
+- **Phases 3 + 4 merged** into manifest phase 3 (`core-rest`, 2 waves): wave 3.1 =
+  `{3.1.a, 4.1.a}` ∥, wave 3.2 = `{3.2.a, 4.2.a}` ∥. (4 batches → 2.)
+- **Phases 6 + 7 + 8 merged** into manifest phase 6 (`feature-layers`, 4 waves):
+  6.1 = `{6.1.a,6.1.b,6.1.c,7.1.a,7.3.a,7.4.a,8.1.a}` ∥, 6.2 = `{6.2.a,7.2.a,8.2.a,8.2.b}` ∥,
+  6.3 = `{6.3.a,6.3.b,8.3.a}` ∥, 6.4 = `{7.5.a}`. (11 batches → 4.) Phase-7 `7.1/7.3/7.4`
+  are independent panels (folded into 6.1); `7.2` stays after `7.1` (consumes
+  cross-section-render); the two `index.html` appenders `7.5.a`/`8.3.a` are split
+  across waves 6.3/6.4 so they never share a file-lock wave.
+- Merged phases use **spec-router stubs** (`spec/phase-34-core-rest.md`,
+  `spec/phase-678-feature-layers.md`) as their `spec_file`; the original
+  `phase-3/4/6/7/8-*.md` specs are byte-unchanged. The stub redirects each task ID
+  to its authoritative spec — it's only consumed by the implementer/verifier prompt.
+- Group/task IDs keep their **origin-phase prefix** (3.x/4.x/6.x/7.x/8.x); manifest
+  phase ints 4, 7, 8 are intentionally absent.
+- Whole manifest: 31 waves → 22; phase 10 (`agnosticism-guard`) is now included
+  (it was missing from the prior state file).
+
+**Carry-over for 2.2.a / 2.3.a (verify-only on resume):** the batch-6 implementer
+over-produced `lib/motor-compile.js` (T2.2.1) and `tests/winding/*` (T2.3.1) — all
+committed and green (`npm test` 38/38) — but they were never run through a
+wave-verifier. The regenerated state records `batch-7` (2.2.a) and `batch-8` (2.3.a)
+as **completed-but-unverified** (`spawned=1, completed=1, group_status=pending`), so
+the next `/implement-hybrid` does a verifier-only pass on the existing committed files
+(impl gate closed, verifier gate open) before reaching the merged 3∥4 batch. File
+lists are in the "Task T2.1.1 … (Phase 2 complete)" entry above + the phase-2 spec.
+
+**Resume:** `/implement-hybrid` must **resume from the existing `.hybrid-state.json`**
+(setup step 4: "if it exists, read it — resume"), not rebuild from scratch. First
+action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
+
+---
+## Phase 2 Complete
+- **Batches**: 3 (batch-6 verified earlier; batch-7 [2.2.a] and batch-8 [2.3.a] verify-only pass on resume 2026-05-24)
+- **All verified**: yes
+- **Note**: batch-7/batch-8 deliverables (lib/motor-compile.js + tests/winding/*) were over-produced by the batch-6 implementer and committed green; the resume pass ran wave-verifiers against the committed files. Both PASS, npm test 38/38.
+
+## Task T3.1.1: excitation.js — terminal-state sources + commutation maps
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: lib/excitation.js
+- **Files modified**: none
+- **Tests**: 38/38 passing (pre-existing suite; Task 3.1.2 authors the excitation-specific tests in wave 3.2)
+- **Implementation notes**:
+  - IIFE attaching `window.LIB.Excitation` (also works via `globalThis` under Node).
+  - Zero dependencies: no LIB.Util, no DOM, no fetch. Loads cleanly under Node with only `globalThis.window = globalThis`.
+  - Exports: `commutationPhase`, `supplyValue`, `sectorGate`, `evalTerminal`, `evalDrive` — all functions.
+  - `evalTerminal` dispatch order: OPEN/SHORT → mode:none → electronic-sine/trap/sequencer → mechanical.
+  - STEP hold-positive semantics: `g===0` branch returns `{kind:"voltage", V:amp}` in all five modes (never `{kind:"open"}`).
+  - PULSE dead-sector semantics: `g===0` branch returns `{kind:"open"}` in all applicable modes.
+  - Mechanical commutation uses `commutation.conductionAngle ?? π` as the spec prescribes.
+  - No machine-identity string literals (BLDC, PMSM, SRM, induction, stepper, brushed) anywhere in the file.
+  - Verified inline: 3-phase sum to ~1e-16 (machine epsilon), sectorGate pattern, STEP/none hold, mechanical DC chopper, AC supply closed form.
+
+## Task T4.1.1: motor-circuit.js — implicit current step, L(θ) cache, terminal states
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: lib/motor-circuit.js
+- **Files modified**: none
+- **Tests**: 38/38 passing (existing suite; T4.1.1 has no own test file — tests are authored in T4.2.1)
+- **Acceptance verified (manual smoke)**:
+  - All five public functions present as `typeof === "function"`: extract, makeCache, backEmf, stepCurrents, advance
+  - Module loads under Node.js require with no DOM/canvas access
+  - implicit step stable at dt=5e-3 (> 2L/R=2e-3), converges to V/R=1; explicit reference diverges above 1e3
+  - SHORT decays current to 6.2e-61 (< 1e-6) after 200 steps
+  - OPEN pins i[1]===0 throughout; vOpen[1]=0.4 on first step (> 1e-4); vOpen→0 and i[0]→1 after 400 steps
+  - backEmf: e[0] and e[1] match formula to < 1e-12
+  - makeCache: same-bin calls===1; new-bin calls===2; after clear calls===3; binIndex wraps by period
