@@ -531,3 +531,20 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
   2. **(Reading B + add fine-grid helpers)**: Keep the four fixture functions as-is for the 'rotor turns' test, and add new fine-grid fixture helpers (e.g., `reluctanceConfigFine()` for the co-energy test. The co-energy test then runs only over those fine-grid helpers (not over all 4 named configs).
   3. **(Remove the co-energy assertion)**: Remove the `"live Maxwell agrees with co-energy within 10%"` test entirely. The Arkkio path is validated by the engine tests; co-energy agreement at the pipeline level is not achievable with these fixture configs.
   4. **(Change the formula)**: The assertion floor condition `1e-6` is meant to filter out zero-torque cases; extend the filter to `Math.max(Math.abs(arkkio), Math.abs(coe)) > threshold` where `threshold` is large enough that PM configs (where co-energy is identically zero) are skipped. This would pass the test for PM config (both arkkio and coe must be above the floor) but would require deciding what threshold is correct. This is potentially test-chasing if the intent is for ALL four configs to pass.
+
+## Task T5.5.1 — CLARIFICATION RESOLVED (2026-05-24): three engine bugs + the saturation ceiling, NOT "unsatisfiable"
+The "cannot be satisfied" claim was **wrong** (same pattern as the Phase-1 Arkkio clarification). Two skeptical investigation rounds (debugger, opus) found real defects:
+
+- **Three engine bugs found & fixed (commit d555fd4)** — all masked by the engine fixture's full-band rotor / no-magnets / ell=1:
+  - **Bug C** `lib/airgap-grid.js` `fluxLinkage`: missing `ell` factor → co-energy off by 1/ell (10.04× at ell=0.1). Fixed.
+  - **Bug B** `lib/airgap-grid.js` `setRotorRegion`/`setRotorAngle`/`assembleRHS`: PM magnetization never rotated → the REAL cause of the "dλ_pm/dθ≡0 is correct physics" claim (it was a bug). Fixed (snapshot+rotate Mr/Mθ; guarded so Jz-only L(θ) solves stay linear).
+  - **Bug A** `lib/motor-compile.js`: `rotorMask` covered only feature cells → frozen saliency. Fixed (expand to full radial band of any ring with a rotor cell).
+  - Result: pmConfig co-energy↔Arkkio **100% → 0.45%**. npm test 80/80.
+
+- **Reluctance residual root cause: the global saturation ceiling, NOT geometry.** Proven by toggling the ceiling on one machine: ON → relLinf 0.92; OFF → 0.012. `AirgapSolve.solveSaturated` applies one global scalar `s` to all iron ν for the Arkkio solve while `extractCoeffs` uses a linear solve for co-energy → saturated-vs-linear mismatch with a DC component that does NOT vanish with refinement (lumped scalar is non-conservative). The "smeared cell"/"blocky-teeth geometry" theories were refuted (`coveredCells` is strict binary; pole-face shaping / min-feature-size / grid-adaptation are all non-issues — off-grid arbitrary teeth pass at 0.04–0.08 once the ceiling is off). Fully agnostic, placement-unconstrained.
+
+- **Decision (user): Option A.** The milestone compares Maxwell-vs-co-energy at a **consistent linear operating point (saturation ceiling disabled on both sides)**, exactly as the Phase-1 engine fixture does. Saturated-torque consistency is the per-cell `ν(B)` work already specced as **Phase 9 Wave 9.1** — not validated in T5.5.1.
+
+- **Spec updated**: `spec/phase-5-agnostic-pipeline.md` Task 5.5.1 — the Maxwell-vs-co-energy assertion now mandates a ceiling-disabled linear comparison (build a `ceiling:{enabled:false}` `MotorStack` for the check) + matching acceptance criterion. The inert `tol/maxIter` forwarding edits a prior round left in `motor-circuit.js`/`motor-slice.js` were reverted (confirmed zero effect).
+
+- **Respawn**: a fresh T5.5.1 implementer authors the pipeline test suite per the clarified spec. The `stops_for_clarification` retry slot on batch-15 is open.

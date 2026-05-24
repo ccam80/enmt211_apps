@@ -751,12 +751,28 @@ they run in parallel.
       byte-identical across all four configs (the "identical code path" proof).
     - › `"N=2 config drives two slices"` — for `skewN2Config()`,
       `rt.stack.nSlices === 2`.
-    - › `"live Maxwell agrees with co-energy within 10%"` — for each `cfg` whose
-      mid-run torque magnitude exceeds a floor `1e-6`: after `300` steps,
-      `arkkio = rt.lastSolve.torque`;
-      `coe = rt.stack.coenergyTorque(rt.state.theta, rt.state.i).total`; assert
+    - › `"Maxwell agrees with co-energy within 10% (linear operating point)"` —
+      **The comparison MUST be made with the saturation ceiling DISABLED on both
+      sides** (linear constitutive law). Rationale (resolved 2026-05-24, see
+      progress.md): the Phase-1 "Live tier" global *scalar* flux-ceiling in
+      `AirgapSolve.solveSaturated` multiplies all iron ν by one lumped θ-dependent
+      factor `s`, which is **not a conservative constitutive law** — so a
+      ceiling-on Arkkio (saturated) and the linear co-energy `extractCoeffs`
+      (which never applies the ceiling) cannot agree, and the inconsistency has a
+      θ-independent DC component (it does NOT vanish with grid refinement). This
+      is identical to how the Phase-1 engine fixture validates Arkkio↔co-energy
+      (plain `pcg`, no ceiling). Consistency *under saturation* is a Phase-9
+      concern (Wave 9.1 per-cell `ν(B)`), explicitly NOT validated here.
+      Implementation: build a ceiling-disabled solve path for the comparison —
+      e.g. a `LIB.MotorStack` whose slices are created with
+      `ceiling: { enabled: false }` (the comparison is a validation, not the live
+      readout, so it need not go through the live `MotorRun`/`lastSolve`). For
+      each `cfg` whose torque magnitude exceeds a floor `1e-6` at the chosen
+      operating point: `arkkio = stack.solve(θ, i).torque`;
+      `coe = stack.coenergyTorque(θ, i).total`; assert
       `Math.abs(arkkio − coe) ≤ 0.10·Math.max(Math.abs(arkkio), Math.abs(coe))
-      + 1e-6`.
+      + 1e-6`. (With the ceiling disabled this holds for PM at ~0.5% and for the
+      reluctance configs at coarse-grid discretization error, ~0.06.)
     - › `"lib/ and mount.js are free of machine names"` — read every `*.js` file
       in `lib/` plus `lessons/unified_motor/mount.js`; for each file and each
       token in `MACHINE_NAMES`, assert no case-insensitive match. (Reads via
@@ -767,7 +783,10 @@ they run in parallel.
     winding / excitation / circuit suites) and exits 0.
   - All four smoke configs reach `|θ| > 1e-3` within 600 steps from rest.
   - The Maxwell-vs-co-energy relative agreement holds at `≤ 0.10` for every
-    config with non-trivial torque.
+    config with non-trivial torque, **evaluated at a linear operating point
+    (saturation ceiling disabled on both the Arkkio and co-energy solves)**.
+    Saturated-torque consistency is deferred to Phase 9 Wave 9.1 (per-cell
+    `ν(B)`) and is not asserted here.
   - The machine-name grep over `lib/` + `mount.js` finds zero matches.
   - `tests/pipeline/_fixtures.js` is not collected as a test (no `.test.js`
     suffix) and is `require`-able by every pipeline test file.
