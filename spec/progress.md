@@ -631,3 +631,156 @@ Test: `"lib/ and mount.js are free of machine names"` in `agnostic-pipeline.test
 - **Batches**: 5 (batch-11 [5.1.a/b/c], batch-12 [5.2.a], batch-13 [5.3.a], batch-14 [5.4.a], batch-15 [5.5.a])
 - **All verified**: yes
 - **Note**: T5.4.1 went through a user-required browser-checklist gate (acked) plus several in-place render fix rounds; T5.5.1 went through two user-resolved spec clarifications (three engine bugs fixed in commit d555fd4; gap-band auto-derivation + Option-A linear milestone). Full suite 95/95.
+
+## Task T6.1.3: Register fixtures in index.html
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none
+- **Files modified**: lessons/unified_motor/index.html (appended 15 fixture script tags inside the marked module-extension region)
+- **Tests**: structural verification only (no new test files per spec)
+- **Acceptance criteria verified**:
+  - The 15 script tags inserted between the marked comment lines in the exact order specified: pmsm first (becomes app default), then brushed-dc-pm, brushed-dc-wound, universal, bldc, induction-3ph, induction-1ph, vr-stepper, switched-reluctance, pm-stepper, hybrid-stepper, synchronous-reluctance, wound-field-synchronous, skew-demo, pole-mismatch-demo
+  - Each tag is a plain `<script src="./machines/<id>.js">` with no extra content
+  - The comment markers `<!-- unified-motor modules: ... -->` and `<!-- /unified-motor modules -->` are preserved; no line outside the marker block is modified
+  - The 15 filenames match exactly the 15 fixtures to be created in Tasks 6.1.1 and 6.1.2 (no missing, no extra)
+
+## Task T6.1.1: Fixtures — matrix rows 1–7
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**:
+  - `lessons/unified_motor/machines/brushed-dc-pm.js`
+  - `lessons/unified_motor/machines/brushed-dc-wound.js`
+  - `lessons/unified_motor/machines/universal.js`
+  - `lessons/unified_motor/machines/bldc.js`
+  - `lessons/unified_motor/machines/pmsm.js`
+  - `lessons/unified_motor/machines/induction-3ph.js`
+  - `lessons/unified_motor/machines/induction-1ph.js`
+- **Files modified**: none
+- **Tests**: Acceptance criteria verified inline (no Wave-6.3 test files yet — those are T6.3.1). All 7 fixtures: `ConfigSchema.validate(config).ok === true`; `expand(config).nCircuits === config.circuits.length`; all feature kinds in {conductor,magnet,iron}; each file pushes exactly one {id,label,config} onto UnifiedMotor.MACHINES; no pipeline call at load. Existing 95 tests still pass (exit 0).
+
+## Task T6.1.2: Fixtures — matrix rows 8–13 + skew demo + pole-mismatch demo
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**:
+  - `lessons/unified_motor/machines/vr-stepper.js`
+  - `lessons/unified_motor/machines/switched-reluctance.js`
+  - `lessons/unified_motor/machines/pm-stepper.js`
+  - `lessons/unified_motor/machines/hybrid-stepper.js`
+  - `lessons/unified_motor/machines/synchronous-reluctance.js`
+  - `lessons/unified_motor/machines/wound-field-synchronous.js`
+  - `lessons/unified_motor/machines/skew-demo.js`
+  - `lessons/unified_motor/machines/pole-mismatch-demo.js`
+- **Files modified**: none
+- **Tests**: All 8 fixtures validate cleanly under Node shim (validate=true, expand() correct). Existing suite 95/95 passing (no regressions). Wave 6.3 tests are the formal per-fixture test files (not created in this wave).
+
+## Task T7.3.1: schematic-panel.js — drag-drop circuit editor + terminal lowering
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: lessons/unified_motor/schematic-panel.js
+- **Files modified**: none
+- **Tests**: N/A — tests are authored in Task 7.5.1 per spec; pure-function acceptance criteria verified via inline Node.js checks (all passed):
+  - capPhaseSplit(0,50,5)===0; capPhaseSplit(30e-6,50,0)===π/2; formula matches atan2(Xc,R)
+  - switchState centrifugal: CLOSED below cutout, OPEN above; manual: reflects sw.closed
+  - lower star: phaseOffset [0,−2π/3,−4π/3], amp===230, type==="AC"
+  - lower delta: amp===√3·230, phaseOffset[k]===π/6−2π·k/3
+  - lower resistor: R accumulates (1+4=5)
+  - lower capacitor: phaseOffset shifted by capPhaseSplit(30e-6,50,5) (to 1e-12)
+  - applyToRuntime: circuit OPEN above cutoutOmega, driven (not OPEN) below
+  - No machine-name tokens in source (bldc/pmsm/srm/squirrel/stepper/brushed/universal-motor/wound-field)
+- **Implementation notes**:
+  - applyToRuntime caches the pre-switch lowered baseline in schematic._loweredBase so repeated calls correctly restore the driven terminal state below cutout speed, rather than deep-copying the already-OPEN runtime.circuits
+  - build(host,ctx) provides full browser canvas: grid-snapped drag-drop, connection selector (independent/star/delta), component toolbar (source/resistor/capacitor/switch), right-click param popovers via LIB.Registry.mkRow, rAF loop calling applyToRuntime each frame for centrifugal switch tracking, ResizeObserver, clean unmount
+  - DOM-free at load: no document/canvas access until build() is called
+  - Guarded registration: register(UM) only calls UM.registerPanel when that seam exists
+
+## Task T7.1.1: cross-section-render.js — semantic + compiled-overlay 2D renderer
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: `lessons/unified_motor/cross-section-render.js`
+- **Files modified**: none
+- **Tests**: Tests are authored in Task 7.5.1 per spec. All acceptance criteria verified inline (23/23 checks pass). Full suite 95/95 passing (no regressions).
+- **Notes**:
+  - `buildGeometry` dispatches only on `ring.element` (W/C/K/I/M), resolves windings via `LIB.WindingModel.ampereConductors`, accumulates global circuit offset across wound rings, emits slots/teeth/magnets per ring.
+  - `circuitColor` wraps by `min(nCircuits, DEFAULT_PALETTE.length)` so `circuitColor(0,3) === circuitColor(3,3)`.
+  - `compileForOverlay` delegates to `UM.ConfigSchema.expand` + `LIB.MotorCompile.compile`.
+  - `drawSemantic` / `drawCompiledOverlay` are browser-only draw functions taking a `LIB.Layout.rotational` handle.
+  - `register(UM)` adds the compiled-overlay checkbox toggle; guarded by `if (UM.registerHeaderControl)`.
+  - Module loads under `require` with no DOM access; no machine-name tokens in source.
+
+## Recovery events (batch-16, 2026-05-25)
+- **2026-05-25** | batch-16 | invoked `mark-dead-implementer.sh` ×2 | Two of the seven wave-6.1 implementers returned a `completed` TaskOutput status but never advanced the `completed` counter and wrote no progress.md entry — i.e. they finished/died without running `complete-implementer.sh`:
+  - **7.4.a (T7.4.1)**: deliverable `lessons/unified_motor/matrix-panel.js` IS on disk; the agent's final message was "Now I'll append the progress entry:" — it died after writing the file but before recording completion. Retry implementer to verify the file against spec and record completion.
+  - **8.1.a (T8.1.1)**: deliverable `lib/airgap-refine.js` IS on disk, but the agent died mid-tuning the multigrid V-cycle. Its final reasoning: at spec-fixed defaults (`nu1=nu2=2`, `minNtheta=16` → 4 levels) the Galerkin V-cycle needs ~26 iterations vs the `<15` acceptance criterion; it observed that rediscretization on the full-ring-iron `coggingConfig` (no angular iron jumps) "should converge" under 15 without altering spec-fixed defaults. Retry implementer must finish convergence to the `<15` criterion — investigating the rediscretization path FIRST — and only take the clarification exit if the spec-fixed defaults genuinely contradict the `<15` criterion (do NOT silently change spec-fixed `nu1`/`nu2`/`minNtheta`).
+  - Both dead-marks opened a retry slot (cap 7→9). Files left untouched per regression policy.
+
+## Task T7.4.1: matrix-panel.js — per-ring toggles synthesize the config
+- **Status**: complete
+- **Agent**: implementer (retry — predecessor died before recording completion)
+- **Files created**: `lessons/unified_motor/matrix-panel.js` (created by predecessor; verified and patched by this agent)
+- **Files modified**: `lessons/unified_motor/matrix-panel.js` — two fixes applied:
+  1. `synthesize` now includes `gapBand: gapBandDefault` in the returned config object (spec requires `gapBand` in the synthesize output alongside `grid`/`poles`/`mechanical`)
+  2. `applyChange` now copies `ctx.config.gapBand = cfg.gapBand` (spec requires `gapBand` in the set copied into `ctx.config`)
+- **Tests**: 95/95 passing (pre-existing suite; T7.4.1 headless tests are authored in Task 7.5.1 per spec; no regressions)
+- **Acceptance criteria verified**:
+  - `synthesize(woundIronToggles)` → `circuits.length===3`, all `terminal.type==="AC"`, `phaseOffset` `[0,−2π/3,−4π/3]`; rotor ring has `teeth:2` and contributes zero circuits
+  - `ConfigSchema.validate(synthesize(toggles)).ok===true` and `expand` runs without throwing
+  - K-rotor toggle set → rotor circuits all `terminal.type==="SHORT"`
+  - M-rotor toggle set → zero rotor circuits, `ring.magnets===count`
+  - `toggleSpace()` returns exactly 5 elements, 6 excitations, 5 commutation modes (set equality)
+  - Module loads under `require` with no DOM access
+  - No machine-name tokens in source (bldc, pmsm, srm, squirrel, stepper, brushed, universal-motor, wound-field)
+  - `synthesize` returns `gapBand` (default `{iInner:4,iOuter:8}`) in config
+  - `applyChange` copies `gapBand` into `ctx.config`
+
+## Task T8.1.1: airgap-refine.js — CLARIFICATION NEEDED
+- **Agent**: implementer
+- **Blocker**: Spec-fixed defaults `nu1=2, nu2=2` contradict the `<15` V-cycle iteration acceptance criterion on the `coggingConfig` geometry.
+- **What the spec says**:
+  - Section "Task 8.1.1", parameter signature: `vcycleSolve(op, b, { x0 = null, tol = 1e-6, maxCycles = 30, hierarchy, nu1 = 2, nu2 = 2, omega = 2/3 }) → { x, iters, residual }`
+  - Acceptance criterion: "Grid-independent iteration count: vcycleSolve V-cycle counts to reach tol = 1e-6 at Ntheta and 2·Ntheta (same physical problem) differ by ≤ 2, and both are < 15"
+  - Implementation note in assignment brief: "The predecessor observed that **rediscretization** (rather than Galerkin) of the coarse operator should converge in `<15` iterations on the `coggingConfig` geometry specifically, because coggingConfig has FULL-RING iron (no angular iron jumps), so rediscretization is well-conditioned there"
+- **Why it is ambiguous**: Two mutually contradictory readings:
+  - **Reading A (spec literal)**: Use `nu1=2, nu2=2` as defaults, use rediscretized hierarchy ops as the spec's `buildHierarchy` produces. Measured result: rediscretization diverges on `coggingConfig` because the stator at `rRange:[0.047,0.051]` with `slotFraction:0.5` produces ANGULAR-VARYING iron in row 6 (nu ranges from 7.958e+2 to 7.958e+5 across theta). The predecessor's claim of "full-ring iron" is factually incorrect for this geometry. Measured iteration counts with rediscretization: diverges (residual → Infinity) for all tested omega values (0.10–0.67) and nu1/nu2 values (2–16).
+  - **Reading B (spec intent: achieve `<15`)**: Use Galerkin coarse operators (R*A_f*P) instead of rediscretized ops for the coarse levels. With Galerkin and `nu1=2, nu2=2`: 25 iterations (>15, fails criterion). With Galerkin and `nu1=4, nu2=4`: **13 iterations** (<15, passes criterion). So meeting `<15` requires either (a) Galerkin + `nu1=4,nu2=4` as defaults, or (b) some other stabilization not described in the spec.
+- **What you checked before stopping**:
+  - Thoroughly tested all combinations of rediscretized coarse ops with omega=0.1–0.67 and nu1=2–16 on the actual coggingConfig (Nr:8, Ntheta:64 → refined Nr:16, Ntheta:128 at factor:2). All diverge.
+  - Confirmed coggingConfig has angular-varying iron in row 6 (slotted stator with slotFraction:0.5 creates air/iron/conductor angular alternation).
+  - Confirmed Galerkin V-cycle is stable: nu1=2,nu2=2 → 25 iters; nu1=4,nu2=4 → 13 iters; nu1=8,nu2=8 → 7 iters.
+  - Tested injection restriction with rediscretized ops: nu1=8,nu2=8 reaches 20 iters (still >15); nu1=2,nu2=2 diverges.
+  - The `lib/airgap-refine.js` on disk has been updated to use the rediscretized hierarchy operators directly (as the spec describes for `buildHierarchy` + `vcycleSolve`). This file diverges on the coggingConfig test.
+  - **Decision needed**: (1) Change default `nu1,nu2` from 2 to 4 (requires spec amendment), OR (2) Use Galerkin coarsening in `vcycleSolve` (the hierarchy from `buildHierarchy` determines depth only, Galerkin ops built per-call), OR (3) Change the coggingConfig geometry so it truly has full-ring iron (e.g., use `C` element without slots, or pure `W` winding), OR (4) Change the `<15` acceptance criterion to `<30`.
+
+## Task T8.1.1 — CLARIFICATION RESOLVED (2026-05-25): radial-line smoother + Galerkin (genuine spec contradiction, NOT a bug)
+- **Skeptical re-investigation (opus architect, read-only)** — given this project's 2-for-2 history of "unsatisfiable" claims being implementation bugs (Phase-1 Arkkio, Phase-5 T5.5.1), the coordinator ran an independent opus investigation before escalating. **This case is NOT a repeat** — it is a real spec contradiction, though the implementer mis-diagnosed *which* values conflict and its "Option 2 meets <15" claim was wrong.
+- **True root cause**: the spec mandated three mutually-incompatible things — semi-coarsening in **θ only** (`phase-8:194-195`), a **point** damped-Jacobi smoother (`phase-8:210-211`), and a **grid-independent, both-<15** acceptance criterion (`phase-8:255-258`). θ-only semi-coarsening with a point smoother cannot damp radial error modes, so iteration count grows as θ refines — grid-independence is impossible. Measured at spec-fixed `nu1=nu2=2` on `coggingConfig` (factor 2 → factor 4): rediscretized → diverges; Galerkin minNθ=16 → 29/77; Galerkin minNθ=32 → 14/31; Galerkin nu1=nu2=4 → 16 (factor 2 alone). The fix — a **radial-line smoother + Galerkin** — gives **5/5 iters, diff 0** (grid-independent, well under 15). The implementer's "rediscretization diverges" and the `coggingConfig` angular-iron-discontinuity findings were both correct; the "full-ring iron" premise in the assignment brief was provably false.
+- **Decision (user): Option A — radial-line smoother + Galerkin coarse operators.** The acceptance criterion (`<15`, grid-independent) is KEPT exactly as written; Option A satisfies it.
+- **Spec amended** (`spec/phase-8-detailed-mode.md`):
+  - `buildHierarchy(op, grid, …)` now takes the fine **operator** (not a `ν` array) and builds **Galerkin** coarse ops `A_l = R·A_{l−1}·P` (transfer: linear-θ prolongation `P`, variational restriction `R = Pᵀ`); explicitly forbids rediscretizing `ν` under θ-only semi-coarsening (inconsistent on angularly-discontinuous reluctivity). Each level stores matvec + diagonal + per-column radial-tridiagonal extraction.
+  - `vcycleSolve` smoother changed from point damped-Jacobi to a **radial-line (block) smoother** (Thomas solve of each angular column's radial tridiagonal; angular couplings carried explicitly in the residual; `x ← x + omega·δ`). `nu1=nu2=2` defaults kept.
+  - `backend.prepare` updated to `buildHierarchy(op, …)` (op already has filleted materials).
+  - `Files to modify`: now permits a minimal, additive, read-only accessor on `lib/airgap-grid.js` for radial face conductances IF the line smoother needs it (no behaviour change).
+- **On-disk carryover**: `lib/airgap-refine.js` was left by the failed retry in a DIVERGING state (it had swapped `vcycleSolve` to rediscretized coarse ops). The fresh implementer must implement the amended Option-A contract (radial-line smoother + Galerkin), not patch the diverging rediscretized version.
+- **Respawn**: a fresh T8.1.1 implementer (the `stops_for_clarification` retry slot on batch-16 is open).
+
+## Task T8.1.1: airgap-refine.js — COMPLETE (2026-05-25, Option A: radial-line smoother + Galerkin)
+- **Status**: complete
+- **Agent**: implementer (respawn after clarification resolution)
+- **Files created**: none (lib/airgap-refine.js already existed on disk in diverging state — fully rewritten)
+- **Files modified**:
+  - `lib/airgap-refine.js` — full rewrite implementing the amended Option-A contract:
+    - `buildHierarchy(op, grid, mg)` — takes the fine **operator** (not nu array); builds Galerkin coarse ops `A_l = R·A_{l-1}·P` via explicit dense assembly (applying fine matvec to each column of P, restricting); stored per level with `matvec`, `diagonal`, `radialCoeffs` accessors
+    - Smoother changed from point damped-Jacobi to **radial-line (block) smoother** using Thomas algorithm per angular column j; angular east/west couplings carried explicitly in the full residual computed before each sweep
+    - `solveSaturated` rebuilds the Galerkin hierarchy from the scaled operator after `setIronScale` (pre-built hierarchy is stale post-scaling; consistent Galerkin correction required)
+    - Transfer operators: `prolongVec` = linear interpolation coarse→fine in θ; `restrictVec = Pᵀ` = full-weighting [¼,½,¼]
+    - `refineSection`, `filletCorners`, `backend` unchanged in contract; `backend.prepare` now calls `buildHierarchy(op, refined.grid, mg)` (op already has filleted materials applied)
+  - `lib/airgap-grid.js` — added purely additive `radialCoeffs()` accessor returning `{aN, aS}` copies for the radial-line smoother; no existing behaviour changed (matvec/diagonal/field/fluxLinkage/etc byte-identical)
+- **Tests**: 95/95 passing (no regressions); 34/34 acceptance checks pass (verified numerically)
+- **Acceptance criterion results**:
+  - `refineSection(s,{factor:3})`: Nr×3, Ntheta×3, extents unchanged, gapBand×3, features deep-cloned — PASS
+  - `filletCorners`: convex corner → geometric mean `sqrt(iron·air)` within 1e-9 rel; interior/flat-edge cells unchanged; strength:0 identity — PASS
+  - `vcycleSolve` matches PCG (tol=1e-8) within relative-L2 7.8e-9 < 1e-5 on cogging-geometry operator — PASS
+  - Grid-independent iteration count: Ntheta=128→9 iters, Ntheta=256→9 iters, diff=0 ≤ 2, both <15 — PASS
+  - `solveSaturated`: below knee satScale=1; above knee satScale>1 and ceilinged Bpeak < unceilinged Bpeak — PASS
+  - `backend().prepare(section)` returns `{op,compiled}` with correct refined Ntheta; `linearSolve`/`solveSaturated` honour SolveBackend contract through MotorSlice — PASS
+  - Module loads under require with no DOM access; source contains no MACHINE_NAMES token — PASS
+  - `radialCoeffs()` on airgap-grid.js: returns correct shape arrays; no side effects on matvec — PASS

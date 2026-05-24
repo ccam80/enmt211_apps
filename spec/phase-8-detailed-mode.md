@@ -188,32 +188,52 @@ It ships, in dependency order:
       `ν` at `strength = 1`; identity at `strength = 0`). All other cells copy
       `nu` verbatim. Deterministic and order-independent (reads original `nu`,
       writes the copy). `strength` is clamped to `[0,1]`.
-    - `LIB.AirgapRefine.buildHierarchy(nu, grid, { minNtheta = 16, maxLevels = 6 })
-      → hierarchy` — builds the semi-coarsened-in-θ multigrid stack from a fine
-      reluctivity array. Level 0 is the fine grid. Each successive level halves
-      `Ntheta` (keeping `Nr` fixed — thin-annulus θ-anisotropy → semi-coarsening),
-      coarsening `ν` by **angular pairwise harmonic averaging** (`νc[i,jc] =
-      2·νf[i,2jc]·νf[i,2jc+1]/(νf[i,2jc]+νf[i,2jc+1])`, matching the Phase-1 face
-      averaging), building `op_l = LIB.AirgapGrid.create({ Nr, Ntheta: Ntheta_l,
-      rInner, rOuter, ell })` and `op_l.setMaterials({ nu: νc_l })`. Stops when
-      `Ntheta_l ≤ minNtheta` or `maxLevels` reached. Requires `Ntheta` divisible
-      by 2 down to the coarsest level (throws a descriptive `Error` otherwise).
-      Each level stores `{ op, Nr, Ntheta }`; restriction/prolongation are pure
-      θ-index operations (full-weighting `[¼,½,¼]` restriction; linear
-      prolongation), defined internally. The coarsest level carries no children.
+    - `LIB.AirgapRefine.buildHierarchy(op, grid, { minNtheta = 16, maxLevels = 6 })
+      → hierarchy` — builds the semi-coarsened-in-θ multigrid stack from the fine
+      **operator** `op` (its `matvec` seeds the Galerkin recursion below). Level 0
+      is the fine operator. Each successive level halves `Ntheta` (keeping `Nr`
+      fixed — thin-annulus θ-anisotropy → semi-coarsening). Transfer operators are
+      pure θ-index operations, defined internally: prolongation `P` is linear
+      interpolation in θ (coarse→fine) and restriction is its variational transpose
+      `R = Pᵀ`. The coarse operator at each level is the **Galerkin (variational)
+      operator** `A_l = R · A_{l−1} · P`, assembled at build time by applying the
+      finer level's operator to the columns of `P` (≈`Ntheta_l` `matvec`s per
+      level) and restricting. **Coarse levels are NOT rediscretized from an
+      angularly-averaged `ν`** — under θ-only semi-coarsening a rediscretized
+      coarse operator is inconsistent with the fine operator wherever `ν` is
+      angularly discontinuous (slotted stators such as `coggingConfig`), which
+      makes the coarse-grid correction diverge; the Galerkin operator is consistent
+      by construction (this is the resolution of the 2026-05-25 T8.1.1
+      clarification — see `spec/progress.md`). Each level stores its coarse
+      operator in a form that supports `matvec`, the operator diagonal, and
+      per-angular-column radial-tridiagonal extraction (consumed by the radial-line
+      smoother in `vcycleSolve`). Stops when `Ntheta_l ≤ minNtheta` or `maxLevels`
+      reached; requires `Ntheta` divisible by 2 down to the coarsest level (throws
+      a descriptive `Error` otherwise). The coarsest level carries no children.
     - `LIB.AirgapRefine.vcycleSolve(op, b, { x0 = null, tol = 1e-6, maxCycles =
       30, hierarchy, nu1 = 2, nu2 = 2, omega = 2/3 }) → { x, iters, residual }` —
       geometric-multigrid V-cycle linear solve with the **same call shape** as
       `LIB.AirgapSolve.pcg`. The **fine level uses `op`** (so the current rotor
       angle, set via `op.setRotorAngle`, is honoured through `op.matvec`/
-      `op.diagonal`); coarse-grid corrections use `hierarchy` (levels ≥ 1). One
-      V-cycle: `nu1` damped-Jacobi pre-smooths (`x ← x + omega·D⁻¹·(b − A·x)`
-      using `op.matvec`/`op.diagonal` at each level), restrict the residual,
-      recurse, prolong + correct, `nu2` post-smooths; the coarsest level is solved
-      by `LIB.AirgapSolve.pcg(coarsestOp, rc, { tol: 1e-8 })`. Iterate V-cycles
-      until `‖b − op.matvec(x)‖₂ / ‖b‖₂ ≤ tol` or `maxCycles`. `iters` = V-cycle
-      count. Holds the pinned gauge node fixed (per the Phase-1 operator
-      contract). `hierarchy` is required.
+      `op.diagonal`); coarse-grid corrections use `hierarchy` (levels ≥ 1). The
+      smoother is a **radial-line (block) smoother, NOT point Jacobi**: because the
+      hierarchy coarsens only in θ, the radial direction is never coarsened and a
+      point smoother cannot damp radial error modes — which is exactly what
+      destroys grid-independence and makes the `< 15` criterion unreachable (the
+      2026-05-25 T8.1.1 clarification; see `spec/progress.md`). One smoothing sweep
+      computes the residual `r = b − A·x` (via `matvec`) and then, for each angular
+      column `j` (fixed θ), solves that column's radial tridiagonal system
+      `T_j · δ_j = r_j` by the Thomas algorithm — where `T_j` carries the operator
+      diagonal on its main diagonal and the radial (north/south) face couplings on
+      its sub/super-diagonals, with the angular (east/west) couplings carried
+      explicitly in `r` — then updates `x ← x + omega·δ` (`omega` is the
+      line-smoother under-relaxation factor). One V-cycle: `nu1` line-pre-smooths,
+      restrict the residual via `R`, recurse, prolong via `P` + correct, `nu2`
+      line-post-smooths; the coarsest level is solved by
+      `LIB.AirgapSolve.pcg(coarsestOp, rc, { tol: 1e-8 })`. Iterate V-cycles until
+      `‖b − op.matvec(x)‖₂ / ‖b‖₂ ≤ tol` or `maxCycles`. `iters` = V-cycle count.
+      Holds the pinned gauge node fixed (per the Phase-1 operator contract).
+      `hierarchy` is required.
     - `LIB.AirgapRefine.solveSaturated(op, b, { x0 = null, tol = 1e-6, maxCycles =
       30, hierarchy, ceiling }) → { x, iters, residual, satScale }` — the
       Live-style global flux-dependent ceiling wrapped around the V-cycle, with
@@ -232,13 +252,21 @@ It ships, in dependency order:
         `op.setMaterials({ nu: nuFillet })`;
         `op.setRotorRegion({ rotorMask: compiled.rotorMask })`;
         `op.setGapBand(refined.gapBand)`;
-        `op._refineHierarchy = buildHierarchy(nuFillet, refined.grid, mg)` (stashed
+        `op._refineHierarchy = buildHierarchy(op, refined.grid, mg)` (stashed
+        — note `op` already has `setMaterials(nuFillet)` applied above, so the
+        Galerkin recursion coarsens the filleted fine operator)
         on the op so the backend's solves reach it); returns `{ op, compiled }`.
       - `solveSaturated(op, b, o)`: `LIB.AirgapRefine.solveSaturated(op, b, {
         ...o, hierarchy: op._refineHierarchy })`.
       - `linearSolve(op, b, o)`: `LIB.AirgapRefine.vcycleSolve(op, b, {
         ...o, hierarchy: op._refineHierarchy })`.
-- **Files to modify**: none.
+- **Files to modify**: `lib/airgap-grid.js` — ONLY if the radial-line smoother
+  needs a minimal, additive, read-only accessor for the per-cell radial
+  (north/south) face conductances, so `T_j` can be assembled without re-deriving
+  the FV stencil. Such an accessor must not change any existing behaviour or
+  output (it is purely additive; the operator's `matvec`/`diagonal`/`field`/etc.
+  results must be byte-identical). If the existing operator surface already
+  exposes enough to assemble the radial tridiagonal, keep this as none.
 - **Tests** (authored in Task 8.3.1): `tests/detailed/airgap-refine.test.js`.
 - **Acceptance criteria**:
   - `refineSection(section, { factor:3 })` returns a section whose `grid.Nr`,
