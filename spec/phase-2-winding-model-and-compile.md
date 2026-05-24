@@ -168,19 +168,22 @@ section = {
       phase belt using the following general rule for arbitrary phase count `m`:
       slot electrical angle `α(s) = (p/2)·s·(2π/Q)`; belt index
       `b = floor( α(s) / (π/m) ) mod (2m)`; polarity `= (b is even ? + : −)`
-      (a `−` belt negates `turns`); phase index `= floor(b/2) mod m` maps to
-      label A, B, C, … in the standard double-layer 60°-phase-belt sequence.
-      Note: the standard 60°-belt sequence for m=3 assigns phase indices in the
-      order A, C, B (not A, B, C) because the belt sequence advances by one
-      phase per half-belt step and wraps with the polarity reversal, producing
-      the canonical map `b: 0→A+, 1→C−, 2→B+, 3→A−, 4→C+, 5→B−`. To reproduce
-      this with the general formula, phase label for belt `b` is the
-      `floor(b/2) mod m`-th element of the sequence `[A, C, B]` (for m=3 the
-      label order is `[A, C, B, A, C, B]` not `[A, B, C, A, B, C]`). For
-      general `m` the label sequence follows the same 60°-belt interleaving:
-      labels cycle as `[0, m−1, 1, m−2, 2, …]` (alternating from the outside
-      in), so `floor(b/2) mod m` indexes into that reordered list. The m=3
-      example `[A, C, B]` is the concrete instance of this rule. Each phase is
+      (a `−` belt negates `turns`); phase index `= reorderedLabels[b mod m]`,
+      where `reorderedLabels` is the standard double-layer 60°-phase-belt label
+      sequence (see below). Each successive belt advances by exactly one label
+      and the polarity alternates with `b`.
+      Note: the standard 60°-belt sequence for m=3 assigns phase labels in the
+      order A, C, B (not A, B, C), producing the canonical map
+      `b: 0→A+, 1→C−, 2→B+, 3→A−, 4→C+, 5→B−`. To reproduce this with the
+      general formula, the phase label for belt `b` is the `(b mod m)`-th
+      element of the reordered sequence `[A, C, B]` (for m=3 the label order over
+      a full period reads `[A, C, B, A, C, B]`, not `[A, B, C, A, B, C]`). For
+      general `m` the reordered label sequence is the phase-index list
+      `[0, m−1, 1, m−2, 2, …]` (alternating from the outside in, `m` entries),
+      and `(b mod m)` indexes into it. The m=3 sequence `[A, C, B] = [0, 2, 1]`
+      is the concrete instance of this rule. (Note: `b mod m` — NOT `floor(b/2)
+      mod m`, which would group two consecutive belts under one phase and is the
+      wrong layout.) Each phase is
       one branch (series). Requires `Q` divisible by `m·p` and
       `1 ≤ coilPitch ≤ Q/p`; otherwise throw a descriptive `Error`.
 - **Files to modify**: none.
@@ -366,7 +369,8 @@ section = {
       and assert `nCircuits === m === 2` (one series branch per phase). For each
       slot `s ∈ {0, 2, 4, 6}`, compute the expected phase index and polarity from
       the general belt formula — `α(s) = (p/2)·s·(2π/Q)`,
-      `b = floor(α(s)/(π/m)) mod (2m)`, phase index `= floor(b/2) mod m`,
+      `b = floor(α(s)/(π/m)) mod (2m)`, phase index `= reorderedLabels[b mod m]`
+      with `reorderedLabels = [0, m−1, 1, m−2, …]` (for m=2 this is `[0, 1]`),
       polarity `= (b even ? + : −)` — and assert the `turns` row in the returned
       `ampereConductors` result matches that signed assignment at slot `s` (go-side:
       `turns[phaseIndex*nSlots + s]` has the predicted sign; return-side at

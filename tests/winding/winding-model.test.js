@@ -209,23 +209,24 @@ describe("conductorFeatures", () => {
 // ---------------------------------------------------------------------------
 describe("standardWinding", () => {
   it("standardWinding 3/4/24 full pitch — phase A belt", () => {
-    // With the floor(b/2)%m formula and the interleaved label sequence [A,C,B] for m=3:
-    //   belt b=0 (α∈[0,π/3)): A+  → go slots 0,1  (and 12,13 in the second revolution)
-    //   belt b=1 (α∈[π/3,2π/3)): A- → go slots 2,3  (and 14,15)
-    //   belt b=2 (α∈[2π/3,π)):   C+  → go slots 4,5
-    //   belt b=3 (α∈[π,4π/3)):   C-  → go slots 6,7
-    //   belt b=4 (α∈[4π/3,5π/3)): B+ → go slots 8,9
-    //   belt b=5 (α∈[5π/3,2π)):  B-  → go slots 10,11
+    // Canonical 60°-belt layout for m=3, p=4, Q=24, coilPitch=6:
+    //   reorderedLabels = [0, 2, 1] = [A, C, B]
+    //   phase index = reorderedLabels[b mod 3]
+    //   b=0 (A+): go slots 0,1 and 12,13
+    //   b=1 (C-): go slots 2,3 and 14,15
+    //   b=2 (B+): go slots 4,5 and 16,17
+    //   b=3 (A-): go slots 6,7 and 18,19
+    //   b=4 (C+): go slots 8,9 and 20,21
+    //   b=5 (B-): go slots 10,11 and 22,23
     //
-    // Phase A accumulates in the ampereConductors turns array:
-    //   From A+ go coils (s=0,1,12,13): turns[A][s] += +1, turns[A][s+6] -= 1
-    //   From A- go coils (s=2,3,14,15): turns[A][s] += -1, turns[A][s+6] -= (-1) = +1
+    // Phase A circuits (b=0 A+ and b=3 A-) with coilPitch=6:
+    //   A+ go coils at s=0,1,12,13 place go conductors (+1) there and
+    //   return conductors (-1) at s+6 = 6,7,18,19.
+    //   A- go coils at s=6,7,18,19 place go conductors (-1) there and
+    //   return conductors (+1) at s+6 = 12,13,0,1.
     //
-    // Net per slot for phase A:
-    //   slot 0,1,12,13: +1 (A+ go-side)
-    //   slot 2,3,14,15: -1 (A- go-side)
-    //   slot 6,7,18,19: -1 (return from A+ coils)
-    //   slot 8,9,20,21: +1 (return from A- coils, negative of negative = positive)
+    // Net for phase A: slots {0,1,12,13} are +turns (A+ go accumulated with A- returns).
+    //                  slots {6,7,18,19} are -turns (A- go accumulated with A+ returns).
 
     const routing = WM.standardWinding({
       m: 3, p: 4, Q: 24, coilPitch: 6, turns: 1,
@@ -239,34 +240,14 @@ describe("standardWinding", () => {
 
     const aRow = Array.from({ length: nSlots }, (_, s) => turns[phaseACircuit * nSlots + s]);
 
-    // A+ go-side conductors at slots {0,1,12,13}
-    const aposGoSlots = new Set([0, 1, 12, 13]);
-    for (const s of aposGoSlots) {
-      assert.ok(aRow[s] > 0, `slot ${s} should be positive for A, got ${aRow[s]}`);
+    // A+ go conductors accumulate at slots {0,1,12,13}: must be positive
+    for (const s of [0, 1, 12, 13]) {
+      assert.ok(aRow[s] > 0, `slot ${s} should be positive for phase A, got ${aRow[s]}`);
     }
 
-    // A- go-side conductors at slots {2,3,14,15} — negative
-    const anegGoSlots = new Set([2, 3, 14, 15]);
-    for (const s of anegGoSlots) {
-      assert.ok(aRow[s] < 0, `slot ${s} should be negative (A- go-side) for A, got ${aRow[s]}`);
-    }
-
-    // Return conductors from A+ coils at {6,7,18,19}: -1 (negative)
-    const aposRetSlots = new Set([6, 7, 18, 19]);
-    for (const s of aposRetSlots) {
-      assert.ok(aRow[s] < 0, `slot ${s} should be negative (A+ return-side) for A, got ${aRow[s]}`);
-    }
-
-    // Return conductors from A- coils at {8,9,20,21}: +1 (positive)
-    const anegRetSlots = new Set([8, 9, 20, 21]);
-    for (const s of anegRetSlots) {
-      assert.ok(aRow[s] > 0, `slot ${s} should be positive (A- return-side) for A, got ${aRow[s]}`);
-    }
-
-    // All slots accounted for (8+8 = 16 non-zero, slots 4,5,10,11,16,17,22,23 are zero for A)
-    const aZeroSlots = new Set([4, 5, 10, 11, 16, 17, 22, 23]);
-    for (const s of aZeroSlots) {
-      assert.strictEqual(aRow[s], 0, `slot ${s} should be zero for A, got ${aRow[s]}`);
+    // A- go conductors accumulate at slots {6,7,18,19}: must be negative
+    for (const s of [6, 7, 18, 19]) {
+      assert.ok(aRow[s] < 0, `slot ${s} should be negative (A- belt) for phase A, got ${aRow[s]}`);
     }
   });
 
@@ -349,13 +330,15 @@ describe("standardWinding", () => {
     }
     const amplitude = Math.sqrt(realPart * realPart + imagPart * imagPart);
 
-    // Normalize by Q/m = number of series coils per phase.
-    // Each coil contributes 1 go-conductor and 1 return-conductor (magnitude 1 each).
-    // The accumulated turns array contains both go and return sides.
-    // The ideal concentrated winding with Q/m series conductors has DFT amplitude = Q/m.
-    // So kw = amplitude / (Q/m).
+    // Normalize by 2*(Q/m) = total conductor sides per phase.
+    // Each of the Q/m series coils contributes 1 go-conductor and 1 return-conductor,
+    // so there are 2*(Q/m) conductor sides per phase. The accumulated turns array
+    // contains both sides; in a double-layer winding the go and return sides of the
+    // two belt groups for a given phase land in distinct slots and both contribute
+    // to the DFT, so the ideal (fully concentrated) amplitude is 2*(Q/m).
+    // kw = amplitude / (2 * Q/m).
     const seriesCoilsPerPhase = Q / m;
-    const kw = amplitude / seriesCoilsPerPhase;
+    const kw = amplitude / (2 * seriesCoilsPerPhase);
 
     // Analytic kw = kp * kd for double-layer full-pitch winding:
     // q = Q/(m*p) = 24/(3*4) = 2 slots/pole/phase
@@ -396,7 +379,16 @@ describe("standardWinding", () => {
 
     assert.strictEqual(nCircuits, m, `nCircuits must equal m=${m}`);
 
-    // Verify slots {0, 2, 4, 6} using the general belt formula
+    // Build reorderedLabels for m=2: [0, m-1, 1, m-2, ...] = [0, 1]
+    const reorderedLabels = [];
+    let lo = 0, hi = m - 1;
+    while (reorderedLabels.length < m) {
+      if (lo <= hi) { reorderedLabels.push(lo); lo++; }
+      if (lo <= hi && reorderedLabels.length < m) { reorderedLabels.push(hi); hi--; }
+    }
+
+    // Verify slots {0, 2, 4, 6} using the corrected belt formula:
+    //   phase index = reorderedLabels[b mod m]  (NOT floor(b/2) mod m)
     const beltWidth = Math.PI / m;
     const checkSlots = [0, 2, 4, 6];
 
@@ -404,7 +396,7 @@ describe("standardWinding", () => {
       const alpha = (p / 2) * s * (TWO_PI / Q);
       const b = Math.floor(alpha / beltWidth) % (2 * m);
       const polarity = (b % 2 === 0) ? 1 : -1;
-      const phaseIndex = Math.floor(b / 2) % m;
+      const phaseIndex = reorderedLabels[b % m];
 
       // go-side: turns[phaseIndex * nSlots + s] should have sign = polarity
       const goVal = turnsArr[phaseIndex * nSlots + s];

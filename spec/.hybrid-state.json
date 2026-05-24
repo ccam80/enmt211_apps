@@ -142,15 +142,15 @@
           "T2.1.1"
         ]
       ],
-      "spawned": 1,
-      "completed": 1,
+      "spawned": 2,
+      "completed": 2,
       "verifications_passed": 0,
-      "verifications_failed": 0,
+      "verifications_failed": 1,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "2.1.a": "pending"
+        "2.1.a": "failed"
       },
       "user_required_tasks": {
         "2.1.a": []
@@ -828,5 +828,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-23T23:56:05.131Z"
+  "last_updated": "2026-05-24T00:14:33.350Z"
 }
