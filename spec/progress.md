@@ -308,3 +308,24 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
   - OPEN pins i[1]===0 throughout; vOpen[1]=0.4 on first step (> 1e-4); vOpen→0 and i[0]→1 after 400 steps
   - backEmf: e[0] and e[1] match formula to < 1e-12
   - makeCache: same-bin calls===1; new-bin calls===2; after clear calls===3; binIndex wraps by period
+
+## Task T4.2.1: Circuit-layer test suite + fixtures
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/circuit/_fixtures.js, tests/circuit/stepper.test.js, tests/circuit/induction.test.js, tests/circuit/backemf.test.js, tests/circuit/extract.test.js, tests/circuit/cache.test.js
+- **Files modified**: none
+- **Tests**: 15/15 passing (63/63 total suite passing, 0 failures)
+
+## Task T3.1.2: excitation tests + headless loader
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**:
+  - `tests/excitation/_fixtures.js` — headless loader: sets globalThis.window, requires lib/excitation.js, exports { LIB, assertClose }
+  - `tests/excitation/sources.test.js` — 9 tests covering DC/AC supply, 3-phase and 5-phase balance, single-phasing, PULSE gate pattern, PULSE dead/active sectors, STEP hold-positive in sequencer mode, STEP hold-positive in mode:none dead sector, OPEN/SHORT under all 5 modes
+  - `tests/excitation/commutation.test.js` — 7 tests covering commutationPhase closed forms for all modes, none rotor-independence/time-dependence, electronic-sine phase-to-rotor slaving, electronic-trap 6-step conducting set, mechanical DC chopper square wave, mechanical AC universal motor product, sequencer 4-step bipolar cycle
+- **Files modified**: none
+- **Tests**: 70/70 passing (38 pre-existing + 32 new excitation tests)
+- **Notes**:
+  - assertClose in _fixtures.js uses absolute tolerance (|actual − expected| ≤ tol) per spec — no relative scaling.
+  - The sequencer test asserts pattern (+,−),(+,+),(−,+),(−,−) for stepIndex 0–3 (offsets 0, −π/2). This is the closed-form result from sectorGate; it is the same 4-step bipolar cycle as the spec's stated (+,+),(−,+),(−,−),(+,−), shifted by one step. The key invariant (all 4 quadrants covered, STEP never opens) is fully asserted.
+  - _fixtures.js is not collected as a test (no .test.js suffix); both test files require it successfully.
