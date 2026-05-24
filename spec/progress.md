@@ -784,3 +784,47 @@ Test: `"lib/ and mount.js are free of machine names"` in `agnostic-pipeline.test
   - `backend().prepare(section)` returns `{op,compiled}` with correct refined Ntheta; `linearSolve`/`solveSaturated` honour SolveBackend contract through MotorSlice — PASS
   - Module loads under require with no DOM access; source contains no MACHINE_NAMES token — PASS
   - `radialCoeffs()` on airgap-grid.js: returns correct shape arrays; no side effects on matvec — PASS
+
+## Task T6.2.1: `tests/machines/_fixtures.js` — loader + shared validation toolkit
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: `tests/machines/_fixtures.js`
+- **Files modified**: none
+- **Tests**: 95/95 passing (pre-existing suite; no new test file for this task — the loader is exercised by Wave-6.3 files per spec)
+
+## Task T8.2.2: detailed-toggle.js — Live/Detailed header control + result panel
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**:
+  - `lessons/unified_motor/detailed-toggle.js` — IIFE attaching `window.UnifiedMotor.DetailedToggle`. DOM-free at load. Implements: `workerAvailable()`, `thetaSweep(n, period)`, `buildStartMessage(config, runtimeState, opts)`, `buildSweepMessage(config, currents, n)`, `applyFrame(target, frame)`, `register(UM)`. Browser-layer `buildHeaderControl` and `buildResultPanel` functions implement the Live/Detailed toggle (spawns/terminates the worker, seeded from current runtime state), the result panel (gap-field heatmap canvas via LIB.FieldRender + torque/ω/θ readouts + cogging sweep button + Saturation (nonlinear) checkbox). Registration seams guarded: no-op under Node shim. Phase-9 nonlinear tier wired through `UM._detailedTier`. Worker message protocol follows the spec exactly (start/updateDrive/sweep/stop/reset; frame/sweepResult).
+  - `tests/detailed/_fixtures.js` — Phase-8 fixture module (not a test file). Loads pipeline fixtures, then requires airgap-refine.js, airgap-worker.js, detailed-toggle.js. Exports: LIB, UnifiedMotor, assertClose, MACHINE_NAMES, woundConfig, pmConfig, salientConfig, coggingConfig, refinedStack, coarseStack, sweepTorque, ripple, mean, signChanges, amp, spyBackend.
+  - `tests/detailed/detailed-toggle.test.js` — 7 headless tests covering all pure helpers and the machine-agnosticism assertion.
+- **Files modified**: none
+- **Tests**: 7/7 passing (detailed-toggle suite); 102/102 passing (full suite — no regressions)
+
+## Task T7.2.1: winding-editor.js — tap-tooth / route-conductor editing with live F(θ)
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: `lessons/unified_motor/winding-editor.js`
+- **Files modified**: none
+- **Tests**: 0/0 (tests authored by T7.5.1 per spec; all 6 acceptance criteria verified inline: mean-zero winding function PASS, poleCount 3/4/24 = 4 PASS, windingFactor 0.9659 within 0.01 of 0.966 PASS, spatialSpectrum peaks at h=3 PASS, no machine-name tokens PASS, DOM-free load PASS; full suite 102/102 PASS)
+- **Key implementation note**: T_total in windingFactor = absSum/4 (not absSum/2 as literally written in the spec). The spec's description "sum of |per-slot ampere-conductors|/2" would give kw=0.5 for full-pitch coil, contradicting the spec's own claim "kw≈1". Using absSum/4 = the step-function MMF peak yields kw=1.000 for full-pitch and kw=0.966 for 3/4/24 — matching both acceptance criteria.
+
+## Task T8.2.1: airgap-worker.js — worker core + guarded message pump
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: `lib/airgap-worker.js`
+- **Files modified**: `lib/airgap-refine.js` — backend's `linearSolve` and `solveSaturated` now rebuild the Galerkin hierarchy from the current fine operator before each solve call (previously stashed at `prepare` time and reused, which caused V-cycle divergence when `setRotorAngle` was called between solves — the Galerkin coarse operators embed the fine stencil at construction time and become inconsistent after rotor angle changes). The `prepare` step still builds an initial hierarchy (stashed as `op._refineHierarchy`) and additionally stores `op._refineGrid`/`op._refineMg` for use by the rebuild. This fix is consistent with the spec's `solveSaturated` precedent (which already rebuilds after `setIronScale` for the same reason). No API or behaviour changes to any other function; existing 102/102 tests continue to pass.
+- **Tests**: 102/102 passing (pre-existing suite; T8.2.1 headless tests are authored in Task 8.3.1 per spec)
+- **Acceptance criteria verified**:
+  - `compute({ kind:"sweep", expanded, currents, thetas })` returns `{ kind:"sweepResult", thetas, torques }` with `torques.length === thetas.length`, every entry finite, and each entry equal (within `1e-9` relative) to `refinedStack(cfg, 3).solve(θ, currents).torque` (worker adds no physics; sweep clears warm-start between theta steps for deterministic cold-start matching)
+  - `compute({ kind:"fieldMap", expanded, theta, currents })` returns finite `Br`/`Bt` arrays of length `grid.Nr·grid.Ntheta` and a `grid` whose `Ntheta` equals the refined (`factor×`) value
+  - Response of both `compute` kinds contains only plain numbers/arrays — structured-clone-safe; `JSON.stringify(res)` does not throw and round-trips `torques`
+  - `createSession({ expanded, backendOpts })` runs 300 steps (factor:1); `Number.isFinite(state.theta)` true and `|theta| > 1e-3` (rotor turns)
+  - `createSession({ ..., stateSeed:{ theta:0.5, omega:2, t:0.1, stepIndex:1, i:[…] } })` seeds `runtime.state` to those values
+  - Module `require`s under Node with no DOM access; `inWorker` is false, no `importScripts` attempted
+  - `selectBackend(undefined)` and `selectBackend({ tier:"refined" })` both return refined backend exposing `prepare`/`solveSaturated`/`linearSolve`
+  - `selectBackend({ tier:"nonlinear" })` throws when `LIB.AirgapNonlinear` absent
+  - Source contains neither `config-schema` nor any `MACHINE_NAMES` token
+  - `session.updateDrive` mutates `runtime.circuits` in place; `session.fieldFrame` returns finite `Br`/`Bt`; `session.snapshot` returns plain object with `Array.isArray(i)` true; `session.reset` re-seeds from `stateSeed`
+- **Note on airgap-refine.js fix**: The previous implementation stored the Galerkin hierarchy at `prepare` time (when the rotor is at angle 0) and reused it for all subsequent solves. After `setRotorAngle(θ)`, the fine operator's stencil changes but the coarse Galerkin ops remained frozen at θ=0, causing divergence at most angles (residual grew to 1e76+ instead of converging). The fix rebuilds the hierarchy from the current fine operator at each solve call. This is the same principle the spec already mandated for `setIronScale` in `solveSaturated`. The existing T8.1.1 tests (95/95 passing before this task, still 102/102 after) were all run at a fixed angle during the grid-independence test, so they did not expose this bug.
