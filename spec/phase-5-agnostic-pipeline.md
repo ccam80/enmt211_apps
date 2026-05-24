@@ -804,10 +804,16 @@ they run in parallel.
       `Math.abs(arkkio − coe) ≤ 0.10·Math.max(Math.abs(arkkio), Math.abs(coe))
       + 1e-6`. (With the ceiling disabled this holds for PM at ~0.5% and for the
       reluctance configs at coarse-grid discretization error, ~0.06.)
-    - › `"lib/ and mount.js are free of machine names"` — read every `*.js` file
-      in `lib/` plus `lessons/unified_motor/mount.js`; for each file and each
-      token in `MACHINE_NAMES`, assert no case-insensitive match. (Reads via
-      `node:fs`; enumerated, not interactive.)
+    - › `"unified-motor lib + mount.js are free of machine names"` — read the
+      unified-motor-owned `lib/` engine+runtime files plus
+      `lessons/unified_motor/mount.js`; for each and each token in `MACHINE_NAMES`,
+      assert no case-insensitive match. **Per `spec/manifest.json` Check 1, the
+      pre-existing non-unified-motor token sites are OUT OF SCOPE** — exclude
+      `lib/app.js`, `lib/registry.js`, `lib/header-buttons.js` (the comment sites),
+      `lib/stepper-drive.js`, and the frozen `lib/three-phase.js`; do NOT scan
+      those for this assertion (e.g. `lib/app.js`'s `// stepper-driven lessons…`
+      comment is a sanctioned pre-existing site, not a unified-motor violation).
+      (Reads via `node:fs`; enumerated, not interactive.)
 - **Files to modify**: none.
 - **Acceptance criteria**:
   - `npm test` runs all `tests/pipeline/*.test.js` (alongside the engine /
@@ -818,7 +824,10 @@ they run in parallel.
     (saturation ceiling disabled on both the Arkkio and co-energy solves)**.
     Saturated-torque consistency is deferred to Phase 9 Wave 9.1 (per-cell
     `ν(B)`) and is not asserted here.
-  - The machine-name grep over `lib/` + `mount.js` finds zero matches.
+  - The machine-name grep over the unified-motor-owned `lib/` files + `mount.js`
+    finds zero matches, EXCLUDING the `spec/manifest.json` Check-1 carve-out sites
+    (app.js / registry.js / header-buttons.js comments, stepper-drive.js, frozen
+    three-phase.js).
   - `tests/pipeline/_fixtures.js` is not collected as a test (no `.test.js`
     suffix) and is `require`-able by every pipeline test file.
   - `tests/_shim.js` is byte-unchanged from its Phase-1 state.
