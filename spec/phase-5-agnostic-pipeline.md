@@ -185,7 +185,14 @@ they run in parallel.
     - `UnifiedMotor.ConfigSchema.validate(config) → { ok:boolean, errors:string[] }`
       — never throws on malformed input. Checks (one human-readable string per
       violation): `grid` has finite `Nr,Ntheta≥1, rInner<rOuter, ell>0`;
-      `gapBand.iInner`/`iOuter` integers in `[0,Nr)` with `iInner<iOuter`;
+      **gap band** (auto-derived; see the GAP-BAND AMENDMENT below) — in
+      `gapBandMode:"manual"`, `gapBand.iInner`/`iOuter` integers in `[0,Nr)` with
+      `iInner<iOuter`, AND every row in `[iInner,iOuter)` strict air with width
+      `≥2` (the Arkkio band must be pure air — it is invalid over iron/conductor
+      cells); in `gapBandMode:"auto"` (the default) `config.gapBand` is OPTIONAL
+      and `validate` re-derives via `deriveGapBand` and errors if no admissible
+      pure-air band exists (no rotor/stator member, or no contiguous pure-air run
+      ≥2 cells between the outermost rotor and innermost stator feature);
       `poles` a positive even integer; `mechanical.J>0`; every `ring.member ∈
       {"rotor","stator"}`; every `ring.element ∈ {"W","C","M","I","K"}`; every
       `ring.rRange=[r0,r1]` with `rInner ≤ r0 < r1 ≤ rOuter`; for wound rings
@@ -205,8 +212,32 @@ they run in parallel.
         slices:   [ { section, offset }, … ],            // length stack.slices (N≥1)
       }
       ```
-      - `section` is the Phase-2 shape `{ grid, gapBand, features }`. `grid` and
-        `gapBand` are `config.grid`/`config.gapBand` echoed onto every slice.
+      - `section` is the Phase-2 shape `{ grid, gapBand, features }`. `grid` is
+        `config.grid` echoed onto every slice. **`gapBand` is AUTO-DERIVED** (see
+        GAP-BAND AMENDMENT): in `gapBandMode:"auto"` (default) `expand` computes a
+        pure-air band via `deriveGapBand(grid, rings)` and writes it onto
+        `expanded.gapBand` and every slice section, IGNORING any `config.gapBand`;
+        in `gapBandMode:"manual"` it echoes `config.gapBand` verbatim.
+
+      **GAP-BAND AMENDMENT (2026-05-25)** — The Arkkio integral is physically
+      valid only over pure air (it picks up J×B Lorentz force over conductors and
+      interface error over iron). The band is therefore a DERIVED geometric
+      quantity, not free input. `deriveGapBand(grid, rings)` (internal, dispatch
+      only on `member`/`element`/`rRange` — no machine identity):
+      (1) cell centres `r[i]=rInner+(i+0.5)·dr`, `dr=(rOuter−rInner)/Nr`;
+      (2) mark each row occupied if `r[i]` lies in any ring footprint, using the
+          SAME cell-centre test as `coveredCells` (`r0 ≤ r[i] < r1`): `I`→`rRange`;
+          `M`→`rRange` (+`backIronRRange` if present); `W`/`K`→`slotRRange??rRange`
+          +`ironRRange??rRange`; `C`→same as W plus teeth `rRange`; tag each row's
+          `member`;
+      (3) the air annulus = unoccupied rows lying between the outermost
+          rotor-member row and the innermost stator-member row;
+      (4) choose the LONGEST contiguous pure-air run in that annulus (ties →
+          innermost); emit `{iInner:a, iOuter:b+1}`;
+      (5) return `null` if the run width `< 2` (Arkkio needs ≥1 internal face).
+      `validate()` errors when `deriveGapBand` returns `null` (auto) or a manual
+      band fails the pure-air predicate. The existing integer-range `gapBand`
+      checks apply only in `manual` mode (`config.gapBand` is optional in auto).
       - `offset` is `config.stack.sliceOffsets[k]` (radians; the per-slice
         rotor-angle offset the stack applies at runtime).
     - **Element→feature builders** (internal, not exported), dispatched only on
