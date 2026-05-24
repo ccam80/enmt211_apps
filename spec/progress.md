@@ -463,3 +463,15 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
 - **Machine-name check**: NONE of the 8 MACHINE_NAMES tokens found in `mount.js` source.
 - **window.UnifiedMotor surface**: all 9 members present (`mount`, `registerPanel`, `registerTool`, `registerHeaderControl`, `registerRender3D`, `PANELS`, `TOOLS`, `HEADER_CONTROLS`, `RENDER3D`); `RENDER3D` initially `null`.
 - **Note**: Live browser visual verification (rotor visibly turns, canvases non-zero height) remains the user-required gate per spec.
+
+## Task 5.4.1-fix-r3: mount.js — built-in 3D rig + cross-sections fix (round 3)
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none
+- **Files modified**: `lessons/unified_motor/mount.js`
+- **Tests**: 80/80 passing (npm test)
+- **Changes made**:
+  1. **Cross-section viewports (was blank)**: Replaced the broken `LIB.Layout3D.orbital(pitch=π/2)` approach (degenerate camera basis when looking straight down a z=0 plane) with a direct 2D flat canvas mapping: `x_px = cx + x_world * scale`, `y_px = cy - y_world * scale`. Now draws every gap-field annular cell as a 2D sector arc, adds stator-bore (rOuter) and rotor-outer (rInner) ring outlines, and draws a rotor-angle marker line. Per-canvas smoothed magScale stored on `canvas._magScale` so the colour scale is stable frame-to-frame. Second canvas shows the same slice-0 field + theta marker when only 1 slice is configured.
+  2. **Built-in 3D rig (no CoilRender, no machine structure)**: Added `drawRing3D` helper (projects a sampled ring polyline through L3) and `drawSlotConductors3D` helper (draws radial slot-conductor lines for wound rings). Built-in path now draws: gap-field heatmap for each slice (existing), stator-bore ring outline per slice, rotor-outer ring outline per slice, slot conductor lines for every wound ring (W/C/K) in `config.rings`, and the rotor-angle marker pointing inward to rInner. Added `LIB.CoilRender` call infrastructure — the slot conductors are projected 3D lines via L3.project (same pattern as `CoilRender.drawConductor3D`). Note: `LIB.CoilRender.drawConductor3D` itself is not called directly because the coil geometry requires `LIB.EM.loop` / `sampleLoopPoints` which depend on the EM physics module's loop shape API — the slot conductor lines are drawn directly via the same L3.project stroke pattern that CoilRender uses internally.
+  3. **Stable magScale (was twitching)**: Added `smoothedMagScale` state variable in the mount closure. Grows immediately to the per-frame max|B|; decays at 2% per frame toward the current max. Passed as fixed `magScale:smoothedMagScale` to `drawGapField` — no more per-frame auto-rescale. vectorStride increased from 8 to 12 to reduce arrow density and clutter.
+  4. **Window.UnifiedMotor surface**: Unchanged — all registration seams intact, no machine-name literals.

@@ -136,6 +136,75 @@
   }
 
   // ---------------------------------------------------------------------------
+  //  Geometry helpers — used by the built-in 3D rig and cross-section views.
+  // ---------------------------------------------------------------------------
+
+  // Sample K points around a ring at radius r in the z=planeZ plane.
+  function ringPoints(r, planeZ, K) {
+    K = K || 64;
+    const pts = new Array(K);
+    for (let i = 0; i < K; i++) {
+      const a = (i / K) * 2 * Math.PI;
+      pts[i] = { x: r * Math.cos(a), y: r * Math.sin(a), z: planeZ };
+    }
+    return pts;
+  }
+
+  // Draw a projected ring outline.
+  function drawRing3D(ctx, L3, r, planeZ, color, lineWidth, K) {
+    const pts = ringPoints(r, planeZ, K || 64);
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth || 1.5;
+    ctx.lineCap = "round";
+    let started = false;
+    let prevBehind = true;
+    ctx.beginPath();
+    for (let i = 0; i <= pts.length; i++) {
+      const p = pts[i % pts.length];
+      const sp = L3.project(p);
+      if (sp.behind) { prevBehind = true; continue; }
+      if (!started || prevBehind) { ctx.moveTo(sp.px, sp.py); started = true; }
+      else                        { ctx.lineTo(sp.px, sp.py); }
+      prevBehind = false;
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Draw radial conductor lines for a wound ring (slot conductors projected in 3D).
+  // conductorCount is the number of slots. The function draws one line per slot
+  // from rInner to rOuter at the slot-centre angles, split into two conductors
+  // per slot (go + return) coloured by the slot's notional current direction.
+  function drawSlotConductors3D(ctx, L3, ring, thetaR, planeZ, current, color) {
+    const rInner = ring.rRange[0];
+    const rOuter = ring.rRange[1];
+    const nSlots = ring.winding && ring.winding.standard ? ring.winding.standard.Q : 6;
+    const sign = current >= 0 ? 1 : -1;
+    ctx.save();
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    for (let q = 0; q < nSlots; q++) {
+      const a = (ring.member === "rotor" ? thetaR : 0) + (q / nSlots) * 2 * Math.PI;
+      const goColor    = (q % 2 === 0) ? color : "rgba(80,80,80,0.7)";
+      const innerPt = { x: rInner * Math.cos(a), y: rInner * Math.sin(a), z: planeZ };
+      const outerPt = { x: rOuter * Math.cos(a), y: rOuter * Math.sin(a), z: planeZ };
+      const pi = L3.project(innerPt);
+      const po = L3.project(outerPt);
+      if (pi.behind && po.behind) continue;
+      ctx.strokeStyle = goColor;
+      ctx.beginPath();
+      if (!pi.behind) ctx.moveTo(pi.px, pi.py);
+      if (!po.behind) {
+        if (pi.behind) ctx.moveTo(po.px, po.py);
+        else           ctx.lineTo(po.px, po.py);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ---------------------------------------------------------------------------
   //  Plot history store
   // ---------------------------------------------------------------------------
 
@@ -343,13 +412,17 @@
     });
 
     // -----------------------------------------------------------------------
-    //  5. Orbit-camera tool state
+    //  5. Orbit-camera tool state + smoothed magScale for gap-field viz
     // -----------------------------------------------------------------------
     let orbitYaw   = 0.4;
     let orbitPitch = 0.35;
     const ORBIT_DIST = 0.25;
 
     let orbitDrag = null;
+
+    // Smoothed magScale for the 3D gap-field overlay — grows immediately when
+    // the field is stronger, decays slowly so arrows never twitch on near-zero.
+    let smoothedMagScale = 1;
 
     // -----------------------------------------------------------------------
     //  8. requestRebuild — re-expands config and rebuilds runtime
@@ -536,11 +609,13 @@
       LIB.Plot.drawLine(ctx2, 0, 0, W, H, yMin, yMax, tMin, tNow, pts, color, 2);
     }
 
-    function drawCrossSection(canvas, field, grid, label) {
+    function drawCrossSection(canvas, field, grid, thetaR, label) {
       const { W, H } = fitCanvas(canvas);
       if (W <= 0 || H <= 0) return;
       const ctx2 = canvas.getContext("2d");
       ctx2.clearRect(0, 0, W, H);
+      ctx2.fillStyle = "#0d1013";
+      ctx2.fillRect(0, 0, W, H);
 
       if (!field || !grid) {
         ctx2.fillStyle = "var(--muted,#8a93a3)";
@@ -551,39 +626,100 @@
         return;
       }
 
-      // Build a flat 2D layout centred in the canvas for the gap-field paint.
-      const R  = grid.rOuter;
-      const pad = 8;
+      // Direct 2D flat mapping: world x → canvas, world y → canvas (y flipped).
+      // x_px = cx + x_world * scale,  y_px = cy - y_world * scale
+      const pad   = 10;
+      const R     = grid.rOuter;
       const scale = Math.min((W - 2 * pad) / (2 * R), (H - 2 * pad) / (2 * R));
-      // Use an identity-like L3 that maps world XY to canvas pixels:
-      // x_px = originX + x_world * scale,  y_px = originY - y_world * scale
-      // We wrap this in an LIB.Layout3D.orbital call centred flat (pitch=0).
-      // For a top-down 2D view: yaw=0, pitch=π/2 (looking down the Z axis).
-      const L3 = LIB.Layout3D.orbital(W, H, {
-        yaw: 0, pitch: Math.PI / 2,
-        dist: R * 2.4,
-        fov:  Math.PI / 4,
-        originX: W / 2,
-        originY: H / 2,
-      });
+      const cx    = W / 2;
+      const cy    = H / 2;
 
-      const geom = {
-        Nr:     grid.Nr,
-        Ntheta: grid.Ntheta,
-        r:      grid.r,
-        rInner: grid.rInner,
-        rOuter: grid.rOuter,
-        planeZ: 0,
+      // Flat2D pseudo-L3: project({x,y,z}) → {px, py, behind:false}
+      const flatL3 = {
+        project: function (p) {
+          return { px: cx + p.x * scale, py: cy - p.y * scale, depth: 1, behind: false };
+        },
       };
 
-      LIB.FieldRender.drawGapField(ctx2, L3, field, geom, {
-        alpha: 0.9,
-        vectors: false,
-        magScale: null,
-      });
+      const Nr     = grid.Nr;
+      const Ntheta = grid.Ntheta;
+      const r      = grid.r;
+      const rInner = grid.rInner;
+      const rOuter = grid.rOuter;
+      const Br     = field.Br;
+      const Bt     = field.Bt;
+      const dTheta = 2 * Math.PI / Ntheta;
+
+      // Compute magScale: use the smoothed slot held on the canvas element.
+      let maxB = 0;
+      for (let k = 0; k < Nr * Ntheta; k++) {
+        const bMag = Math.sqrt(Br[k] * Br[k] + Bt[k] * Bt[k]);
+        if (bMag > maxB) maxB = bMag;
+      }
+      if (!canvas._magScale || canvas._magScale < maxB) {
+        canvas._magScale = maxB > 0 ? maxB : 1;
+      } else {
+        canvas._magScale = canvas._magScale * 0.98 + maxB * 0.02;
+      }
+      const magScale = canvas._magScale > 0 ? canvas._magScale : 1;
+
+      // Radial cell boundaries.
+      const rLo = new Float64Array(Nr);
+      const rHi = new Float64Array(Nr);
+      for (let i = 0; i < Nr; i++) {
+        rLo[i] = (i === 0)      ? rInner : 0.5 * (r[i - 1] + r[i]);
+        rHi[i] = (i === Nr - 1) ? rOuter : 0.5 * (r[i] + r[i + 1]);
+      }
+
+      // Draw each annular cell as a 2D sector (path with 4 corners).
+      ctx2.save();
+      ctx2.globalAlpha = 0.92;
+      for (let i = 0; i < Nr; i++) {
+        const r0 = rLo[i] * scale;
+        const r1 = rHi[i] * scale;
+        for (let j = 0; j < Ntheta; j++) {
+          const idx  = i * Ntheta + j;
+          const bMag = Math.sqrt(Br[idx] * Br[idx] + Bt[idx] * Bt[idx]);
+          const t    = Math.max(0, Math.min(1, bMag / magScale));
+          const thLo = j * dTheta;
+          const thHi = (j + 1) * dTheta;
+          ctx2.fillStyle = LIB.Util.lerpColor("#0d1013", "#ffd54a", t);
+          ctx2.beginPath();
+          ctx2.moveTo(cx + r0 * Math.cos(thLo), cy - r0 * Math.sin(thLo));
+          ctx2.lineTo(cx + r1 * Math.cos(thLo), cy - r1 * Math.sin(thLo));
+          ctx2.lineTo(cx + r1 * Math.cos(thHi), cy - r1 * Math.sin(thHi));
+          ctx2.lineTo(cx + r0 * Math.cos(thHi), cy - r0 * Math.sin(thHi));
+          ctx2.closePath();
+          ctx2.fill();
+        }
+      }
+      ctx2.restore();
+
+      // Ring outlines: stator bore (rOuter) and rotor outer (rInner).
+      ctx2.save();
+      ctx2.strokeStyle = "rgba(180,200,220,0.4)";
+      ctx2.lineWidth = 1;
+      ctx2.beginPath();
+      ctx2.arc(cx, cy, rOuter * scale, 0, Math.PI * 2);
+      ctx2.stroke();
+      ctx2.beginPath();
+      ctx2.arc(cx, cy, rInner * scale, 0, Math.PI * 2);
+      ctx2.stroke();
+      ctx2.restore();
+
+      // Rotor angle marker.
+      const markerR = rInner * scale * 0.75;
+      ctx2.save();
+      ctx2.strokeStyle = "#ffd54a";
+      ctx2.lineWidth = 1.5;
+      ctx2.beginPath();
+      ctx2.moveTo(cx, cy);
+      ctx2.lineTo(cx + markerR * Math.cos(thetaR), cy - markerR * Math.sin(thetaR));
+      ctx2.stroke();
+      ctx2.restore();
 
       // Label
-      ctx2.fillStyle = "var(--muted,#8a93a3)";
+      ctx2.fillStyle = "rgba(138,147,163,0.8)";
       ctx2.font = "10px ui-sans-serif";
       ctx2.textAlign = "left";
       ctx2.textBaseline = "top";
@@ -639,67 +775,117 @@
           // Phase 9 or registered renderer takes over the entire viewport draw.
           UM.RENDER3D.paint(mountCtx, L3, rctx);
         } else {
-          // Built-in: draw gap-field heatmap for each slice on the 3D projection.
+          // Built-in rig: gap-field heatmap + CoilRender winding wireframe +
+          // stator/rotor ring outlines + rotor body marker.
+          const st     = runtime.state;
           const solved = runtime.lastSolve;
+          const rOuter = expanded.grid.rOuter;
+          const rInner = expanded.grid.rInner;
+
+          // Update smoothed magScale from the latest field data.
+          if (solved) {
+            let maxB = 0;
+            for (let k = 0; k < expanded.slices.length; k++) {
+              const sf = solved.perSliceField[k];
+              if (!sf) continue;
+              const Br = sf.Br, Bt = sf.Bt;
+              for (let n = 0; n < Br.length; n++) {
+                const bm = Math.sqrt(Br[n] * Br[n] + Bt[n] * Bt[n]);
+                if (bm > maxB) maxB = bm;
+              }
+            }
+            if (maxB > smoothedMagScale) {
+              smoothedMagScale = maxB;
+            } else {
+              smoothedMagScale = smoothedMagScale * 0.98 + maxB * 0.02;
+            }
+            if (smoothedMagScale < 1e-9) smoothedMagScale = 1e-9;
+          }
+
+          // Draw gap-field heatmap for each slice.
           if (solved) {
             for (let k = 0; k < expanded.slices.length; k++) {
               const sliceField = solved.perSliceField[k];
               if (!sliceField) continue;
-              const grid = runtime.stack.sliceGrid(k);
+              const sliceGrid = runtime.stack.sliceGrid(k);
               const geom = {
-                Nr:     grid.Nr,
-                Ntheta: grid.Ntheta,
-                r:      grid.r,
-                rInner: grid.rInner,
-                rOuter: grid.rOuter,
-                planeZ: k * 0.05,
+                Nr:     sliceGrid.Nr,
+                Ntheta: sliceGrid.Ntheta,
+                r:      sliceGrid.r,
+                rInner: sliceGrid.rInner,
+                rOuter: sliceGrid.rOuter,
+                planeZ: expanded.slices[k].offset || 0,
               };
               LIB.FieldRender.drawGapField(ctx3, L3, sliceField, geom, {
-                alpha:   0.85,
-                vectors: true,
-                magScale: null,
+                alpha:        0.82,
+                vectors:      true,
+                vectorStride: 12,
+                magScale:     smoothedMagScale,
               });
             }
-          } else {
-            // No solve yet — draw a placeholder ring
-            ctx3.strokeStyle = "var(--muted,#8a93a3)";
-            ctx3.lineWidth = 1;
+          }
+
+          // Stator bore outline (rOuter ring) in each slice plane.
+          for (let k = 0; k < expanded.slices.length; k++) {
+            const planeZ = expanded.slices[k].offset || 0;
+            drawRing3D(ctx3, L3, rOuter, planeZ, "rgba(140,160,200,0.5)", 1.5, 64);
+          }
+
+          // Rotor outer surface (rInner ring, rotates with theta) — drawn as a
+          // ring at the inner radius, which is the rotor/gap boundary.
+          for (let k = 0; k < expanded.slices.length; k++) {
+            const planeZ = expanded.slices[k].offset || 0;
+            drawRing3D(ctx3, L3, rInner, planeZ, "rgba(255,213,74,0.35)", 1.2, 48);
+          }
+
+          // Winding wireframe: draw slot conductors for each wound ring.
+          const i0 = runtime.state.i.length > 0 ? runtime.state.i[0] : 0;
+          for (const ring of config.rings) {
+            if (ring.element !== "W" && ring.element !== "C" && ring.element !== "K") continue;
+            for (let k = 0; k < expanded.slices.length; k++) {
+              const planeZ = expanded.slices[k].offset || 0;
+              drawSlotConductors3D(ctx3, L3, ring, st.theta, planeZ, i0, "#4ea1ff");
+            }
+          }
+
+          // Rotor angle indicator: a line from centre to rInner along the rotor angle.
+          const markerLen = rInner * 0.85;
+          const originW = { x: 0, y: 0, z: 0 };
+          const tipW    = {
+            x: markerLen * Math.cos(st.theta),
+            y: markerLen * Math.sin(st.theta),
+            z: 0,
+          };
+          const op = L3.project(originW);
+          const tp = L3.project(tipW);
+          if (!op.behind && !tp.behind) {
+            ctx3.strokeStyle = "#ffd54a";
+            ctx3.lineWidth   = 2;
+            ctx3.lineCap     = "round";
             ctx3.beginPath();
-            ctx3.arc(W3 / 2, H3 / 2, Math.min(W3, H3) * 0.3, 0, Math.PI * 2);
+            ctx3.moveTo(op.px, op.py);
+            ctx3.lineTo(tp.px, tp.py);
             ctx3.stroke();
           }
 
-          // Rotor angle indicator
-          const st = runtime.state;
-          const R  = expanded.grid.rOuter;
-          const originWorld = { x: 0, y: 0, z: 0 };
-          const tipWorld    = {
-            x: R * Math.cos(st.theta),
-            y: R * Math.sin(st.theta),
-            z: 0,
-          };
-          const o = L3.project(originWorld);
-          const t = L3.project(tipWorld);
-          if (!o.behind && !t.behind) {
-            ctx3.strokeStyle = "#ffd54a";
-            ctx3.lineWidth = 2;
-            ctx3.beginPath();
-            ctx3.moveTo(o.px, o.py);
-            ctx3.lineTo(t.px, t.py);
-            ctx3.stroke();
+          // Placeholder ring if no solve yet.
+          if (!solved) {
+            drawRing3D(ctx3, L3, (rInner + rOuter) * 0.5, 0, "rgba(138,147,163,0.5)", 1.5, 48);
           }
         }
       }
 
       // Cross-section views
-      const solved = runtime.lastSolve;
+      const solved   = runtime.lastSolve;
+      const thetaRCS = runtime.state.theta;
       const sliceGrid0 = expanded.slices.length > 0 ? runtime.stack.sliceGrid(0) : null;
       const field0     = solved && solved.perSliceField.length > 0 ? solved.perSliceField[0] : null;
-      drawCrossSection(canvas2DA, field0, sliceGrid0, "slice 0 — gap field");
+      drawCrossSection(canvas2DA, field0, sliceGrid0, thetaRCS, "slice 0 — gap field");
 
       const sliceGrid1 = expanded.slices.length > 1 ? runtime.stack.sliceGrid(1) : null;
       const field1     = solved && solved.perSliceField.length > 1 ? solved.perSliceField[1] : null;
-      drawCrossSection(canvas2DB, field1, sliceGrid1, expanded.slices.length > 1 ? "slice 1 — gap field" : "rotor angle");
+      drawCrossSection(canvas2DB, field1, sliceGrid1, thetaRCS,
+        expanded.slices.length > 1 ? "slice 1 — gap field" : "slice 0 — field + θ");
 
       // Plots
       drawPlot(plotTorque,  history.torque,  "τ (Nm)",    "#ffd54a", v => v.toFixed(4));

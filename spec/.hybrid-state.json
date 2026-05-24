@@ -409,6 +409,12 @@
           "timestamp": "2026-05-24T02:33:14.930Z",
           "task_group": "5.4.a",
           "reason": "TDZ fixed but lesson still non-functional: CSS height collapse — mount root (um-mount) does not fill tab-host (207px of 576px), upper 3-zone region (um-upper) collapses to 12px, viewport canvas is 870x0, so all 3-zone canvases render blank. Reopening for layout fix + headless finite-state sim check."
+        },
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-24T06:55:10.258Z",
+          "task_group": "5.4.a",
+          "reason": "Browser checklist (user): runs but visuals incomplete vs spec. Built-in 3D rig OMITS the spec-required LIB.CoilRender winding polylines (no stator/rotor/coils visible, 'nothing 3D'); the two cross-section viewports render blank; bare gap-field heatmap is uninterpretable. Reopening to bring built-in rig to T5.4.1 spec + fix cross-sections."
         }
       ]
     },
@@ -695,5 +701,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-24T02:36:04.051Z"
+  "last_updated": "2026-05-24T06:59:54.600Z"
 }
