@@ -435,3 +435,14 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
   - Module extension region present with the exact comment markers per spec.
   - No machine-name string literals in mount.js — 0 matches for all 8 tokens (bldc, pmsm, srm, squirrel, stepper, brushed, universal-motor, wound-field).
   - Browser verification checklist (CLAUDE.md "Verifying a new lesson" steps) is user-required and not performed here.
+
+## Task T5.4.1: mount.js TDZ fix — FIX
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none
+- **Files modified**: lessons/unified_motor/mount.js
+- **Tests**: 80/80 passing (no regressions)
+- **Fix applied**: Moved the orbit-camera state declarations (`orbitYaw`, `orbitPitch`, `ORBIT_DIST`, `orbitDrag`) and the `buildCtx()` / `requestRebuild()` function definitions from their original positions (after line 369) to immediately before the first `buildCtx()` call (at what was line 342). This eliminates the temporal-dead-zone ReferenceError that caused `mount()` to throw on every load.
+- **Headless verification**: A minimal DOM shim (node -e inline script) called `window.UnifiedMotor.mount(host)` and confirmed it returned an unmount function without throwing. All four checks passed: mount returns function, all required UnifiedMotor keys present, RENDER3D starts null, no machine-name string literals in source.
+- **Full test suite**: npm test → 80/80 pass, 0 fail, exit code 0.
+- **Note**: Browser verification (rotor visibly turns, field paints, Reset/Pause behave) remains user-required per the spec; the coordinator must surface the CLAUDE.md checklist to the user.

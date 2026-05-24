@@ -396,7 +396,15 @@
           "T5.4.1"
         ]
       },
-      "user_acks": {}
+      "user_acks": {},
+      "recovery_log": [
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-24T02:26:15.906Z",
+          "task_group": "5.4.a",
+          "reason": "T5.4.1 mount() throws TDZ ReferenceError 'Cannot access orbitYaw before initialization' at mount.js:431 (buildCtx) invoked from mount.js:342 — lesson fully broken in-browser (blank zones, confirmed via Chrome over http://). Completion was not functional; reopening for a surgical fix."
+        }
+      ]
     },
     {
       "id": "batch-15",
@@ -681,5 +689,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-24T02:15:27.658Z"
+  "last_updated": "2026-05-24T02:28:52.235Z"
 }

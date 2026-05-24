@@ -337,6 +337,32 @@
       }
     });
 
+    // -----------------------------------------------------------------------
+    //  5. Orbit-camera tool state
+    // -----------------------------------------------------------------------
+    let orbitYaw   = 0.4;
+    let orbitPitch = 0.35;
+    const ORBIT_DIST = 0.25;
+
+    let orbitDrag = null;
+
+    // -----------------------------------------------------------------------
+    //  8. requestRebuild — re-expands config and rebuilds runtime
+    // -----------------------------------------------------------------------
+    function requestRebuild() {
+      expanded = expand(config);
+      runtime  = LIB.MotorRun.create(expanded);
+    }
+
+    function buildCtx() {
+      return {
+        runtime: runtime,
+        config:  config,
+        view:    { yaw: orbitYaw, pitch: orbitPitch, dist: ORBIT_DIST },
+        requestRebuild: requestRebuild,
+      };
+    }
+
     // Mount shelf panels from PANELS (zone: "shelf")
     const registeredShelfUnmounts = [];
     const ctx = buildCtx();
@@ -364,15 +390,6 @@
         registeredHeaderUnmounts.push(result.unmount.bind(result));
       }
     }
-
-    // -----------------------------------------------------------------------
-    //  5. Orbit-camera tool state
-    // -----------------------------------------------------------------------
-    let orbitYaw   = 0.4;
-    let orbitPitch = 0.35;
-    const ORBIT_DIST = 0.25;
-
-    let orbitDrag = null;
 
     // -----------------------------------------------------------------------
     //  6. Plot history + timing
@@ -414,23 +431,6 @@
     const rdFlux = [];
     for (let k = 0; k < expanded.nCircuits; k++) {
       rdFlux.push(buildReadoutRow("λ_" + k + " (Wb)"));
-    }
-
-    // -----------------------------------------------------------------------
-    //  8. requestRebuild — re-expands config and rebuilds runtime
-    // -----------------------------------------------------------------------
-    function requestRebuild() {
-      expanded = expand(config);
-      runtime  = LIB.MotorRun.create(expanded);
-    }
-
-    function buildCtx() {
-      return {
-        runtime: runtime,
-        config:  config,
-        view:    { yaw: orbitYaw, pitch: orbitPitch, dist: ORBIT_DIST },
-        requestRebuild: requestRebuild,
-      };
     }
 
     // -----------------------------------------------------------------------
