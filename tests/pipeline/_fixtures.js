@@ -26,6 +26,7 @@ require("../../lib/motor-circuit.js");
 // Phase-5 lib modules
 require("../../lib/motor-slice.js");
 require("../../lib/motor-stack.js");
+require("../../lib/motor-run.js");
 
 // Phase-5 app module (attaches window.UnifiedMotor.ConfigSchema)
 require("../../lessons/unified_motor/config-schema.js");

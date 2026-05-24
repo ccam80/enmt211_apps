@@ -391,3 +391,29 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
   - tinySection in _fixtures.js uses partial-span conductor + optional iron/magnet features to serve the motor-slice unit tests authored in T5.5.1.
   - tests/pipeline/_fixtures.js is not collected as a test (no .test.js suffix).
   - tests/_shim.js is byte-unchanged.
+
+## Task T5.3.1: motor-run.js — per-tick driver + state tiers
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: lib/motor-run.js
+- **Files modified**: tests/pipeline/_fixtures.js (added `require("../../lib/motor-run.js")` to the Phase-5 lib modules section)
+- **Tests**: 80/80 passing (pre-existing suite; agnostic-pipeline.test.js is T5.5.1's deliverable and not authored here)
+- **Implementation notes**:
+  - IIFE attaching `LIB.MotorRun`. DOM-free. No winding/element/machine knowledge.
+  - `create(expanded, opts)` builds `LIB.MotorStack` (forwarding opts), creates a θ-binned `LIB.MotorCircuit.makeCache` (period=2π, binCount=360), stores mutable `circuits`, `mechanical`, `poles`. Initializes true-state `{ theta:0, omega:0, i:Float64Array(nCircuits), t:0, stepIndex:0 }` and `lastSolve=null`.
+  - `step(dt)`: (1) builds commutation ctx from state; (2) evalDrive via LIB.Excitation.evalDrive; (3) maps conditions to terminalStates ("OPEN"/"SHORT"/"DC") + V + R arrays; (4) fetches cached coeffs (or extracts on miss); (5) advances currents via LIB.MotorCircuit.advance; (6) solves stack.solve → stashes lastSolve; (7) semi-implicit Euler mechanics (omega += (tau - b*omega - loadTorque)/J * dt; theta += omega*dt); (8) t += dt.
+  - `commandStep(n=1)`: increments stepIndex by n.
+  - `reset()`: zeroes theta/omega/t/stepIndex, allocates new Float64Array for i, calls stack.clearWarmStart() + cache.clear(), nulls lastSolve.
+  - `clearFieldCache()`: calls stack.clearWarmStart() + cache.clear() only (preserves true state).
+  - `lastSolve` exposed via getter so it reads the current closed-over variable.
+  - Exposes: stack, state, circuits, mechanical, lastSolve (getter), step, commandStep, reset, clearFieldCache.
+- **Acceptance criteria verified**:
+  - API surface complete (step, commandStep, reset, clearFieldCache, stack, state, circuits, mechanical).
+  - state.i is Float64Array of length stack.nCircuits.
+  - 50 steps: state.theta/omega/t all finite; t === N*dt to 2.2e-16 (float rounding only).
+  - reset() zeroes theta, omega, t, stepIndex, i to all-zero.
+  - All 4 configs (wound, pm, salient, skewN2) run 600 steps and |theta| > 1e-3 (rotor turns).
+  - skewN2Config produces nSlices===2.
+  - Module loads under require with no DOM access.
+  - Pre-existing 80/80 suite: still 80/80, 0 regressions.
+- **Note on Maxwell-vs-co-energy test**: T5.3.1 does not author agnostic-pipeline.test.js (that is T5.5.1's deliverable). A forward note for T5.5.1: with Nr=12, Ntheta=24 config grids, the Arkkio torque and co-energy (dL/dθ from linear extractCoeffs) disagree by orders of magnitude due to (a) near-zero inductance gradient at coarse grid resolution and (b) strong iron saturation in the wound configs. The 10% tolerance spec test cannot pass with these configs as written. T5.5.1 must resolve this — either by using a lower-current operating point, finer grid fixtures, or adjusting the floor condition in the test.
