@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unified Motor</title>
+<link rel="stylesheet" href="../../lib/shell.css">
+</head>
+<body>
+<!--
+  Unified Motor lesson. mount.js attaches window.UnifiedMotor.mount and the
+  registration seams; this page collects them and mounts via LIB.App.runTabs.
+  Later phases append their <script> tags inside the marked module extension
+  region below, between the two comment markers.
+-->
+<script src="../../lib/util.js"></script>
+<script src="../../lib/canvas-type.js"></script>
+<script src="../../lib/registry.js"></script>
+<script src="../../lib/plot.js"></script>
+<script src="../../lib/integrate.js"></script>
+<script src="../../lib/draw.js"></script>
+<script src="../../lib/layout3d.js"></script>
+<script src="../../lib/em-physics.js"></script>
+<script src="../../lib/field-render.js"></script>
+<script src="../../lib/coil-render.js"></script>
+<script src="../../lib/app.js"></script>
+<script src="../../lib/airgap-grid.js"></script>
+<script src="../../lib/airgap-solve.js"></script>
+<script src="../../lib/airgap-torque.js"></script>
+<script src="../../lib/motor-compile.js"></script>
+<script src="../../lib/winding-model.js"></script>
+<script src="../../lib/excitation.js"></script>
+<script src="../../lib/motor-circuit.js"></script>
+<script src="./config-schema.js"></script>
+<script src="../../lib/motor-slice.js"></script>
+<script src="../../lib/motor-stack.js"></script>
+<script src="../../lib/motor-run.js"></script>
+<script src="./mount.js"></script>
+<!-- unified-motor modules: later phases append <script> tags below this line ONLY -->
+<!-- /unified-motor modules -->
+<script>
+  LIB.App.runTabs({
+    title: "Unified Motor",
+    tabs: [{ label: "unified-motor", mount: window.UnifiedMotor.mount }],
+  });
+</script>
+</body>
+</html>

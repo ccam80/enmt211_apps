@@ -417,3 +417,21 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
   - Module loads under require with no DOM access.
   - Pre-existing 80/80 suite: still 80/80, 0 regressions.
 - **Note on Maxwell-vs-co-energy test**: T5.3.1 does not author agnostic-pipeline.test.js (that is T5.5.1's deliverable). A forward note for T5.5.1: with Nr=12, Ntheta=24 config grids, the Arkkio torque and co-energy (dL/dθ from linear extractCoeffs) disagree by orders of magnitude due to (a) near-zero inductance gradient at coarse grid resolution and (b) strong iron saturation in the wound configs. The 10% tolerance spec test cannot pass with these configs as written. T5.5.1 must resolve this — either by using a lower-current operating point, finer grid fixtures, or adjusting the floor condition in the test.
+
+## Task T5.4.1: mount.js + index.html — bespoke interior, loop, registration seams
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**:
+  - `lessons/unified_motor/mount.js`
+  - `lessons/unified_motor/index.html`
+- **Files modified**: none
+- **Tests**: 80/80 passing (pre-existing suite; no regression; no new headless tests for this task per spec)
+- **Notes**:
+  - `window.UnifiedMotor` exposes `mount`, `registerPanel`, `registerTool`, `registerHeaderControl`, `registerRender3D`, `PANELS`, `TOOLS`, `HEADER_CONTROLS` arrays, and `RENDER3D` slot (initially null).
+  - Built-in default config uses the same geometry as `woundConfig()` fixture — a current-fed wound machine with salient rotor known to produce non-zero reluctance torque so the rotor visibly turns.
+  - `RENDER3D.paint(ctx, L3, { runtime, config, expanded, W, H })` is delegated when registered; built-in path draws gap-field heatmap via `LIB.FieldRender.drawGapField` for each slice plus a rotor-angle indicator line.
+  - 3-zone bespoke interior: 3D viewport canvas + two cross-section view canvases + right shelf sliders + bottom plots + readout column.
+  - Script load order in index.html matches spec exactly (util → canvas-type → registry → plot → integrate → draw → layout3d → em-physics → field-render → coil-render → app → engine libs → config-schema → motor-slice/stack/run → mount).
+  - Module extension region present with the exact comment markers per spec.
+  - No machine-name string literals in mount.js — 0 matches for all 8 tokens (bldc, pmsm, srm, squirrel, stepper, brushed, universal-motor, wound-field).
+  - Browser verification checklist (CLAUDE.md "Verifying a new lesson" steps) is user-required and not performed here.
