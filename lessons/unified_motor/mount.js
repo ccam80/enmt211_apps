@@ -179,11 +179,16 @@
     //  3. Build bespoke DOM interior
     // -----------------------------------------------------------------------
 
-    // Root wrapper
+    // Root wrapper — fills the runTabs tab-host via the flex algorithm.
+    // tab-host is display:flex; flex-direction:column; flex:1 (set by app.js).
+    // Using flex:1 1 0; min-height:0 here lets um-mount grow to fill that host
+    // without relying on percentage-height resolution (which requires a definite
+    // parent height that the tab-host flex item does not provide).
     const root = el("div", "um-mount", {
       display: "flex",
       flexDirection: "column",
-      height: "100%",
+      flex: "1 1 0",
+      minHeight: "0",
       overflow: "hidden",
       background: "var(--bg)",
       color: "var(--ink)",

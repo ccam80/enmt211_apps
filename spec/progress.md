@@ -446,3 +446,20 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
 - **Headless verification**: A minimal DOM shim (node -e inline script) called `window.UnifiedMotor.mount(host)` and confirmed it returned an unmount function without throwing. All four checks passed: mount returns function, all required UnifiedMotor keys present, RENDER3D starts null, no machine-name string literals in source.
 - **Full test suite**: npm test → 80/80 pass, 0 fail, exit code 0.
 - **Note**: Browser verification (rotor visibly turns, field paints, Reset/Pause behave) remains user-required per the spec; the coordinator must surface the CLAUDE.md checklist to the user.
+
+## Task T5.4.1: mount.js CSS layout-collapse fix (round 2)
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none
+- **Files modified**: `lessons/unified_motor/mount.js`
+- **Tests**: 80/80 passing (no regressions)
+- **Fix applied**: Replaced `height: "100%"` with `flex: "1 1 0"` and `minHeight: "0"` on the `um-mount` root div. Root cause: `height:100%` on a flex child requires a definite CSS height on the parent to resolve; `tabHost` in `app.js` `runTabs` is a flex item with `flex:1` but no explicit `height`, so percentage height cannot resolve. The fix uses the flex algorithm itself (same mechanism the canonical `_mountSpec` shell uses: `.lesson { flex:1 }`) so `um-mount` grows to fill the `tab-host` space and `um-upper`'s existing `flex:1 1 0; minHeight:0` can then expand to fill the remaining space after the header and bottom region.
+- **Headless sim check (600 steps, dt=1/240, amp=5)**:
+  - `state.theta` after 600 steps: `-25196.80` (finite, |theta| >> 1e-3 — rotor turns)
+  - `state.omega` after 600 steps: `-22113.10` (finite)
+  - All `state.i[k]` finite: true
+  - `lastSolve.torque`: `-1.1265e+0` (finite)
+  - Default config parameters are the same geometry as `woundConfig()` in `_fixtures.js` — confirmed working.
+- **Machine-name check**: NONE of the 8 MACHINE_NAMES tokens found in `mount.js` source.
+- **window.UnifiedMotor surface**: all 9 members present (`mount`, `registerPanel`, `registerTool`, `registerHeaderControl`, `registerRender3D`, `PANELS`, `TOOLS`, `HEADER_CONTROLS`, `RENDER3D`); `RENDER3D` initially `null`.
+- **Note**: Live browser visual verification (rotor visibly turns, canvases non-zero height) remains the user-required gate per spec.

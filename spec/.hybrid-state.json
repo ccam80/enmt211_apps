@@ -403,6 +403,12 @@
           "timestamp": "2026-05-24T02:26:15.906Z",
           "task_group": "5.4.a",
           "reason": "T5.4.1 mount() throws TDZ ReferenceError 'Cannot access orbitYaw before initialization' at mount.js:431 (buildCtx) invoked from mount.js:342 — lesson fully broken in-browser (blank zones, confirmed via Chrome over http://). Completion was not functional; reopening for a surgical fix."
+        },
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-24T02:33:14.930Z",
+          "task_group": "5.4.a",
+          "reason": "TDZ fixed but lesson still non-functional: CSS height collapse — mount root (um-mount) does not fill tab-host (207px of 576px), upper 3-zone region (um-upper) collapses to 12px, viewport canvas is 870x0, so all 3-zone canvases render blank. Reopening for layout fix + headless finite-state sim check."
         }
       ]
     },
@@ -689,5 +695,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-24T02:28:52.235Z"
+  "last_updated": "2026-05-24T02:36:04.051Z"
 }
