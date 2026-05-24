@@ -376,3 +376,18 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
   - No machine-name string literals (bldc, pmsm, srm, squirrel, stepper, brushed, universal-motor, wound-field) in source — confirmed by source text scan.
   - Inline verification: all 5 element letters produce correct feature kinds; zero-not-skip confirmed for magnet-free configs; N=1/N=2 stack expansion correct; flux-source sign flips exact (Mr exact negatives); validate rejects mismatched circuit count; compile() succeeds on all expanded sections; circuits echoed verbatim; mechanical defaults (damping=0, loadTorque=0) applied.
   - Pre-existing 70/70 test suite: still 70/70, 0 regressions.
+
+## Task T5.2.1: motor-stack.js — N≥1 spatial aggregator
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**:
+  - `lib/motor-stack.js` — IIFE attaching `LIB.MotorStack`. Builds one `LIB.MotorSlice` per expanded slice (unconditional loop, no N=1 fast path). Implements `solve`, `extractCoeffs`, `coenergyTorque`, `sliceGrid`, `clearWarmStart`. Asserts per-slice `nCircuits === nCircuits` at create-time with a descriptive error. Reads no element letter or machine identity.
+  - `tests/pipeline/_fixtures.js` — headless loader and fixture factory. Requires `tests/_shim.js` (read-only), then directly requires all Phase-2/3/4/5 lib modules and `config-schema.js`. Exports: `LIB`, `UnifiedMotor`, `MACHINE_NAMES`, `assertClose` (re-exported from engine/_fixtures.js), `woundConfig`, `pmConfig`, `salientConfig`, `skewN2Config`, `tinySection`.
+  - `tests/pipeline/motor-stack.test.js` — 10 tests covering all spec acceptance criteria: N=1 equals single slice, N=2 zero-offset doubles torque and flux (to 1e-9), offset changes torque, perSliceField length equals nSlices, coenergyTorque four finite parts, extractCoeffs array lengths/finiteness, DOM-free API surface, nCircuits mismatch throws, clearWarmStart, sliceGrid fields.
+- **Files modified**: none
+- **Tests**: 80/80 passing (70 pre-existing + 10 new motor-stack tests)
+- **Notes**:
+  - "offset changes torque" test uses woundConfig (salient 2-tooth rotor) instead of tinySection (full-ring iron is rotationally symmetric and produces identical torque regardless of offset).
+  - tinySection in _fixtures.js uses partial-span conductor + optional iron/magnet features to serve the motor-slice unit tests authored in T5.5.1.
+  - tests/pipeline/_fixtures.js is not collected as a test (no .test.js suffix).
+  - tests/_shim.js is byte-unchanged.
