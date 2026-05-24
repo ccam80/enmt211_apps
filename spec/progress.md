@@ -618,3 +618,16 @@ Test: `"lib/ and mount.js are free of machine names"` in `agnostic-pipeline.test
   - PM: arkkio=-0.1614, coe=-0.1614, relErr=0.03% (PASS, well under 10%)
   - wound/salient/skewN2: arkkio≈-0.115/-0.115/-0.232, coe≈-0.110/-0.110/-0.222, relErr≈4.4% (PASS, under 10%)
 - **Pipeline test breakdown**: agnostic-pipeline 4/4, config-schema 7/7, motor-slice 4/4, motor-stack 10/10
+
+## Task T5.5.1 — VERIFIED (2026-05-24)
+- **Verifier verdict**: PASS on 5.5.a (wave-verifier, batch-15 chunk 1/1).
+- All deliverable files present and matching the spec contract (4 pipeline test files + fixtures; config-schema gap-band auto-derivation with manual-override validation).
+- Maxwell-vs-co-energy milestone implemented as the user-resolved Option A (ceiling-disabled linear comparison via a `ceiling:{enabled:false}` MotorStack).
+- Machine-name agnosticism scan respects the manifest Check-1 carve-outs.
+- `npm test` 95/95 passing, 0 regressions (70/70 pre-existing suite still green).
+
+---
+## Phase 5 Complete (agnostic-pipeline)
+- **Batches**: 5 (batch-11 [5.1.a/b/c], batch-12 [5.2.a], batch-13 [5.3.a], batch-14 [5.4.a], batch-15 [5.5.a])
+- **All verified**: yes
+- **Note**: T5.4.1 went through a user-required browser-checklist gate (acked) plus several in-place render fix rounds; T5.5.1 went through two user-resolved spec clarifications (three engine bugs fixed in commit d555fd4; gap-band auto-derivation + Option-A linear milestone). Full suite 95/95.
