@@ -329,3 +329,50 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
   - assertClose in _fixtures.js uses absolute tolerance (|actual − expected| ≤ tol) per spec — no relative scaling.
   - The sequencer test asserts pattern (+,−),(+,+),(−,+),(−,−) for stepIndex 0–3 (offsets 0, −π/2). This is the closed-form result from sectorGate; it is the same 4-step bipolar cycle as the spec's stated (+,+),(−,+),(−,−),(+,−), shifted by one step. The key invariant (all 4 quadrants covered, STEP never opens) is fully asserted.
   - _fixtures.js is not collected as a test (no .test.js suffix); both test files require it successfully.
+
+---
+## Phase 3 Complete (merged "core-rest" — origin phases 3 + 4)
+- **Batches**: 2 (batch-9 [3.1.a, 4.1.a], batch-10 [3.2.a, 4.2.a])
+- **All verified**: yes
+- **Notes**: batch-9 3.1.a had one fix round (dead-code "fallback" return removed from lib/excitation.js via coordinator in-place fix + re-verify). Sequencer sign-pattern concern on 3.2.a was investigated by the verifier and cleared (code follows the spec's formal sectorGate/phaseOffset definitions; the spec's illustrative table assumed a different phaseOffset). Full suite 70/70.
+
+## Task T5.1.3: field-render.js — gap-field annulus visualization
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none
+- **Files modified**: lib/field-render.js (added `drawGapField` function and added it to the `LIB.FieldRender` export object)
+- **Tests**: 0/0 (no headless tests specified for this task — canvas renderer; verified manually per spec. Existing 70/70 suite still passes.)
+- **Notes**: `drawGapField(ctx, L3, fieldData, geom, opts)` added as specified. The five pre-existing exports (drawLoopFieldLines, drawMomentArrow, drawBarMagnet, drawVectorArrow, drawTorqueArrow) are byte-unchanged. The function body references no LIB.EM symbol. The module-level LIB.EM guard is byte-unchanged.
+
+## Task T5.1.2: motor-slice.js — single-section solver
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: lib/motor-slice.js
+- **Files modified**: none
+- **Tests**: 70/70 passing (full pre-existing suite; T5.1.2 tests are authored in T5.5.1 which is a separate wave — `tests/pipeline/_fixtures.js` was locked by T5.1.1 during this run)
+- **Implementation notes**:
+  - IIFE attaching `LIB.MotorSlice`. DOM-free. No winding/element/machine knowledge.
+  - `coarseBackend` (default): `prepare` calls `AirgapGrid.create`, `MotorCompile.compile`, registers materials/rotorRegion/gapBand; `solveSaturated` delegates to `AirgapSolve.solveSaturated`; `linearSolve` delegates to `AirgapSolve.pcg`.
+  - `create(section, opts)` stores `op`, `compiled`, `backend`, warm-start `_Az = null`, `ceiling`, `tol`.
+  - `solve(thetaR, currents)`: `op.setRotorAngle` → `assembleJz` → `assembleRHS` → `backend.solveSaturated` (with warm-start x0 and ironMask in ceiling) → `op.field` → `op.fluxLinkage` → `AirgapTorque.arkkio`; updates `_Az`.
+  - `extractCoeffs(thetaR, opts2)`: delegates to `LIB.MotorCircuit.extract` with `jzBasis=coilMasks`, `coilMasks`, `magnetization`.
+  - `clearWarmStart()`: sets `_Az = null`.
+  - Exposes `nCircuits`, `grid`, `solve`, `extractCoeffs`, `clearWarmStart`.
+  - Inline validation confirmed: API surface, finite torque, fluxLinkages Float64Array of length nCircuits, field arrays of length Nr*Ntheta, satScale finite, Br changes with rotor angle, lambdaPm=0 for magnet-free section, spy backend routes prepare/solveSaturated/linearSolve correctly with identical results.
+
+## Task T5.1.1: config-schema.js — agnostic descriptor + expand() (vocabulary-complete)
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: `lessons/unified_motor/config-schema.js`
+- **Files modified**: none
+- **Tests**: 26/26 passing (inline verification script; config-schema.test.js is authored by T5.5.1 in wave 5.5 — correctly not created here to avoid regressing the 70/70 suite)
+- **Implementation notes**:
+  - IIFE attaching `window.UnifiedMotor.ConfigSchema` with `validate` and `expand`. DOM-free. No DOM access at module load.
+  - `expand(config)` dispatches only on `ring.element` (W, C, M, I, K) — no machine name or machine-type field anywhere in the source.
+  - Element builders: I → salient tooth iron features (teeth/spanFraction/theta0); M → alternating-polarity magnet features + optional backIron iron; W/K → conductor features via LIB.WindingModel.conductorFeatures (with angularWidth slot geometry) + full-ring back-iron; C → same as W plus per-slot tooth iron features.
+  - Global circuit indexing: wound rings (W, C, K) accumulate circuitBase in ring-declaration order; each conductor feature gets circuit+base applied. nCircuits is the running total.
+  - Slice-stack: N=1 runs the same code path as N>1 (no single-slice bypass). fluxSources multiplies magnet feature Mr/Mtheta per slice by sliceSigns[k]; rings not referenced are copied unchanged.
+  - `validate(config)` checks all spec-mandated invariants: grid dimensions, gapBand indices, poles parity, J>0, ring members/elements/rRanges, wound routing via LIB.WindingModel.validate, terminal types, commutation modes, R>=0, stack dimensions, fluxSources ringRef pointing at M elements, and resolved circuit count matching circuits.length.
+  - No machine-name string literals (bldc, pmsm, srm, squirrel, stepper, brushed, universal-motor, wound-field) in source — confirmed by source text scan.
+  - Inline verification: all 5 element letters produce correct feature kinds; zero-not-skip confirmed for magnet-free configs; N=1/N=2 stack expansion correct; flux-source sign flips exact (Mr exact negatives); validate rejects mismatched circuit count; compile() succeeds on all expanded sections; circuits echoed verbatim; mechanical defaults (damping=0, loadTorque=0) applied.
+  - Pre-existing 70/70 test suite: still 70/70, 0 regressions.
