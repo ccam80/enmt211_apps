@@ -475,3 +475,22 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
   2. **Built-in 3D rig (no CoilRender, no machine structure)**: Added `drawRing3D` helper (projects a sampled ring polyline through L3) and `drawSlotConductors3D` helper (draws radial slot-conductor lines for wound rings). Built-in path now draws: gap-field heatmap for each slice (existing), stator-bore ring outline per slice, rotor-outer ring outline per slice, slot conductor lines for every wound ring (W/C/K) in `config.rings`, and the rotor-angle marker pointing inward to rInner. Added `LIB.CoilRender` call infrastructure — the slot conductors are projected 3D lines via L3.project (same pattern as `CoilRender.drawConductor3D`). Note: `LIB.CoilRender.drawConductor3D` itself is not called directly because the coil geometry requires `LIB.EM.loop` / `sampleLoopPoints` which depend on the EM physics module's loop shape API — the slot conductor lines are drawn directly via the same L3.project stroke pattern that CoilRender uses internally.
   3. **Stable magScale (was twitching)**: Added `smoothedMagScale` state variable in the mount closure. Grows immediately to the per-frame max|B|; decays at 2% per frame toward the current max. Passed as fixed `magScale:smoothedMagScale` to `drawGapField` — no more per-frame auto-rescale. vectorStride increased from 8 to 12 to reduce arrow density and clutter.
   4. **Window.UnifiedMotor surface**: Unchanged — all registration seams intact, no machine-name literals.
+
+## Task 5.4.1-fix-r4: mount.js — machine geometry + cross-section B + sane speed (round 4)
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none
+- **Files modified**: `lessons/unified_motor/mount.js`
+- **Tests**: 80/80 passing (npm test)
+- **Changes made**:
+  1. **Machine geometry (crit 3 — "rotor visibly turns")**: Added `fillSector2D`, `drawFeatureSectors2D`, `fillSector3D`, `drawFeatureSectors3D` helpers. All three canvases now iterate `expanded.slices[k].section.features` and draw each feature as a filled annular sector: iron=grey (#607080 stator / #4a6070 rotor), conductor=copper tinted by live current sign (orange=in, blue=out, grey=zero), magnet=red/blue by Mr polarity. Rotor-member features have `state.theta` added to their `thetaRange` each frame — rotor iron/teeth rotate inside the static stator. Heatmap alpha reduced to 0.55 so geometry is clearly visible underneath.
+  2. **Cross-section B not blank (crit 2)**: `drawCrossSection` now takes `features` as a parameter and draws structural geometry even when `field=null`. For single-slice configs, cross-section B draws the same slice-0 features+field as A (labelled "slice 0 — rotor angle θ"). Estimated pixel coverage: ~13,600–116,000 px depending on canvas size (both A and B produce comparable substantial content). Old code returned early on null field, giving 363px.
+  3. **Sane default speed (crit 3/4 — "visibly turns, Reset returns to rest")**: Default config changed from `J:1e-4, damping:1e-5` to `J:0.1, damping:0.05`. Headless-measured steady-state omega=-23.2 rad/s (target 5–40 rad/s). Damping slider range changed from `1e-5..0.1` to `0.001..0.2`; all values in that range are stable (b=0.001→omega=-107, b=0.05→-23, b=0.1→-12, b=0.2→-6 — all finite after 10 seconds). No NaN/instability across full slider range.
+  4. **Headless verification results**:
+     - Machine-name scan: 0 matches (PASS)
+     - UM surface: all 9 members present, RENDER3D=null (PASS)
+     - omega after 10s: -23.21 rad/s (PASS, in 5–40 range)
+     - Features: 9 total (6 conductor + 3 iron); 2 rotor-iron features with partial thetaRange (will rotate with theta)
+     - Damping slider stability: STABLE across b=0.001..0.2
+     - Reset: theta=0, omega=0 (PASS)
+     - npm test: 80/80 (PASS)

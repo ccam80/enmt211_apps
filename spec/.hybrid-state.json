@@ -415,6 +415,12 @@
           "timestamp": "2026-05-24T06:55:10.258Z",
           "task_group": "5.4.a",
           "reason": "Browser checklist (user): runs but visuals incomplete vs spec. Built-in 3D rig OMITS the spec-required LIB.CoilRender winding polylines (no stator/rotor/coils visible, 'nothing 3D'); the two cross-section viewports render blank; bare gap-field heatmap is uninterpretable. Reopening to bring built-in rig to T5.4.1 spec + fix cross-sections."
+        },
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-24T08:13:17.726Z",
+          "task_group": "5.4.a",
+          "reason": "Confirmed via render-driving measurement: FAIL crit2 (cross-section B blank, 363 non-bg px vs 12105 in A), FAIL crit3 (no recognizable rotor/stator geometry drawn — only gap-field heatmap + thin ring strokes), FAIL crit4 (runaway speed aliases rotor). Reopening to render machine geometry (rotor/stator iron + conductors) in both cross-sections + 3D, populate cross-section B, sane default speed."
         }
       ]
     },
@@ -701,5 +707,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-24T06:59:54.600Z"
+  "last_updated": "2026-05-24T08:25:23.479Z"
 }
