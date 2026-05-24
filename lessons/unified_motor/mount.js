@@ -68,7 +68,6 @@
     return {
       label: "Default wound machine",
       grid: { Nr: 12, Ntheta: 24, rInner: 0.04, rOuter: 0.06, ell: 0.1 },
-      gapBand: { iInner: 4, iOuter: 8 },
       poles: 2,
       rings: [
         {

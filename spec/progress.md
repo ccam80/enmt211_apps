@@ -548,3 +548,73 @@ The "cannot be satisfied" claim was **wrong** (same pattern as the Phase-1 Arkki
 - **Spec updated**: `spec/phase-5-agnostic-pipeline.md` Task 5.5.1 — the Maxwell-vs-co-energy assertion now mandates a ceiling-disabled linear comparison (build a `ceiling:{enabled:false}` `MotorStack` for the check) + matching acceptance criterion. The inert `tol/maxIter` forwarding edits a prior round left in `motor-circuit.js`/`motor-slice.js` were reverted (confirmed zero effect).
 
 - **Respawn**: a fresh T5.5.1 implementer authors the pipeline test suite per the clarified spec. The `stops_for_clarification` retry slot on batch-15 is open.
+
+## Task T5.5.1: pipeline test suite + fixtures (the milestone) — CLARIFICATION NEEDED (round 2)
+- **Agent**: implementer
+- **Blocker**: Two spec assertions remain genuinely unsatisfiable after implementing all deliverables and verifying the three bug fixes are present in code. Stopping per spec: "if anything genuinely fails the ceiling-disabled comparison, STOP and report."
+
+### What was accomplished
+Three test files were created and 15 of 17 tests pass:
+- `tests/pipeline/config-schema.test.js` — 7/7 tests pass (all spec assertions)
+- `tests/pipeline/motor-slice.test.js` — 4/4 tests pass (all spec assertions)
+- `tests/pipeline/agnostic-pipeline.test.js` — 2/4 tests pass ("rotor turns" and "N=2 drives two slices" pass; "Maxwell agrees" and "lib/ free of machine names" fail)
+- Pre-existing `tests/pipeline/motor-stack.test.js` — 10/10 still pass
+
+### Blocker 1: Maxwell-vs-co-energy 10% test
+
+Test: `"Maxwell agrees with co-energy within 10% (linear operating point)"` in `agnostic-pipeline.test.js`
+
+Measured with `ceiling: { enabled: false }` on both Arkkio and co-energy (MotorStack with linearOpts), at theta=0.2, currents=[5]:
+- `pmConfig`: arkkio=-0.1614, coe=-0.1614, relErr=0.03% — PASSES
+- `woundConfig`: arkkio=-19.51, coe=-0.110, relErr=99.4% — FAILS (175x discrepancy)
+- `salientConfig`: arkkio=-19.51, coe=-0.110, relErr=99.4% — FAILS (identical)
+- `skewN2Config`: same topology as woundConfig, same 99% error
+
+The discrepancy is NOT saturation (ceiling is off). Tested at 5 current levels (0.001–5 A): ratio is constant 177x at every level, confirming it scales as i² on both sides. Tested at Nr=40/Ntheta=128: relErr changes to 66.6% — still far above 10%. Used AirgapTorque.coenergy directly (same as engine tests): same 99% error.
+
+Root cause: the `I` (salient iron) ring uses full-ring back-iron (the rotorMask expansion from Bug Fix A covers the entire radial band). The inductance gradient dL/dtheta is extremely small (~0.009 H/rad) because the coarse blocky teeth barely modulate inductance. But the Arkkio integral is large because the concentrated Q=6 stator winding creates strong radial B. These two quantities diverge at this geometry, at any tested grid resolution.
+
+Note: the engine fixture (Nr=40, Ntheta=256, real-iron rotor with distinct air gap) uses a sweep-peak-normalized L-inf metric (not per-point), which is very different. The per-point error of the engine fixture at theta=0.2 is also ~35%; the reported 0.3% is the sweep-normalized figure.
+
+### Blocker 2: lib/ machine-name string check
+
+Test: `"lib/ and mount.js are free of machine names"` in `agnostic-pipeline.test.js`
+
+`lib/app.js` line 363 contains: `// stepper-driven lessons that need pi-aware angle entry.`
+"stepper" is in MACHINE_NAMES. This is a UI comment ("stepper" meaning a step-input widget/UI pattern), not a motor machine identity. But the spec says "every *.js file in lib/" with zero matches, and "Files to modify: none" for T5.5.1. Modifying lib/app.js comment is not in scope.
+
+### Decision needed from user
+
+**For Blocker 1 (Maxwell-vs-co-energy):**
+1. Change the fixture geometry: replace I+W configs with real-iron-gap machines known to pass (similar to the engine fixture)
+2. Filter to only PM-type configs for this assertion; use wound/salient/skewN2 only in the "rotor turns" test
+3. Use sweep-normalized L-inf metric (like the engine tests) instead of per-point ratio — this would very likely pass for all configs
+4. Remove the Maxwell-vs-co-energy assertion for reluctance-only configs; validate only PM
+
+**For Blocker 2 (lib/app.js "stepper" comment):**
+1. Rename "stepper" in lib/app.js comment to "step-entry" or "angle-stepper" (single-word change)
+2. Exclude pre-existing UI shell files (app.js, pid.js, etc.) from the machine-name scan — only scan motor-pipeline modules
+3. Remove "stepper" from MACHINE_NAMES (but this weakens the agnosticism guarantee for stepper motors)
+
+- **Files created**: tests/pipeline/config-schema.test.js, tests/pipeline/motor-slice.test.js, tests/pipeline/agnostic-pipeline.test.js
+- **Files modified**: none
+- **Tests**: 15/17 passing (93/95 total suite, 2 new failures)
+- **If partial — remaining work**: Fix the two failing assertions per user's resolution above. All other deliverables (config-schema tests, motor-slice tests, fixtures, rotor-turns, N=2 test) are complete and passing.
+
+## Task T5.5.1: pipeline test suite + fixtures (the milestone) — COMPLETE (retry)
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: (all three test files already existed from prior attempt)
+- **Files modified**:
+  - `lessons/unified_motor/config-schema.js` — added `deriveGapBand(grid, rings)` internal function + `isPureAirRow` helper; rewired `validate()` to gate existing integer-range gapBand checks on `gapBandMode==="manual"` (in auto, config.gapBand is optional; validate re-derives and errors if null); rewired `expand()` to auto-derive in default/auto mode (ignoring any config.gapBand) and write the derived band onto `expanded.gapBand` and every slice section; manual mode echoes config.gapBand verbatim.
+  - `tests/pipeline/_fixtures.js` — removed now-inert hardcoded `gapBand:{iInner:4,iOuter:8}` from `woundConfig()`, `pmConfig()`, `salientConfig()` (skewN2Config clones woundConfig so inherits). Configs now auto-derive.
+  - `lessons/unified_motor/mount.js` — removed hardcoded `gapBand:{iInner:4,iOuter:8}` from `makeDefaultConfig()` so the live app self-derives.
+  - `tests/pipeline/agnostic-pipeline.test.js` — fixed machine-name scan to exclude per-spec carve-out sites (app.js, registry.js, header-buttons.js, stepper-drive.js, three-phase.js); renamed test "lib/ and mount.js are free of machine names" → "unified-motor lib + mount.js are free of machine names" per the spec.
+- **Tests**: 95/95 passing (`npm test` exits 0)
+- **Auto-derived gap bands**:
+  - `woundConfig` / `salientConfig`: `{iInner:5, iOuter:7}` (2 pure-air rows between I rotor r=[0.04,0.048] and W/C stator r=[0.052,0.06])
+  - `pmConfig`: `{iInner:4, iOuter:8}` (4 pure-air rows between M rotor r=[0.04,0.047] and W stator r=[0.053,0.06])
+- **Maxwell-vs-co-energy results** (ceiling disabled, theta=0.2, i=5A):
+  - PM: arkkio=-0.1614, coe=-0.1614, relErr=0.03% (PASS, well under 10%)
+  - wound/salient/skewN2: arkkio≈-0.115/-0.115/-0.232, coe≈-0.110/-0.110/-0.222, relErr≈4.4% (PASS, under 10%)
+- **Pipeline test breakdown**: agnostic-pipeline 4/4, config-schema 7/7, motor-slice 4/4, motor-stack 10/10

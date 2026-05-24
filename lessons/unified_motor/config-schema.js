@@ -30,6 +30,167 @@
   }
 
   // ---------------------------------------------------------------------------
+  //  deriveGapBand(grid, rings) → { iInner, iOuter } | null
+  //
+  //  Automatically finds the longest contiguous pure-air radial run between the
+  //  outermost rotor-member row and the innermost stator-member row.
+  //  Returns null if no valid band of width >= 2 exists.
+  //
+  //  Dispatch is ONLY on ring.member / ring.element / ring.rRange (and sub-ranges).
+  //  No machine identity is used.
+  // ---------------------------------------------------------------------------
+  function deriveGapBand(grid, rings) {
+    const { Nr, rInner, rOuter } = grid;
+    const dr = (rOuter - rInner) / Nr;
+
+    // Compute cell-centre radii
+    const rCentre = new Float64Array(Nr);
+    for (let i = 0; i < Nr; i++) {
+      rCentre[i] = rInner + (i + 0.5) * dr;
+    }
+
+    // Mark each row as occupied ("rotor" | "stator" | null)
+    // A row is occupied if its cell centre lies in any ring footprint.
+    // Uses the SAME cell-centre test as coveredCells: r0 <= r[i] < r1.
+    const rowMember = new Array(Nr).fill(null);
+
+    for (const ring of rings) {
+      const member = ring.member;
+      const el = ring.element;
+
+      // Collect rRange segments that this ring occupies
+      const segments = [];
+
+      if (el === "I") {
+        segments.push(ring.rRange);
+      } else if (el === "M") {
+        segments.push(ring.rRange);
+        if (ring.backIron && ring.backIronRRange) {
+          segments.push(ring.backIronRRange);
+        }
+      } else if (el === "W" || el === "K") {
+        // Slot region
+        segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
+        // Back-iron region
+        segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
+      } else if (el === "C") {
+        // Slot region
+        segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
+        // Back-iron region
+        segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
+        // Teeth (same rRange as ring)
+        segments.push(ring.rRange);
+      }
+
+      for (const seg of segments) {
+        if (!Array.isArray(seg) || seg.length < 2) continue;
+        const r0 = seg[0];
+        const r1 = seg[1];
+        for (let i = 0; i < Nr; i++) {
+          if (rCentre[i] >= r0 && rCentre[i] < r1) {
+            // Mark as occupied; rotor wins over stator if both claim the same row
+            // (should not happen in a valid config, but be deterministic)
+            if (rowMember[i] === null) {
+              rowMember[i] = member;
+            }
+          }
+        }
+      }
+    }
+
+    // Find outermost rotor row and innermost stator row
+    let outermostRotor = -1;
+    let innermostStator = Nr;
+
+    for (let i = 0; i < Nr; i++) {
+      if (rowMember[i] === "rotor") {
+        outermostRotor = i;
+      }
+    }
+    for (let i = 0; i < Nr; i++) {
+      if (rowMember[i] === "stator") {
+        innermostStator = i;
+        break;
+      }
+    }
+
+    if (outermostRotor < 0 || innermostStator >= Nr) {
+      return null;
+    }
+
+    // Air annulus: unoccupied rows strictly between outermostRotor and innermostStator
+    // i.e. rows i where outermostRotor < i < innermostStator and rowMember[i] === null
+    const airStart = outermostRotor + 1;
+    const airEnd = innermostStator; // exclusive
+
+    if (airEnd <= airStart) {
+      return null;
+    }
+
+    // Find the LONGEST contiguous pure-air run in [airStart, airEnd)
+    // Ties → innermost (lowest iInner)
+    let bestLen = 0;
+    let bestStart = -1;
+    let runStart = -1;
+    let runLen = 0;
+
+    for (let i = airStart; i <= airEnd; i++) {
+      const isAir = (i < airEnd) && (rowMember[i] === null);
+      if (isAir) {
+        if (runStart < 0) runStart = i;
+        runLen++;
+      } else {
+        if (runLen > bestLen) {
+          bestLen = runLen;
+          bestStart = runStart;
+        }
+        runStart = -1;
+        runLen = 0;
+      }
+    }
+
+    if (bestLen < 2) {
+      return null;
+    }
+
+    return { iInner: bestStart, iOuter: bestStart + bestLen };
+  }
+
+  // ---------------------------------------------------------------------------
+  //  isPureAirRow(grid, rings, i) — checks if row i is pure air
+  //  (not occupied by any ring footprint using the same cell-centre test)
+  // ---------------------------------------------------------------------------
+  function isPureAirRow(grid, rings, i) {
+    const dr = (grid.rOuter - grid.rInner) / grid.Nr;
+    const rc = grid.rInner + (i + 0.5) * dr;
+
+    for (const ring of rings) {
+      const el = ring.element;
+      const segments = [];
+
+      if (el === "I") {
+        segments.push(ring.rRange);
+      } else if (el === "M") {
+        segments.push(ring.rRange);
+        if (ring.backIron && ring.backIronRRange) segments.push(ring.backIronRRange);
+      } else if (el === "W" || el === "K") {
+        segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
+        segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
+      } else if (el === "C") {
+        segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
+        segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
+        segments.push(ring.rRange);
+      }
+
+      for (const seg of segments) {
+        if (!Array.isArray(seg) || seg.length < 2) continue;
+        if (rc >= seg[0] && rc < seg[1]) return false;
+      }
+    }
+    return true;
+  }
+
+  // ---------------------------------------------------------------------------
   //  Element→feature builders
   //  Each returns an array of Phase-2 feature objects for the given ring.
   //  circuitBase is added to every conductor feature.circuit.
@@ -174,20 +335,61 @@
       }
     }
 
-    // gapBand
-    const gb = config.gapBand;
-    if (!gb || typeof gb !== "object") {
-      errors.push("gapBand must be a non-null object");
+    const gapBandMode = config.gapBandMode != null ? config.gapBandMode : "auto";
+
+    if (gapBandMode === "manual") {
+      // Manual mode: validate config.gapBand integer range and pure-air content
+      const gb = config.gapBand;
+      const gridValid = g && isFinitePositiveInt(g.Nr);
+      if (!gb || typeof gb !== "object") {
+        errors.push("gapBand must be a non-null object (required in manual mode)");
+      } else {
+        const Nr = gridValid ? g.Nr : null;
+        if (!Number.isInteger(gb.iInner) || gb.iInner < 0 || (Nr !== null && gb.iInner >= Nr)) {
+          errors.push(`gapBand.iInner must be an integer in [0, Nr); got ${gb.iInner}`);
+        }
+        if (!Number.isInteger(gb.iOuter) || gb.iOuter < 0 || (Nr !== null && gb.iOuter >= Nr)) {
+          errors.push(`gapBand.iOuter must be an integer in [0, Nr); got ${gb.iOuter}`);
+        }
+        if (Number.isInteger(gb.iInner) && Number.isInteger(gb.iOuter) && gb.iInner >= gb.iOuter) {
+          errors.push(`gapBand.iInner (${gb.iInner}) must be < gapBand.iOuter (${gb.iOuter})`);
+        }
+        // Width >= 2
+        if (Number.isInteger(gb.iInner) && Number.isInteger(gb.iOuter) &&
+            gb.iOuter - gb.iInner < 2) {
+          errors.push(`gapBand width (${gb.iOuter - gb.iInner}) must be >= 2`);
+        }
+        // Every row in [iInner, iOuter) must be pure air
+        if (gridValid && Array.isArray(config.rings) &&
+            Number.isInteger(gb.iInner) && Number.isInteger(gb.iOuter) &&
+            gb.iInner < gb.iOuter) {
+          for (let i = gb.iInner; i < gb.iOuter; i++) {
+            if (!isPureAirRow(g, config.rings, i)) {
+              errors.push(`gapBand row ${i} is not pure air — manual band must lie entirely in air`);
+            }
+          }
+        }
+      }
     } else {
-      const Nr = g && isFinitePositiveInt(g.Nr) ? g.Nr : null;
-      if (!Number.isInteger(gb.iInner) || gb.iInner < 0 || (Nr !== null && gb.iInner >= Nr)) {
-        errors.push(`gapBand.iInner must be an integer in [0, Nr); got ${gb.iInner}`);
-      }
-      if (!Number.isInteger(gb.iOuter) || gb.iOuter < 0 || (Nr !== null && gb.iOuter >= Nr)) {
-        errors.push(`gapBand.iOuter must be an integer in [0, Nr); got ${gb.iOuter}`);
-      }
-      if (Number.isInteger(gb.iInner) && Number.isInteger(gb.iOuter) && gb.iInner >= gb.iOuter) {
-        errors.push(`gapBand.iInner (${gb.iInner}) must be < gapBand.iOuter (${gb.iOuter})`);
+      // Auto mode: config.gapBand is optional; validate by attempting derivation
+      if (g && isFinitePositiveInt(g.Nr) && Array.isArray(config.rings)) {
+        const derived = deriveGapBand(g, config.rings);
+        if (derived === null) {
+          // Diagnose why
+          let hasRotor = false;
+          let hasStator = false;
+          for (const ring of config.rings) {
+            if (ring.member === "rotor") hasRotor = true;
+            if (ring.member === "stator") hasStator = true;
+          }
+          if (!hasRotor) {
+            errors.push("auto gap-band derivation failed: no rotor-member ring found");
+          } else if (!hasStator) {
+            errors.push("auto gap-band derivation failed: no stator-member ring found");
+          } else {
+            errors.push("auto gap-band derivation failed: no contiguous pure-air run of width >= 2 between outermost rotor and innermost stator rows");
+          }
+        }
       }
     }
 
@@ -357,6 +559,22 @@
     const offsets = stack.sliceOffsets != null ? stack.sliceOffsets : new Array(N).fill(0);
     const fluxSources = Array.isArray(stack.fluxSources) ? stack.fluxSources : [];
 
+    // Resolve gapBand: auto-derive unless gapBandMode === "manual"
+    const gapBandMode = config.gapBandMode != null ? config.gapBandMode : "auto";
+    let gapBand;
+    if (gapBandMode === "manual") {
+      gapBand = config.gapBand;
+    } else {
+      gapBand = deriveGapBand(config.grid, rings);
+      if (gapBand === null) {
+        throw new Error(
+          "config-schema expand: auto gap-band derivation failed — " +
+          "no contiguous pure-air run of width >= 2 between the outermost rotor row " +
+          "and the innermost stator row. Check ring rRange values and member assignments."
+        );
+      }
+    }
+
     // Build the base feature list with global circuit indexing
     const baseFeatures = [];
     let circuitBase = 0;
@@ -386,19 +604,15 @@
 
     const nCircuits = circuitBase;
 
-    // Build per-slice sections
-    // For each slice k, copy the base features but apply fluxSource sign flips to M rings
+    // Build per-slice sections, applying fluxSource sign flips to M rings
     const slices = [];
     for (let k = 0; k < N; k++) {
-      // Build a set of (featureIndex → magnet index) for flux-source-referenced magnet features
-      // We need to know which features in baseFeatures came from M rings referenced by fluxSources.
-      // We rebuild the feature list per slice to apply per-slice sign flips.
       const sliceFeatures = buildSliceFeatures(rings, fluxSources, k);
 
       slices.push({
         section: {
           grid: config.grid,
-          gapBand: config.gapBand,
+          gapBand,
           features: sliceFeatures,
         },
         offset: offsets[k],
@@ -409,7 +623,7 @@
 
     return {
       grid: config.grid,
-      gapBand: config.gapBand,
+      gapBand,
       poles: config.poles,
       mechanical: {
         J: mech.J,
