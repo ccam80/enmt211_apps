@@ -383,20 +383,26 @@
       ],
       "spawned": 1,
       "completed": 1,
-      "verifications_passed": 0,
+      "verifications_passed": 1,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "5.4.a": "pending"
+        "5.4.a": "passed"
       },
       "user_required_tasks": {
         "5.4.a": [
           "T5.4.1"
         ]
       },
-      "user_acks": {},
+      "user_acks": {
+        "T5.4.1": {
+          "task_group": "5.4.a",
+          "timestamp": "2026-05-24T08:58:33.021Z",
+          "evidence": "browser checklist: lesson mounts, rotor turns at sane speed, both cross-sections populated, Reset/Pause work; semantic cross-section (T7.1.1) + 3D polish (Phase 9) deferred per plan"
+        }
+      },
       "recovery_log": [
         {
           "script": "reopen-implementer-slot.sh",
@@ -707,5 +713,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-24T08:25:23.479Z"
+  "last_updated": "2026-05-24T09:00:40.974Z"
 }
