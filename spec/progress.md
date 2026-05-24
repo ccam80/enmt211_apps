@@ -494,3 +494,40 @@ action should be a wave-verifier on `batch-7`, NOT a re-run of phase 0.
      - Damping slider stability: STABLE across b=0.001..0.2
      - Reset: theta=0, omega=0 (PASS)
      - npm test: 80/80 (PASS)
+
+## Task T5.5.1: pipeline test suite + fixtures (the milestone) — CLARIFICATION NEEDED
+- **Agent**: implementer
+- **Blocker**: The spec's `"live Maxwell agrees with co-energy within 10%"` milestone assertion cannot be satisfied for any of the four prescribed fixture configs (`woundConfig`, `pmConfig`, `salientConfig`, `skewN2Config`) at any grid resolution, because the co-energy formula yields values 100–500× smaller than the Arkkio torque for all of them. This is a genuine physics impossibility with the prescribed configs, not a coding bug.
+- **What the spec says** (Phase 5, Task 5.5.1, `agnostic-pipeline.test.js` bullet):
+  > `"live Maxwell agrees with co-energy within 10%"` — for each `cfg` in `[woundConfig(), pmConfig(), salientConfig(), skewN2Config()]`: after `300` steps, `arkkio = rt.lastSolve.torque`; `coe = rt.stack.coenergyTorque(rt.state.theta, rt.state.i).total`; assert `Math.abs(arkkio − coe) ≤ 0.10·Math.max(Math.abs(arkkio), Math.abs(coe)) + 1e-6`.
+
+  And the KNOWN CONCERN in the assignment:
+  > "Handle this the way the SPEC intends — e.g. choose the spec's prescribed operating point / fixture grid for the Maxwell-vs-co-energy test (a fixture resolved enough for the comparison to be meaningful), per the Task 5.5.1 text."
+
+- **Why it is ambiguous** — two plausible readings, need the user to decide:
+
+  **Reading A** — "The named fixture functions (`woundConfig()` etc.) are the authoritative input to the Maxwell-vs-co-energy test; no deviation is permitted." Under this reading, the test is provably impossible (see numbers below) and the spec must be changed (either the configs must be replaced with physically-compatible ones, or the assertion must be removed / reformulated).
+
+  **Reading B** — "The KNOWN CONCERN authorises T5.5.1 to use finer-grid versions of the same machine topologies specifically for the Maxwell-vs-co-energy assertion. The named fixture functions (`woundConfig()` etc.) govern only the 'rotor turns' test; T5.5.1 may define additional fixture helpers (e.g., `woundConfigFine()`) that use a grid resolved enough for the co-energy comparison to be meaningful." Under this reading the test is implementable — the Nr=40/Ntheta=256 engine-test fixture already proves agreement to <0.3% — but it adds fixture functions not named in the spec, and those functions would need to be designed to be structurally equivalent to the four named configs (same machine topologies, just finer grids).
+
+  **Measured numbers (confirmed by numerical experiment):**
+  - `woundConfig()` (Nr=12, Ntheta=24): Arkkio ≈ -1.097 N·m; co-energy total ≈ -0.0026 N·m; relative error ≈ 99.8%. Same topology at Nr=12, Ntheta=192: still 99.8% error (resolution alone does not fix it).
+  - `pmConfig()` (Nr=12, Ntheta=24): Arkkio ≈ -0.167 N·m; `dLambdaPmdth` = **identically zero for all θ** (measured at 24 equally-spaced angles); co-energy total = 0. Root cause: in the sliding-band FV model, the PM magnetization rotates with the rotor region, so the net PM flux linkage through a uniform stator winding is angle-independent (λ_pm(θ) = constant). This is not a code bug — it is correct physics for the symmetric 2-pole PM with uniform winding. `dLambdaPmdth = 0` for ALL angles at ALL grid resolutions tested (Nr=12..40, Ntheta=24..256).
+  - `salientConfig()` and `skewN2Config()`: same as `woundConfig()` — `dLdth` is non-zero but ~500× too small relative to the Arkkio torque at Nr=12. Finer Ntheta does not help because the problem is the coarseness of the iron feature grid, not angular resolution.
+  - The **engine-test** real-iron salient fixture (Nr=40, Ntheta=256, genuine air-gap between iron rotor and iron stator) passes co-energy vs Arkkio to 0.3% (well under 2%). This proves the implementation is correct; the fixture design is the issue.
+
+- **What you checked before stopping**:
+  - Read `spec/phase-5-agnostic-pipeline.md` Task 5.5.1 in full, including KNOWN CONCERN in the assignment.
+  - Read `tests/engine/_fixtures.js` (buildSalient, SALIENT_DEFAULTS) and `lib/motor-circuit.js` (extract, coenergyTorque formula).
+  - Read `lib/motor-slice.js`, `lib/motor-stack.js`, `lib/motor-run.js`, `lessons/unified_motor/config-schema.js`, `tests/pipeline/_fixtures.js` (the existing fixtures).
+  - Ran numerical experiments: swept θ across 24 angles for PM/salient/wound configs at Nr=12,24,40 and Ntheta=24..192. Confirmed `dLambdaPmdth = 0` at every angle for PM (physics reason: uniform stator winding + rotating PM gives constant λ_pm). Confirmed `dLdth` is ~500× too small for reluctance configs at Nr=12.
+  - Verified the engine-test real-iron fixture (Nr=40, Ntheta=256) gives co-energy vs Arkkio agreement < 0.3% using `LIB.MotorCircuit.extract` directly.
+  - Verified existing 80/80 test suite still passes (no regressions from this investigation — no files were edited).
+
+- **Files touched so far**: none (all lock-protected; no edits made).
+
+- **Decision needed from user** (pick one):
+  1. **(Reading A + spec change)**: Replace the four fixture configs in `_fixtures.js` with physically-compatible configs that have genuine air-gap saliency (real iron rotor vs iron stator, finer grid ~Nr=40) so that the co-energy formula can agree with Arkkio. This would change `woundConfig()`, `pmConfig()`, `salientConfig()`, and `skewN2Config()` to use different geometries.
+  2. **(Reading B + add fine-grid helpers)**: Keep the four fixture functions as-is for the 'rotor turns' test, and add new fine-grid fixture helpers (e.g., `reluctanceConfigFine()` for the co-energy test. The co-energy test then runs only over those fine-grid helpers (not over all 4 named configs).
+  3. **(Remove the co-energy assertion)**: Remove the `"live Maxwell agrees with co-energy within 10%"` test entirely. The Arkkio path is validated by the engine tests; co-energy agreement at the pipeline level is not achievable with these fixture configs.
+  4. **(Change the formula)**: The assertion floor condition `1e-6` is meant to filter out zero-torque cases; extend the filter to `Math.max(Math.abs(arkkio), Math.abs(coe)) > threshold` where `threshold` is large enough that PM configs (where co-energy is identically zero) are skipped. This would pass the test for PM config (both arkkio and coe must be above the floor) but would require deciding what threshold is correct. This is potentially test-chasing if the intent is for ALL four configs to pass.
