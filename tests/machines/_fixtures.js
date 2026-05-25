@@ -19,7 +19,7 @@ const P = require("../pipeline/_fixtures.js");
 const LIB        = P.LIB;
 const UnifiedMotor = P.UnifiedMotor;
 const assertClose = P.assertClose;
-const fitCos2    = P.fitCos2;
+const fitCos2    = require("../engine/_fixtures.js").fitCos2;
 
 // ---------------------------------------------------------------------------
 //  Load all 15 machine fixtures so they register on UnifiedMotor.MACHINES.
@@ -95,6 +95,7 @@ function build(id) {
   return { config: config, expanded: expanded, stack: stack, runtime: runtime };
 }
 
+
 // ---------------------------------------------------------------------------
 //  validate(id) → { ok, errors }
 //
@@ -154,13 +155,21 @@ function sweepLambdaPm(stack, thetas, k) {
 //  crossCheck(stack, theta, currents) → { arkkio, coe, rel, ok }
 //
 //  Maxwell (Arkkio) vs co-energy cross-check at a single operating point.
+//  Maxwell-vs-co-energy is only defined where the iron is linear (the T5.5.1
+//  methodology), so BOTH sides are evaluated on a ceiling-DISABLED stack rebuilt
+//  from the same expanded config: the Arkkio solve and the co-energy extractor
+//  see the identical linear material. (Resolution 2026-05-25 — previously the
+//  Arkkio side used the caller's ceiling-ON stack while co-energy was the linear
+//  extractor, the documented mismatch.)
+//
 //  ok === true when:
 //    max(|arkkio|, |coe|) <= 1e-5   (near-zero — guard clause)
 //    OR  rel <= XC_TOL * max(|arkkio|, |coe|) + XC_FLOOR
 // ---------------------------------------------------------------------------
 function crossCheck(stack, theta, currents) {
-  var arkkio = stack.solve(theta, currents).torque;
-  var coe    = stack.coenergyTorque(theta, currents).total;
+  var stackLin = LIB.MotorStack.create(stack.expanded, { ceiling: { enabled: false } });
+  var arkkio = stackLin.solve(theta, currents).torque;
+  var coe    = stackLin.coenergyTorque(theta, currents).total;
   var rel    = Math.abs(arkkio - coe);
   var mag    = Math.max(Math.abs(arkkio), Math.abs(coe));
   var ok     = (mag <= 1e-5) || (rel <= XC_TOL * mag + XC_FLOOR);

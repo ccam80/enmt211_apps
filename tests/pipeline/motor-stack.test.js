@@ -135,12 +135,13 @@ describe("motor-stack", function () {
     assert.ok(Number.isFinite(coe.reluctance), "coe.reluctance must be finite");
     assert.ok(Number.isFinite(coe.pm), "coe.pm must be finite");
     assert.ok(Number.isFinite(coe.mutual), "coe.mutual must be finite");
+    assert.ok(Number.isFinite(coe.cogging), "coe.cogging must be finite");
     assert.ok(Number.isFinite(coe.total), "coe.total must be finite");
     assertClose(
       coe.total,
-      coe.reluctance + coe.mutual + coe.pm,
+      coe.reluctance + coe.mutual + coe.pm + coe.cogging,
       1e-12,
-      "total must equal reluctance + mutual + pm"
+      "total must equal reluctance + mutual + pm + cogging"
     );
   });
 

@@ -129,7 +129,18 @@ no module in this phase has any knowledge of windings, machines, or the UI.
       using **1st-order linear interpolation** on the periodic angular index
       (`shift = thetaR/dtheta`, blend the two bracketing angular samples), write
       the interpolated `nu`/magnetization back into the rotor cells, and
-      recompute the affected stencil coefficients only. No remesh.
+      recompute the affected stencil coefficients only. No remesh. **The rotor
+      WINDING current distribution must rotate with the rotor too** (Resolution
+      2026-05-25, Phase-6 driven): any rotor-member conductor current map
+      (`coilMasks`) is rotated by the same `Δθ` so that flux linkage, `Jz`, and the
+      mutual-/`λpm`-gradients reflect the moved conductors. Without this, wound-rotor
+      machines (brushed-DC, universal, wound-field-synchronous, the induction cage)
+      have `dM/dθ ≡ 0` and produce zero/phantom torque. The rotation may be realized
+      in the operator (snapshot rotor `coilMasks` in `setRotorRegion` and rotate here,
+      analogous to the magnetization rotation) or in the slice/compile layer that
+      assembles `Jz` from `coilMasks` — implementer's choice — but the observable
+      contract is that a rotor winding's current pattern moves rigidly with `thetaR`.
+      See spec/progress.md "T6.3.1 / T6.3.2 — FULL RESOLUTION" FIX 1.
     - `op.setIronScale(s, ironMask)` — multiply the `nu` of cells where
       `ironMask[idx]` is set by `s` relative to the base `nu`, recompute affected
       coefficients. `s=1` restores base. Used by the saturation ceiling in 1.3.

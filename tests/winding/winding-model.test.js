@@ -379,24 +379,22 @@ describe("standardWinding", () => {
 
     assert.strictEqual(nCircuits, m, `nCircuits must equal m=${m}`);
 
-    // Build reorderedLabels for m=2: [0, m-1, 1, m-2, ...] = [0, 1]
-    const reorderedLabels = [];
-    let lo = 0, hi = m - 1;
-    while (reorderedLabels.length < m) {
-      if (lo <= hi) { reorderedLabels.push(lo); lo++; }
-      if (lo <= hi && reorderedLabels.length < m) { reorderedLabels.push(hi); hi--; }
-    }
-
-    // Verify slots {0, 2, 4, 6} using the corrected belt formula:
-    //   phase index = reorderedLabels[b mod m]  (NOT floor(b/2) mod m)
+    // EVEN-m belt rule (fixed 2026-05-25 in lib/winding-model.js): for even m the
+    // canonical odd-m rule (polarity b%2, phase reorderedLabels[b%m]) degenerates —
+    // a phase lands at belts b and b+m with the SAME parity, collapsing the winding
+    // to a pure spatial-order-m MMF (no order-1 fundamental) with adjacent phases on
+    // the same axis (no rotating field). The general-correct layout used for even m
+    // is "first m belts +, next m belts -, phase = b mod m" (phases in quadrature),
+    // which restores the order-1 fundamental and the 90° main/aux separation a
+    // capacitor-start single-phase machine needs.
     const beltWidth = Math.PI / m;
     const checkSlots = [0, 2, 4, 6];
 
     for (const s of checkSlots) {
       const alpha = (p / 2) * s * (TWO_PI / Q);
       const b = Math.floor(alpha / beltWidth) % (2 * m);
-      const polarity = (b % 2 === 0) ? 1 : -1;
-      const phaseIndex = reorderedLabels[b % m];
+      const polarity = (Math.floor(b / m) % 2 === 0) ? 1 : -1;
+      const phaseIndex = b % m;
 
       // go-side: turns[phaseIndex * nSlots + s] should have sign = polarity
       const goVal = turnsArr[phaseIndex * nSlots + s];

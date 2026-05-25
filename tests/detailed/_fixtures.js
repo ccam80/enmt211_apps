@@ -49,6 +49,7 @@ function coggingConfig() {
       rInner: 0.030, rOuter: 0.055, ell: 0.10,
     },
     gapBand: { iInner: 4, iOuter: 5 },
+    gapBandMode: "manual",
     poles: 4,
     mechanical: { J: 1e-4, damping: 1e-5, loadTorque: 0 },
     rings: [

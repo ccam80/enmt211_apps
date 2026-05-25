@@ -25,7 +25,7 @@
         member: "stator",
         element: "W",
         rRange: STATOR_SURFACE,
-        winding: { standard: { m: 3, p: 4, Q: 12, coilPitch: 3, turns: 40 } },
+        winding: { standard: { m: 3, p: 4, Q: 12, coilPitch: 2, turns: 40 } },
         slotRRange: STATOR_SURFACE,
         slotFraction: 0.5,
         ironRRange: STATOR_YOKE,
