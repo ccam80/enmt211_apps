@@ -39,20 +39,27 @@
           "T1.1.1"
         ]
       ],
-      "spawned": 2,
-      "completed": 1,
+      "spawned": 3,
+      "completed": 2,
       "verifications_passed": 0,
-      "verifications_failed": 0,
+      "verifications_failed": 1,
       "stops_for_clarification": 0,
       "dead_implementers": 1,
       "dead_verifiers": 0,
       "group_status": {
-        "1.1.a": "pending"
+        "1.1.a": "failed"
       },
       "user_required_tasks": {
         "1.1.a": []
       },
-      "user_acks": {}
+      "user_acks": {},
+      "recovery_log": [
+        {
+          "script": "i-fixed-it.sh",
+          "timestamp": "2026-05-26T23:34:09.528Z",
+          "description": "Added missing -u flag to set -euo pipefail in lib/solver-src/build.sh L16 (spec-required, single-character fix)"
+        }
+      ]
     },
     {
       "id": "batch-3",
@@ -484,5 +491,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-26T23:28:45.708Z"
+  "last_updated": "2026-05-26T23:34:09.528Z"
 }

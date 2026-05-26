@@ -13,7 +13,7 @@
 # The built solver.mjs and solver.wasm are copied into lib/ (the parent of
 # this script's directory) and are safe to commit.
 
-set -eo pipefail
+set -euo pipefail
 
 if [ -z "${EMSDK_ROOT:-}" ]; then
   echo "ERROR: EMSDK_ROOT is not set." >&2
