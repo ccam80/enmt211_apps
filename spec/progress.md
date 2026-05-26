@@ -65,3 +65,11 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - fea-solver.js: classic script (no top-level import/export), no machine identity
   - lib/solver.wasm (44419 bytes) and lib/solver.mjs (12792 bytes) committed
   - All 11 node:test assertions green including proxy residual < 1e-9 at N=12100 and N=50176, symbolic-reuse, multi-instance isolation, scatter-map duplicate summation, host-compat ArrayBuffer path with fetch/streaming stubs
+
+## Task T1.2.1: Headless solver tests + host-compat load-path check
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none (all test files were created by T1.1.1 implementer: tests/solver/_shim.js, tests/solver/_fixtures.js, tests/solver/solver.test.js, tests/solver/host-compat.test.js)
+- **Files modified**: none
+- **Tests**: 11/11 passing (node --test tests/solver/solver.test.js tests/solver/host-compat.test.js)
+- **Notes**: All required test files were already present and correct from the T1.1.1 implementer. All 11 node:test assertions pass including proxy residual < 1e-9 at N=12100 and N=50176, symbolic reuse, two-instance isolation, setValues without re-analyze, scatter-map duplicate summation, factorNnz fill sanity, timing relative-order assertion, non-SPD error detection, host-compat ArrayBuffer path with fetch/instantiateStreaming stubbed to throw and no Worker invoked, and init idempotency.
