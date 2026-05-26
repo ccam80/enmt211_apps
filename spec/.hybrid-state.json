@@ -15,13 +15,13 @@
       ],
       "spawned": 1,
       "completed": 1,
-      "verifications_passed": 0,
+      "verifications_passed": 1,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "0.1.a": "pending"
+        "0.1.a": "passed"
       },
       "user_required_tasks": {
         "0.1.a": []
@@ -39,12 +39,12 @@
           "T1.1.1"
         ]
       ],
-      "spawned": 0,
-      "completed": 0,
+      "spawned": 2,
+      "completed": 1,
       "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
-      "dead_implementers": 0,
+      "dead_implementers": 1,
       "dead_verifiers": 0,
       "group_status": {
         "1.1.a": "pending"
@@ -484,5 +484,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-26T23:10:27.935Z"
+  "last_updated": "2026-05-26T23:28:45.708Z"
 }

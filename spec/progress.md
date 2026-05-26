@@ -43,3 +43,25 @@ Progress is recorded here by implementation agents. Each completed task appends 
 - **Files modified**: tests/_shim.js, tests/winding/_fixtures.js, tests/circuit/_fixtures.js, tests/pipeline/_fixtures.js, tests/pipeline/config-schema.test.js
 - **Files deleted**: tests/engine/_fixtures.js, tests/engine/flux-balance.test.js, tests/engine/solver.test.js, tests/engine/analytic-salient.test.js, tests/engine/convergence.test.js, tests/detailed/_fixtures.js, tests/detailed/detailed-toggle.test.js, tests/detailed/airgap-worker.test.js, tests/detailed/wiring.test.js, tests/detailed/airgap-refine.test.js, tests/detailed/cogging.test.js, tests/winding/motor-compile.test.js, tests/circuit/extract.test.js, tests/pipeline/motor-slice.test.js
 - **Tests**: 36/36 passing (smoke, winding-model, circuit backemf/cache/induction/stepper, config-schema all pass; deferred motor-stack/agnostic-pipeline/machines left untouched)
+
+---
+## Phase 0 Complete
+- **Batches**: 1
+- **All verified**: yes
+
+---
+## Recovery events
+
+- **2026-05-27** — batch-2 implementer `a787f4714a0674d17` (T1.1.1): TaskOutput returned `completed` with truncated trailing message "Let me check the interim output after some time:" (context exhaustion); `completed` counter did not advance and progress.md was not appended. Invoked `mark-dead-implementer.sh` (dead_implementers=1) and `clear-locks.sh` to release stale T1.1.1 + 10 file locks. Partial artifacts left in place for the replacement implementer: `lib/fea-solver.js`, `lib/solver.mjs`, `lib/solver.wasm`, `lib/solver-src/{README.md,build.sh,wrapper.cpp,solver.mjs,solver.wasm}`, `tests/solver/{_shim.js,_fixtures.js,solver.test.js,host-compat.test.js}`.
+
+## Task T1.1.1: Handle-based Eigen SimplicialLDLT WASM solver + LIB.FeaSolver wrapper
+- **Status**: complete
+- **Agent**: implementer (recovery — prior implementer died at context exhaustion; artifacts were intact and correct)
+- **Files created**: lib/fea-solver.js, lib/solver.wasm, lib/solver.mjs, lib/solver-src/wrapper.cpp, lib/solver-src/build.sh, lib/solver-src/README.md, tests/solver/_shim.js, tests/solver/_fixtures.js, tests/solver/solver.test.js, tests/solver/host-compat.test.js
+- **Files modified**: none
+- **Tests**: 11/11 passing (node --test tests/solver/*.test.js)
+- **Acceptance criteria**:
+  - wrapper.cpp: zero printf/cout/debug output; exactly 8 EMSCRIPTEN_KEEPALIVE exports (create, destroy, setPattern, setValues, analyze, factorize, solve, factorNnz)
+  - fea-solver.js: classic script (no top-level import/export), no machine identity
+  - lib/solver.wasm (44419 bytes) and lib/solver.mjs (12792 bytes) committed
+  - All 11 node:test assertions green including proxy residual < 1e-9 at N=12100 and N=50176, symbolic-reuse, multi-instance isolation, scatter-map duplicate summation, host-compat ArrayBuffer path with fetch/streaming stubs
