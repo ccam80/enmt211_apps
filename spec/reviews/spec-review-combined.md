@@ -1,155 +1,318 @@
 # Spec Review: Combined Report
 
-## Overall Verdict: needs-revision → **RESOLVED** (all findings applied 2026-05-24)
+## Overall Verdict: **needs-revision**
 
-> **Resolution:** All 13 Mechanical fixes (6 genuine + 7 cross-reference) and all
-> ~36 Decision-Required items were applied via per-file fix-agents. Decisions were
-> resolved under three user-supplied rules: (1) keep edits file-scoped where
-> possible; (2) never resolve an inconsistency by cheapening a test/feature; (3)
-> fan cross-phase contracts back into the earlier owning phase. P7-D1 was decided
-> by the user (Option A). Two items resolved to combinations (P2-D1, P6-D3); one
-> (P8-D5) was kept 1-cell after a geometry check showed widening would corrupt the
-> Arkkio band. Manifest unchanged. False positives (backslash paths, P9-D2
-> notation) intentionally not edited.
-
-Ten phase specs (0–9) reviewed by parallel per-phase agents plus a cross-phase
-consistency pass. The specs are unusually complete and internally disciplined;
-**most findings are clarity/cross-reference items, not architectural gaps.** The
-single recurring theme: the consuming phases (4, 8, 9) under-cite contracts that
-**are** already specified upstream in Phase 5/Phase 1, so several "major"
-Decision-Required items collapse to "add a cross-reference."
-
-Two classes of agent false-positive were caught and dropped in aggregation:
-- **Backslash-path findings** (Phase 1 M1–M4, Phase 6 M3): a Read-render artifact.
-  Verified by grep — `spec/` contains **zero** backslash paths. Dropped.
-- **Already-specified-upstream "gaps"** (Phase 8 D1 partial, D2, D4; Phase 9 D3,
-  D5, D6, I1; Phase 5 D2; Phase 4 D1; Phase 7 D7): the interface exists in Phase
-  5/1. Re-cast as cross-reference Mechanical fixes (X-M*).
+Per-phase reviews ran in parallel; cross-phase consistency checks performed by the coordinator. Phase 0 and Phase 8 are `ready`; every other phase has at least one Decision-Required item.
 
 ## Per-Phase Verdicts
 | Phase | Verdict | critical | major | minor | info |
 |-------|---------|----------|-------|-------|------|
-| 0 — dead-code-removal | needs-revision | 0 | 0 | 3 | 3 |
-| 1 — engine-core | needs-revision | 0 | 2 | 2 | 1 |
-| 2 — winding-model-and-compile | needs-revision | 0 | 1 | 2 | 2 |
-| 3 — excitation-commutation | needs-revision | 0 | 3 | 1 | 1 |
-| 4 — circuit-ode | ready | 0 | 0 | 1 | 1 |
-| 5 — agnostic-pipeline | needs-revision | 0 | 2 | 2 | 2 |
-| 6 — machine-fixtures | needs-revision | 0 | 6 | 1 | 2 |
-| 7 — editors | needs-revision | 0 | 5 | 2 | 1 |
-| 8 — detailed-mode | needs-revision | 0 | 1* | 2 | 1 |
-| 9 — saturation-and-render-polish | needs-revision | 0 | 1* | 2 | 1 |
+| 0 — dead-code-removal | ready | 0 | 0 | 1 | 1 |
+| 1 — fea-sparse-solver | needs-revision | 0 | 3 | 1 | 2 |
+| 2 — parametric-ring-stack-mesher | needs-revision | 2 | 2 | 1 | 1 |
+| 3 — current-source-terminal | needs-revision | 1 | 1 | 3 | 1 |
+| 4 — harmonic-gap-sliding-interface | needs-revision | 1 | 3 | 1 | 1 |
+| 5 — fea-slice | needs-revision | 0 | 1 | 4 | 2 |
+| 6 — mesh-render-and-live-ui | needs-revision | 0 | 2 | 2 | 1 |
+| 7 — validation | needs-revision | 1 | 5 | 2 | 2 |
+| 8 — legacy-reference-review | ready | 0 | 0 | 3 | 1 |
+| **Cross-phase** | — | 0 | 1 | 0 | 1 |
 
-\* Phase 8/9 major counts after cross-phase resolution (originally 2/3; the rest
-were already-specified upstream).
+## Cross-phase Findings
+
+### X-D1 — `tests/pipeline/_fixtures.js` `CS` export gap between Phase 5 and Phase 7 (major)
+- **Phases involved**: 5 (modifies `tests/pipeline/_fixtures.js`) and 7 (consumes from it via `tests/fea-engine/_fixtures.js` which re-requires `../pipeline/_fixtures.js`).
+- **Problem**: Phase 7 §T7.1.1 expects `tests/pipeline/_fixtures.js` to re-export `initSolver`, `feaOpts`, **and `CS = UnifiedMotor.ConfigSchema`**. Phase 5 §T5.3.1 explicitly adds `initSolver` and `feaOpts` to that fixture but does not add `CS`. Without `CS`, Phase 7's loader pattern (`const P = require("../pipeline/_fixtures.js"); … const CS = P.CS;`) silently produces `CS = undefined` and every `CS.expand(cfg)` in Phase 7 throws.
+- **Options**:
+  - **A — Add `CS` export to Phase 5's `tests/pipeline/_fixtures.js` modification list**: Phase 5 T5.3.1's edits add `module.exports.CS = UnifiedMotor.ConfigSchema`. Phase 7's read pattern works as written.
+  - **B — Phase 7 derives `CS` locally**: `tests/fea-engine/_fixtures.js` does `const CS = P.UnifiedMotor.ConfigSchema;` (since `UnifiedMotor` is already in `P`'s exports). No Phase 5 change.
+
+### X-I1 — Sequential-wave intra-phase file sharing pattern (info)
+- **Phases involved**: 2 (motor-mesh.js across 2.1.a → 2.2.a → 2.3.a), 4 (airgap-harmonic.js across 4.1.a → 4.2.a), 5 (motor-slice.js across 5.1.a → 5.2.a → 5.3.a).
+- **Observation**: The review-spec file-locality rule (`rules.md`) flags "two tasks share any file → must be in same manifest group" as critical. Each of these phases explicitly notes the waves run sequentially, eliminating lock contention. Each spec acknowledges the constraint; the rule has no stated sequential-wave carve-out. This pattern is consistent across three phases and is best treated as a rule clarification rather than three independent fixes. Per-phase reviews flagged this as Phase 2 D2 (critical) and Phase 4 D4 (critical). Merging to project-level info.
 
 ---
 
 ## Mechanical Fixes (apply with user approval)
-
-### Genuine spec defects (clear, no design choice)
 | ID | Severity | Phase | Location | Problem | Proposed Fix |
 |----|----------|-------|----------|---------|--------------|
-| P0-M1 | minor | 0 | §Files Owned blockquote | Historical-provenance prose ("`spec/plan.md` was corrected by the spec-authoring step…") banned by rules.md | Delete the second sentence; keep only "No file content is modified by this phase." |
-| P4-M1 | minor | 4 | §Conventions, test-harness paragraph | "(matching Phases 2 and 4)" is self-referential | Replace with "(matching Phases 2 and 3)" |
-| P5-M1 | minor | 5 | §Task 5.4.1 index.html script load list | Nine entries after `../../lib/util.js` (`canvas-type.js`…`app.js`) lack the `../../lib/` prefix; literal reading loads them from `lessons/unified_motor/` | Prefix all nine (and verify the engine libs after them) with `../../lib/` |
-| P6-M1 | major | 6 | §Task 6.3.2 `synchronous-reluctance.test.js` | `Math.abs(fit.a2) > 1e-9` — `fitCos2` returns `{L0,L2,r2}`; `fit.a2` is `undefined` → assertion always false | Replace `fit.a2` → `fit.L2` |
-| P6-M2 | minor | 6 | §Overview "Why three waves" | "`plan.md`'s Phase 6 section is updated to match" — historical-provenance prose | Delete the sentence |
-| P7-M1 | major | 7 | §Files Owned | `tests/editors/wiring.test.js` is created by Task 7.5.1 but absent from Files Owned (10 listed, 11 in task-union) | Add `- tests/editors/wiring.test.js — created` |
-
-### Cross-phase-resolved (interface already specified upstream — add a cross-reference / confirming note)
-| ID | Severity | Phase(s) | Problem (as raised) | Resolution / Proposed Fix |
-|----|----------|----------|---------------------|---------------------------|
-| X-M1 | major→info | 8, 5 | Phase 8 §8.2.1 consumes `stack.solve(...).perSliceField` and `runtime.lastSolve` as if unspecified | **Already specified** — Phase 5 §5.2.1 (`solve` returns `perSliceField`) and §5.3.1 step 6 (`runtime.lastSolve = solved`). Add a one-line cross-reference in §8.2.1. |
-| X-M2 | minor | 8, 5 | Phase 8 §8.2.2 `build(host, ctx)` uses `ctx.runtime`/`ctx.config` as if unspecified | **Already specified** — Phase 5 §5.4.1 defines `ctx = { runtime, config, view, requestRebuild() }` with a live `runtime`. Add cross-reference. |
-| X-M3 | minor | 5, 4 | Phase 5 §5.3.1 maps all voltage conditions to terminalStates `"DC"`; correctness vs Phase 4 unstated | **Correct** — Phase 4 §4.1.1 `stepCurrents` branches only on `OPEN`/`SHORT`; every other token (incl. `"DC"`) uses `V[k]`. Add a one-line note. |
-| X-M4 | minor | 9, 5 | Phase 9 §9.1.2 reads `perSliceField[0].satScale`; interface unstated | **Already specified** — Phase 5 §5.1.2 `solve` returns `field:{Az,Br,Bt,satScale}`, and `perSliceField[k]` is that field. Add cross-reference. |
-| X-M5 | minor | 9, 8 | Phase 9 §9.1.2 asserts `Br.length === 16*128`; appears to contradict default 256×12 grid | **Correct** — `coggingConfig` (Phase 8) overrides grid to `Nr:8, Ntheta:64`; `factor:2` → `16×128 = 2048`. Add a derivation comment. |
-| X-M6 | info | 4, 1 | Phase 4 §4.2.1 uses `buildSalient(...).sweepThetaR(θ).L11`; shape uncited | **Already specified** — Phase 1 §1.4.2 defines `buildSalient → { …, sweepThetaR(θ) → { Az,Br,Bt,L11,torqueArkkio } }`. Add cross-reference. |
-| X-M7 | minor | 8, 2 | Phase 8 §8.2.1 `importScripts` omits `winding-model.js` | **Correct omission** — the worker receives `expanded` (already routed via WindingModel on the main thread); `motor-compile` rasterizes pre-resolved features and never calls `LIB.WindingModel`. Add a clarifying note. |
-
-> Note: a spec-wide shorthand `Float64Array([…])` (no `new`) appears in Phases
-> 4/5/6/8/9 as pseudo-code for "a Float64Array of these values." Phase 9's agent
-> flagged it (its D2). It is understood notation, not a per-phase defect; if
-> normalized it should be normalized spec-wide. Recommend: leave as understood
-> notation (info, no edit).
+| P2-M1 | major | 2 | T2.1.1 → `tests/mesh/_fixtures.js` helpers | `assertClose` described as re-exported from deleted `tests/engine/_fixtures.js`. | Replace `tests/engine/_fixtures.js` → `tests/_assert.js` in the re-export description. |
+| P3-M1 | minor | 3 | T3.1.1 → `tests/excitation/sources.test.js` `"CURRENT under sequencer"` test | Two test cases call `evalTerminal` with no `ctx` `t`/`theta`. | Add `ctx = { t: 0, theta: 0, stepIndex: <0/2> }` explicitly to the two `stepIndex` cases. |
+| P3-M2 | minor | 3 | T3.1.1 → `tests/circuit/current-terminal.test.js` `mutual2` helper | Uses invalid JS `Float64Array[L0,M,M,L1]` (square bracket constructor syntax). | Replace with `new Float64Array([L0,M,M,L1])`. |
+| P4-M1 | minor | 4 | T4.1.1 → `tests/harmonic/_fixtures.js` `annulusOracle` | `nTheta≈32`, `nRad≈6` use `≈` — implementer could pick variants that bust the `2e-2` tolerance. | Replace `≈` with exact `nTheta=32, nRad=6`. |
+| P6-M1 | minor | 6 | T6.2.1 "Files to create" | `tests/render/gap-eval.test.js` and `tests/render/render3d.test.js` described in T6.2.1 "Tests" but absent from T6.2.1 "Files to create" list. | Add both `.test.js` bullets to T6.2.1 "Files to create" (matching T6.1.1 pattern). |
+| P7-M1 | major | 7 | §Files Owned "Created" list | `scripts/phase7-repoint.mjs` is created by T7.1.2 but absent from Phase 7's Files Owned "Created" list. | Add `- scripts/phase7-repoint.mjs — scripted edit driver (created)` to Files Owned. |
+| P7-M2 | minor | 7 | §T7.1.2 D9 / "WFS self-start un-skip" parenthetical | Line range `(line 44–48)` describes incorrect span — includes the `skip:` line being removed and misses the closing `});`. | Replace `(line 44–48: …)` with `(lines 45–50: the function body — runFromRest, assert.ok, and closing });)`. |
 
 ---
 
-## Decision-Required Items (user must choose)
+## Decision-Required Items
 
-> Each item lists a **Recommended** option. Items resolved above are not repeated.
-
-### X-D1 — Per-slice grid accessor on `MotorStack` is unspecified (major, cross-phase: Phase 5 + 8)
-- **Problem**: Phase 8 §8.2.1 `compute({kind:"fieldMap"})` and `session.fieldFrame()` need "the slice grid for that slice," and Phase 5's mount (§5.4.1 step 4) feeds `drawGapField` "from `perSliceField[*]` + the slice grid" — but Phase 5's `MotorStack` public API (§5.2.1) exposes no per-slice grid accessor, and `perSliceField[k]` carries `{Az,Br,Bt,satScale}` with **no grid**. `MotorSlice` does expose `slice.grid`, but the stack doesn't surface it.
+### P0-D1 — `tests/circuit/_fixtures.js` `fitCos2` removal ambiguity (minor)
+- **Phase / Location**: 0 / Task 0.1.3 "Files to modify" → `tests/circuit/_fixtures.js`.
+- **Problem**: Spec drops `fitCos2` from `module.exports`. Whether any surviving circuit test uses it is not stated.
 - **Options**:
-  - **A (Recommended)** — Amend Phase 5 §5.2.1 to expose a per-slice grid: add `stack.sliceGrid(k) → { Nr, Ntheta, rInner, rOuter, r }` (or expose `stack.slices[k].slice.grid`). Phase 8 then calls it; mount uses it.
-  - B — Attach `grid` into each `perSliceField[k]` entry returned by `solve` (changes the field payload shape; heavier message in the worker).
-  - C — Have Phase 8 rebuild the grid from `expanded.slices[k].section.grid` × `factor` instead of asking the stack (couples Phase 8 to the refinement arithmetic).
+  - **A** — Add a spec note: "`fitCos2` is used only by the deleted `extract.test.js`; surviving circuit tests do not import it."
+  - **B** — Move `fitCos2` to `tests/_assert.js` exports (it is already moved there from `engine/_fixtures.js`) and re-point any surviving caller; document that re-point requirement.
 
-### X-D2 — Phase 10 exists in the plan but has no spec file and no manifest entry (minor, cross-phase)
-- **Problem**: `plan.md` defines Phase 10 (Legacy Reference Review + machine-agnosticism guard, Task 10.1.1) and shows it in the dependency graph, but there is no `spec/phase-10-*.md` and no `phases[]` entry. Its substance (git-diff freeze guard + machine-name audit) is in the manifest's top-level `verification[]`. `implement-hybrid` will run it as final verification, not as an implementation wave.
+### P1-D1 — `buildSmallSPD()` size ambiguous ("4×4 (or 3×3)") (major)
+- **Phase / Location**: 1 / T1.2.1 → `tests/solver/_fixtures.js`.
+- **Problem**: Spec says "fixed 4×4 (or 3×3) SPD system" — choice affects `xExact`, which downstream tests compare against. Verifier cannot reproduce.
 - **Options**:
-  - **A (Recommended)** — Confirm intentional; add a one-line note in `plan.md` that Phase 10 is realized as the manifest `verification[]` block (no implementation files), documenting the discrepancy.
-  - B — Author a real `spec/phase-10-*.md` + manifest `phases[]` entry (a no-files audit task) for symmetry.
-  - C — Leave as-is (accept the undocumented divergence).
+  - **A** — Fix size to 3×3 (simpler hand-computation).
+  - **B** — Fix size to 4×4 (more off-diagonal coverage).
+  - **C** — Pin the full matrix `I`, `J`, `V`, `b`, `xExact` arrays in the spec.
 
-### Phase 1
-- **P1-D1 — `arkkio` gap-extent `rOuter_gap`/`rInner_gap` derivation undefined (major).** `gapBand` is integer indices; the normalization denominator depends on cell-centre vs face span. Options: A cell-centre (`op.r[iOuter]−op.r[iInner]`); **B (Recommended)** face-to-face (`op.r[iOuter]+dr/2 − (op.r[iInner]−dr/2)`); C cell-count×dr.
-- **P1-D2 — `coenergy` parameter `Jz` is never consumed (major).** Options: **A (Recommended)** remove `Jz` from the signature (unit solves use `coilMasks`; PM solve uses `Jz=0`); B additive background on unit-current solves; C background for the PM solve only.
-- **P1-D3 — `setGapBand` used but not in the method enumeration (minor).** Options: **A (Recommended)** add `op.setGapBand({iInner,iOuter})` to the API list; B make `op.gapBand` a writable property.
-- **P1-D4 — "All tests pass" criterion contradicts the guarded-require Note (minor).** Options: **A (Recommended)** narrow the criterion to the two smoke tests; B merge the Note into the criterion.
-- **P1-D5 — `coenergy` warm-start strategy ambiguous (info).** Options: A same-circuit/opposite-angle; **B (Recommended)** cold-start (test-only function, simplest); C warm-start from operating-point `Az`.
+### P1-D2 — Node test environment setup for classic-script `fea-solver.js` unspecified (major)
+- **Phase / Location**: 1 / T1.2.1 → `tests/solver/*.test.js`; T1.1.1 → `lib/fea-solver.js`.
+- **Problem**: `fea-solver.js` is a classic IIFE expecting `window.LIB`, dynamically `import()`s `./solver.mjs`. How tests load it under `node --test` (no `window`, CJS/ESM friction, `./solver.mjs` path resolution) is unspecified.
+- **Options**:
+  - **A** — Add `tests/solver/_shim.js` modelled on `tests/_shim.js` (sets `global.window = { LIB: {} }`, loads `fea-solver.js`, resolves `./solver.mjs` via absolute path).
+  - **B** — Use `globalThis.LIB` instead of `window.LIB` in `fea-solver.js`; tests use ESM import (`import.meta.url` resolves paths).
+  - **C** — Add thin Node entry `lib/fea-solver-node.js` (CJS wrapper handling `global.window`, path resolution).
 
-### Phase 2
-- **P2-D1 — non-contiguous `circuit` indices in `motor-compile` (major).** `nCircuits = 1+max(circuit)` silently allocates phantom zero masks for gaps. Options: **A (Recommended)** document contiguity as a caller guarantee (+ note in Phase 5 config-schema); B fast-fail validation in `compile`; C renumber pass.
-- **P2-D2 — `coveredCells` periodic-wrap algorithm undefined for negative lower bound (minor).** `conductorFeatures` produces `t0 = −angularWidth/2` for slot 0. Options: **A (Recommended)** specify normalize-to-[0,2π) algorithm + add a wrap test; B require callers to pre-normalize `t0≥0`.
-- **P2-D3 — `conductorFeatures` test doesn't verify wrap-case geometry (minor, paired with P2-D2).** Options: **A (Recommended)** assert slot-0 `thetaRange[0]` (or via compile, per P2-D2); B integration assertion through `compile`; C accept gap, rely on P2-D2/A.
-- **P2-D4 — `circuitMeta` returned by `ampereConductors` never asserted (info).** Options: **A (Recommended)** add a minimal structural assertion; B document the intentional gap.
-- **P2-D5 — "sampled slot" undefined in the m≠3 test (info).** Options: **A (Recommended)** name concrete slots covering both polarities; B assert all Q slots; C accept current phrasing.
+### P1-D3 — `_solver_bench/` location relative to repo root never stated (major)
+- **Phase / Location**: 1 / T1.1.1 → `lib/solver-src/build.sh` and `README.md`.
+- **Problem**: Spec references `_solver_bench/` but `CLAUDE.md` repo layout does not list it. Build script paths depend on its location.
+- **Options**:
+  - **A** — State the path explicitly in the spec.
+  - **B** — Make `build.sh` accept `EMSDK_ROOT` / `EIGEN_ROOT` env vars (location-independent).
+  - **C** — Declare the C ABI description as authoritative source; implementer writes `wrapper.cpp` fresh from the spec.
 
-### Phase 3
-- **P3-D1/D2/D3 — three tests use discovery phrasing instead of concrete values (major, grouped).** `"PULSE dead sector"` (θ in `[2π/3,π)`), `"STEP mode:none"` (t in `[1/3,1/2)`), `"mechanical AC commutation"` ((t,θ) with gate −1 & cos +). Options: **A (Recommended)** pin the agent's worked midpoints (θ=3π/4; t=5/12; t=0,θ=3π/2,amp=10,freq=1 → V=−10); B pin alternative concrete values; C split into separate gate+composition assertions.
-- **P3-D4 — Wave-3.2 heading vs Task-3.1.2 numbering anomaly (minor; merges the agent's M1+D4).** Options: A annotate the heading only (keep `3.1.2`, plan-aligned); B full renumber `3.1.2→3.2.1` (coordinated spec+manifest+cross-ref edits); **C (Recommended)** annotate the heading (= A) — least churn, stays plan/manifest-consistent.
-- **P3-D5 — `DC` under electronic modes ignores `base`; rationale undocumented (info).** Options: **A (Recommended)** add one clarifying sentence; B leave as-is.
+### P1-D4 — Timing assertion contradicts "not an absolute-ms gate" framing (minor)
+- **Phase / Location**: 1 / T1.2.1 → `tests/solver/solver.test.js` timing test.
+- **Problem**: Test asserts `factorize < 2000ms` while parenthetical says "reported, not asserted" — self-contradictory.
+- **Options**:
+  - **A** — Keep the hard assert; remove the contradictory parenthetical.
+  - **B** — Remove the assert; log only.
+  - **C** — Keep relative `solve < factorize` assert only; log absolute timings.
 
-### Phase 5
-- **P5-D1 — `field-render.js` module-level `LIB.EM` guard vs "no LIB.EM dependency" / "byte-unchanged" (major).** The existing `if(!LIB.EM) throw` fires at load even though `drawGapField` doesn't use EM. Options: A keep guard, future headless tests shim `LIB.EM={}` (+ note); B relax guard to per-function (not byte-unchanged); **C (Recommended)** tighten the acceptance wording — "`drawGapField` body references no `LIB.EM`; module guard byte-unchanged" + note that headless render tests shim `LIB.EM`.
-- **P5-D3 — `mount.js` built-in default config underspecified (major).** No params given; the "rotor visibly turns" criterion needs working geometry. Options: A state full params inline; **B (Recommended)** reference the §5.5.1 `woundConfig()` values; C minimal parameter constraints only.
-- **P5-D4 — default-backend delegation (`solveSaturated` vs `pcg`) not directly tested (minor).** A wrong impl routing both through `pcg` passes all stated tests. Options: A add a default-backend spy test; **B (Recommended)** assert `r.field.satScale` is finite in the first solve test (behavioral, survives renames); C accept gap, note it.
+### P2-D1 — Test files in Files Owned have no creating task (critical)
+- **Phase / Location**: 2 / Files Owned vs. T2.1.1 "Files to create".
+- **Problem**: `tests/mesh/mesh-core.test.js` and `tests/mesh/mesh-view.test.js` appear in Files Owned but in no task's "Files to create".
+- **Options**:
+  - **A** — Add both test files to T2.1.1 "Files to create" (recommended; metadata repair).
+  - **B** — Split into a new sub-task 2.1.2 owning the test files (added manifest overhead).
 
-### Phase 6
-- **P6-D1 — `induction-1ph` test uses `Tboth` before it is defined (major).** Options: A reverse assertion order (module-scope `Tboth`); **B (Recommended)** combine into one test block; C use a standalone `1e-6` floor denominator.
-- **P6-D2 — `vr-stepper` literal embeds invalid token `phaseOffset:-2π·k/3 via terminal.phaseOffset` inside `commutation:{}` (major; near-mechanical).** Options: **A (Recommended)** move `phaseOffset` into `terminal`, delete from `commutation`, drop the clarifying sentence; B expand to a written-out 3-entry array.
-- **P6-D3 — `crossCheck` helper missing the `max(|arkkio|,|coe|)>1e-5` skip guard from the class-(B) definition (major).** At near-zero torque it collapses to `rel≤1e-6` (impossible). Options: **A (Recommended)** add the guard inside `crossCheck`; B move the standstill crossCheck angles to ones with `>1e-5` torque; C guard at each call site.
-- **P6-D4 — `pm-stepper` holding-torque test "energize phase 0 only" is unproven (major).** Whether circuit 1 is gated off at `stepIndex 0` depends on Phase-3 `sectorGate` boundary. Options: **A (Recommended)** explicitly set `circuits[1].terminal.type="OPEN"` (clone+rebuild); B replace with a structural self-start/settle check; C pin the `sectorGate` boundary in Phase 3 and reference it.
-- **P6-D5 — `wound-field-synchronous` load-angle test uses `phaseOffset += δ` across three sequential runs without reset (major).** Increments accumulate; `avgTorqueAtSpeed` resets state but not `circuits`. Stator circuits are indices 1–3 (field=0), not stated. Options: **A (Recommended)** fresh `build` per δ + absolute offsets `= -2πk/3 + δ` on circuits 1–3; B single build, set absolute offsets before each run; C three pre-built runtimes.
-- **P6-I1 (info)** — Task 6.1.2 acceptance lists `expand()`-dependent assertions that can't run until Wave 6.3 (misleadingly forward-looking; covered correctly in 6.3.2). **P6-I2 (info)** — `induction-1ph` crossCheck current vector is a prose placeholder; should be a concrete `Float64Array`. Recommend: tidy both.
+### P2-D2 — Cross-group file sharing across sequential waves (critical)
+- **Phase / Location**: 2 / manifest groups 2.1.a, 2.2.a, 2.3.a.
+- **Problem**: `lib/motor-mesh.js` and `tests/mesh/_fixtures.js` are shared across sequential-wave groups. Letter of file-locality rule says they must be in one group; wave sequencing eliminates contention.
+- **Options**:
+  - **A** — Accept current structure; add spec annotation documenting wave sequencing.
+  - **B** — Clarify the rule in `spec/.context/rules.md` to permit cross-wave file sharing (project-wide fix, also resolves Phase 4 D4 and Phase 5's analogous case).
+  - **C** — Collapse all four tasks into Wave 2.1 / group 2.1.a (exceeds 10-file cap; loses milestone structure).
 
-### Phase 7
-- **P7-D1 — `capPhaseSplit` formula contradicts its boundary statements AND acceptance criteria (major, real bug).** Formula `atan2(1/(2πfC),R)` gives C=0→π/2 (spec says 0) and fC→∞→0 (spec says π/2); acceptance `capPhaseSplit(0,50,5)===0` matches the (physically-backwards) boundary text, not the formula. Options: A adopt `atan2(1,2πfCR)` with `if(C===0)return 0` guard; **B (Recommended)** keep `atan2(1/(2πfC),R)` and replace the three boundary statements with explicit guards (C=0→0, R=0→π/2, drop the fC→∞ claim) so formula+guards+acceptance agree; C fully piecewise definition. **The physical direction (does larger C give more or less phase shift?) must be confirmed by the author.**
-- **P7-D2 — `windingFactor` reference winding ("full-pitch concentrated, equal total conductors") undefined (major).** Options: A define a concrete 2-slot full-pitch reference routing; **B (Recommended)** replace with the analytic normalization `k_w = amps[h-1]/(4·T_total/(π·h))` (no reference object); C drop `windingFactor`, show raw spectrum only.
-- **P7-D3 — `MatrixPanel.synthesize` `rRange` "split evenly across the gap" algorithm unspecified (major).** Options: A halve at midpoint; **B (Recommended)** derive the rotor/stator boundary from `gapBand` (`gapR = rInner + (rOuter−rInner)·iInner/Nr`), split each side evenly; C fixed per-element lookup table.
-- **P7-D4 — winding editor "active ring" selection model undefined (major).** Options: A implicit polar hit-test; **B (Recommended)** explicit ring-picker in the panel (handles multi-wound configs, testable); C default to first wound ring (silent multi-ring limitation).
-- **P7-D5 — `Schematic.lower` capacitor uses `terminal.freq`, undefined for non-AC terminals → NaN (minor).** Options: **A (Recommended)** skip when `terminal.type !== "AC"` (zero-not-skip aligned); B treat missing `freq` as 0 (interacts with P7-D1).
-- **P7-D6 — `buildGeometry` `nCircuits` / `conductor.circuit` global-vs-local indexing ambiguous for multi-wound configs (minor).** Options: **A (Recommended)** global indices throughout + a 2-wound-ring acceptance test; B ring-local indices with per-ring `circuitColor` calling convention.
+### P2-D3 — `interiorEdgeSharing(mesh)` return contract unspecified (major)
+- **Phase / Location**: 2 / T2.1.1 → `_fixtures.js` helpers + "M2 conforming interfaces" test.
+- **Problem**: Helper "reports" interior edge sharing; return type (boolean / structured object / throw) not specified.
+- **Options**:
+  - **A** — Returns `true`/`false` (simplest).
+  - **B** — Returns `{ ok: boolean, badEdges: [...] }` (better diagnostic).
+  - **C** — Throws on violation, returns `undefined` on success.
 
-### Phase 8
-- **P8-D3 — worker `stepsPerMessage` field-attachment counter bookkeeping unspecified (minor).** Where the counter lives, reset on start/reset, first-post behavior. Options: **A (Recommended)** module-scoped `postCount`, reset on `start`/`reset`, field when `postCount % stepsPerMessage === 0`; B tick-local counter resetting after each attach.
-- **P8-D5 — `coggingConfig` gap band spans one radial cell (`iInner:4,iOuter:5`) (info).** Options: A widen to 2 cells (`iInner:3,iOuter:5`); **B (Recommended)** add a note that the 1-cell band is intentional (the test checks Richardson ratios, not absolute accuracy).
+### P2-D4 — `readMsh` return contract vs. "gap-layer count matches" assertion (major)
+- **Phase / Location**: 2 / T2.3.2 → `_fixtures.js` `readMsh` vs. `convergence.test.js::gmsh reference diff`.
+- **Problem**: `readMsh` extracts "element count / min-angle / node count"; test asserts "gap-layer count matches" — quantity not in return contract and not natively in `.msh` files.
+- **Options**:
+  - **A** — `gen-mesh-refs.mjs` writes `// gap_layers: N` header comment; extend `readMsh` return.
+  - **B** — Derive gap-layer count geometrically from `.msh` node positions in `readMsh`.
+  - **C** — Drop "gap-layer count matches" from the gmsh-diff assertion (already covered by `collar-gap.test.js`).
 
-### Phase 9
-- **P9-D1 — `extrudeAnnulus` returns identical `front` and `outerWall` rings; "wall" rings don't span z (major).** Internal inconsistency (description says cylinders; definition gives single rings at z0). Options: A set `outerWall` at z1 (four distinct end-rings); **B (Recommended)** make each wall a `[z0-ring, z1-ring]` pair (matches "wall" semantics, gives `paint` barrel geometry; update the T9.2.2 test); C drop `outerWall` (three-ring return).
-- **P9-D4 — tooth-tip rolloff test `thPk` sweep resolution unspecified (minor).** Options: **A (Recommended)** specify `n=32` uniform samples over `[thUnalign,thAlign]`; B pin `thPk=thAlign`; C bisection tolerance.
+### P2-D5 — `dofBudget` cap test assertion strictness contradictory (minor)
+- **Phase / Location**: 2 / T2.3.1 → `collar-gap.test.js::dofBudget caps node count`.
+- **Problem**: "within the rounding the spec permits: `Nn <= dofBudget` strictly" — tolerance vs. strict.
+- **Options**:
+  - **A** — Strictly `Nn <= dofBudget`.
+  - **B** — Allow `Nn <= dofBudget + P_body` (one snapping multiple of slack).
+
+### P3-D1 — `current-schema.test.js` `config-schema.js` require path wrong (critical)
+- **Phase / Location**: 3 / T3.1.1 → `tests/excitation/current-schema.test.js` setup.
+- **Problem**: Spec says require "relative to `lib/`"; `config-schema.js` lives at `lessons/unified_motor/config-schema.js`. As-written require fails.
+- **Options**:
+  - **A** — Fix require to `require("../../lessons/unified_motor/config-schema.js")`; keep file at `tests/excitation/`.
+  - **B** — Move file to `tests/pipeline/current-schema.test.js` (alongside `bknee-schema.test.js`); update Files Owned + manifest.
+  - **C** — Keep file at `tests/excitation/`; use absolute path via `path.join(__dirname, …)`.
+
+### P3-D2 — `supplyValue` fallthrough comment update inaccurate for `CURRENT` (major)
+- **Phase / Location**: 3 / T3.1.1 → `lib/excitation.js`.
+- **Problem**: Proposed comment includes `CURRENT` and says "sectorGate applies shape" — but sectorGate only gates CURRENT in `mechanical` mode.
+- **Options**:
+  - **A** — Add `CURRENT`, drop the sectorGate clause: `// DC, PULSE, STEP, CURRENT — return raw amplitude`.
+  - **B** — Add `CURRENT` and qualify: `// DC, PULSE, STEP, CURRENT — return raw amplitude; sectorGate applied by evalTerminal for PULSE/STEP and mechanical CURRENT`.
+  - **C** — Do not update the comment.
+
+### P3-D3 — T3.1.2 "loading throws no error" criterion unverifiable (minor)
+- **Phase / Location**: 3 / T3.1.2 acceptance criteria.
+- **Problem**: Fixture is an IIFE assigning to `window.UnifiedMotor.MACHINES`; plain `node -e "require(...)"` throws. Spec doesn't say how to verify; T3.1.2 also says it has no Phase-3-runnable test.
+- **Options**:
+  - **A** — Weaken to an inspection-only criterion ("inspect: circuit 0 has `terminal.type === 'CURRENT'` with `amp: 12`").
+  - **B** — Specify a concrete shimmed Node one-liner.
+
+### P3-D4 — `Iimp` undefined safety contract in `stepCurrents` (info)
+- **Phase / Location**: 3 / T3.1.1 → `lib/motor-circuit.js`.
+- **Problem**: If `Iimp` is undefined and a terminal state is `"CURRENT"`, the pinning step throws cryptic TypeError. Not stated as either invariant or guard.
+- **Options**:
+  - **A** — State invariant explicitly: callers that omit `Iimp` must not produce CURRENT states; no defensive guard.
+  - **B** — Add throw guard: `if (terminalStates[k] === "CURRENT" && !Iimp) throw …`.
+
+### P4-D1 — `slots` derivation in `gapLoopsFromConfig` underspecified (major)
+- **Phase / Location**: 4 / T4.1.1 → `tests/harmonic/_fixtures.js` helper.
+- **Problem**: "Max angular feature count" derivation ambiguous — raw `config.rings` vs. expanded `section.features`. Affects `defaultK` and Phase 5 integration consistency.
+- **Options**:
+  - **A** — Derive from `CS.expand(config)` output (`section.features[].angularCount`).
+  - **B** — Derive directly from `config.rings` (`Math.max(...rings.map(r => r.teeth ?? r.magnets ?? r.Q ?? 1))`).
+  - **C** — Make `slots` a caller-supplied argument; hard-code per test.
+
+### P4-D2 — `M_k` symmetry test: internal accessor vs. recomputation (major)
+- **Phase / Location**: 4 / T4.1.1 → `admittance.test.js::"M_k is symmetric for each k"`.
+- **Problem**: Spec says "exposed via internal accessor or recomputed from documented closed form" — neither approach pinned; only the first verifies the assembled matrix.
+- **Options**:
+  - **A** — Add a test-only `gap.Mk(k)` accessor on the production object.
+  - **B** — Recompute from closed form in the test (no API extension; weaker).
+  - **C** — Replace with a `surfaceFlux`-based reciprocity check (no internals exposed).
+
+### P4-D3 — Harmonic torque formula `f(k, r̂ₖ(φ), ŝₖ)` not written (major)
+- **Phase / Location**: 4 / Public API `torque` + T4.2.1 → `torque.test.js`.
+- **Problem**: Formula structurally `T = (ell/μ0)·Σ f(k, …)` but `f` is never given; sign conventions vary. Acceptance criteria only require magnitude within 2 %.
+- **Options**:
+  - **A** — Write the complete real-pair formula in the spec, with sign convention pinned.
+  - **B** — Add a sign-pinning test case (lighter; pins the sign without specifying the full formula).
+  - **C** — Leave as-is, relying solely on the Arkkio oracle.
+
+### P4-D4 — `lib/airgap-harmonic.js` shared across manifest groups 4.1.a and 4.2.a (critical)
+- **Phase / Location**: 4 / manifest groups 4.1.a, 4.2.a.
+- **Problem**: Identical pattern to P2-D2 (sequential-wave file sharing). The spec acknowledges no lock contention; rule has no carve-out.
+- **Options**:
+  - **A** — Merge T4.1.1 and T4.2.1 into one group in wave 4.1.
+  - **B** — Split into two files: `lib/airgap-harmonic-base.js` (4.1.a) + `lib/airgap-harmonic.js` (4.2.a).
+  - **C** — Codify sequential-wave exception in manifest schema or rules.md (resolves with X-I1 / P2-D2 / P5 analog).
+
+### P5-D1 — `_internals` inventory in T5.1.1 missing keys later waves reference (major)
+- **Phase / Location**: 5 / T5.1.1 internals hatch vs. T5.2.1/T5.3.1 test bodies.
+- **Problem**: T5.1.1 declares closed `_internals = { … 8 entries … }`. Tests reference `assembleCombinedTriplets`, `bodies`, `solveStaticRotor`, `K`, `solverSat`, `solverLin`, `derivedSlots`, `derivedPoles` — none in the list.
+- **Options**:
+  - **A** — Extend the `_internals` list in T5.1.1 to enumerate every needed key with brief signatures (recommended).
+  - **B** — Replace the closed enumeration with a rule: "expose every internal the Phase 5 tests reference."
+  - **C** — Keep T5.1.1 list closed; add a "Test-only internals addendum" subsection.
+
+### P5-D2 — `θ_e` undefined in harmonic-torque sign-check test (minor)
+- **Phase / Location**: 5 / T5.2.1 → `contract.test.js::"harmonic torque sign convention"`.
+- **Problem**: Test uses `salientConfig` at `thetaR = π/8` and asserts sign of `−sin(2·θ_e)` — pole count not stated; mechanical vs. electrical angle ambiguous.
+- **Options**:
+  - **A** — Specify pole count and compute `thetaR = (π/8)·(2/P)` so `θ_e = π/8`.
+  - **B** — Replace with synthetic 2-pole salient section built inline.
+  - **C** — Relax to sign-change check (pole-count-independent).
+
+### P5-D3 — `r1` referent ambiguous in N=2 zero-offset test (minor)
+- **Phase / Location**: 5 / T5.3.1 → `motor-stack.test.js` item 4 bullet.
+- **Problem**: Test asserts `r2.torque ≈ 2·r1.torque`; `r1` defined in different `it(…)` block (out of scope).
+- **Options**:
+  - **A** — Define `r1` inline within this test as an N=1 stack solve.
+  - **B** — Express assertion without `r1`: compare against `stack_n1.solve(...).torque`.
+
+### P5-D4 — "compute the equivalent two extra solves manually" in `derivStep` test (minor)
+- **Phase / Location**: 5 / T5.3.1 → `extract.test.js::"derivStep override is honored"`.
+- **Problem**: "Manually" doesn't specify mechanism — multiple interpretations give different expected values.
+- **Options**:
+  - **A** — Two `extractCoeffs` calls at shifted base angles, both with `derivStep = π/360`.
+  - **B** — Compare `dLdth` from two different `derivStep` values (weaker; tests stability).
+  - **C** — Replace with a unit test that asserts override step is actually used internally.
+
+### P5-D5 — `create` behavior before `LIB.FeaSolver.init()` resolves (info)
+- **Phase / Location**: 5 / T5.1.1 → `lib/motor-slice.js` `prepare`.
+- **Problem**: Spec hints at "lazily on first solve via a cached promise" but `solve`'s contract is sync. Either lazy-async or throw-on-misuse needs pinning.
+- **Options**:
+  - **A** — `create` throws if `init` not resolved; sync `solve` contract is unconditional.
+  - **B** — Replace "lazily on first solve" language with "init must complete before create"; no lazy-init path.
+
+### P5-D6 — Discovery phrasing in agnostic-pipeline edit, immediately resolved (info)
+- **Phase / Location**: 5 / T5.3.1 → `agnostic-pipeline.test.js` edit point 4.
+- **Problem**: "extend CARVE_OUTS set ONLY if Phase-8 allow-list so dictates" — discovery phrasing, though answer is given in the same sentence.
+- **Options**:
+  - **A** — Delete the conditional; state CARVE_OUTS contents directly.
+  - **B** — Keep rationale but rewrite as definitive statement.
+
+### P6-D1 — `UM.showGapLoop` is an undeclared state variable (major)
+- **Phase / Location**: 6 / T6.1.1 → `cross-section-render.js` paint overlay order.
+- **Problem**: References `UM.showGapLoop`, but it's not in D3's `UM.fieldViz` enumeration and never initialized.
+- **Options**:
+  - **A** — Add `gapLoop` as 6th independent checkbox in `UM.fieldViz`.
+  - **B** — Draw gapLoop overlay unconditionally (no toggle).
+  - **C** — Remove gapLoop overlay from production render path (kept only in `mesh-dev.html`).
+
+### P6-D2 — `applyGapLength` rotor/stator ring partition rule unspecified (major)
+- **Phase / Location**: 6 / T6.3.1 → `matrix-panel.js` `applyGapLength`.
+- **Problem**: "For every rotor ring … for every stator ring …" — but how to determine ring membership (no `ring.body` field exists).
+- **Options**:
+  - **A** — Infer by radial position relative to current mid-gap (straddling rings throw).
+  - **B** — Use `config.grid.rInner` / `rOuter` mid-point as the pivot.
+  - **C** — Add `ring.body: "rotor"|"stator"` to `config-schema` (cross-phase change; touches Phase 3's owned file + 15 fixtures).
+
+### P6-D3 — `drawFluxLines` lower-bound assertion ambiguous (minor)
+- **Phase / Location**: 6 / T6.1.1 → `mesh-view-prod.test.js::"drawFluxLines emits stroke calls"`.
+- **Problem**: Primary assert is `>= 1` (very weak); proportionality clause `>= levels - 1` is parenthetical — implementer cannot tell if it's a hard assert.
+- **Options**:
+  - **A** — Promote `>= levels - 1` to hard assertion.
+  - **B** — Keep `>= 1` as the hard assertion; mark `>= levels - 1` as informational comment.
+
+### P7-D2 — `meshArkkioTorque` denominator inconsistent between D3 prose and code spec (major)
+- **Phase / Location**: 7 / §D3 prose vs. T7.1.1 code spec.
+- **Problem**: D3 says scale by `ell / (μ0·(r_ms − r_stator_bore))`; T7.1.1 code spec returns `ell / (μ0·(r_ms − r_mr))`. Different bands.
+- **Options**:
+  - **A** — Use `(r_ms − r_mr)` (full gap annulus, code-spec version); update D3 prose.
+  - **B** — Use `(r_ms − r_stator_bore)` (stator collar only, D3 prose); add `r_stator_bore` to helper signature.
+
+### P7-D3 — `stack.slices[0]` used but `.slices[]` not declared `MotorStack` API (major)
+- **Phase / Location**: 7 / T7.2.1 first test.
+- **Problem**: Test does `coggingAmpAt(stack.slices[0], …)`; Phase 5 `MotorStack` contract doesn't declare `.slices[]` as a public accessor.
+- **Options**:
+  - **A** — Amend Phase 5 to declare `.slices: MotorSlice[]` as `MotorStack` public API.
+  - **B** — Replace `stack.slices[0]` with an explicit `LIB.MotorSlice.create(...)` call in T7.2.1.
+
+### P7-D4 — `stack.coenergyTorque` not declared in Phase 5 `MotorStack` contract (major)
+- **Phase / Location**: 7 / T7.1.1 `cross-method.test.js`.
+- **Problem**: Test uses `stack.coenergyTorque(θ, currents).total`; Phase 5's `MotorStack` contract methods don't explicitly list it. Old grid stack has it; FEA stack might or might not.
+- **Options**:
+  - **A** — Amend Phase 5 to declare `coenergyTorque(θ, currents) → { total, … }` on `MotorStack`.
+  - **B** — Phase 7 implements `coenergyTorque` as a local fixture helper using `extractCoeffs`.
+
+### P7-D5 — Back-EMF test is self-consistency, not analytic cross-check (minor)
+- **Phase / Location**: 7 / T7.1.1 → `analytic.test.js::"no-load back-EMF"`.
+- **Problem**: Test compares numeric central difference of `λpm` to `dLambdaPmdth` — both from `extractCoeffs`. Plan validation criterion implies an analytic cross-check.
+- **Options**:
+  - **A** — Accept self-consistency form; clarify that this validates `extractCoeffs` internal consistency.
+  - **B** — Replace with analytic peak-flux-linkage cross-check against closed form on `slotlessPmConfig` (requires adding excitation circuits to that config).
+
+### P8-D1 — Manual cross-check remediation path unspecified (minor)
+- **Phase / Location**: 8 / §Phase-exit verification "Manual cross-check" bullet.
+- **Problem**: If the manual greps surface real hits, no remediation path is given — Phase 8 creates audit, not the code under audit.
+- **Options**:
+  - **A** — Escalate to coordinator on any hit (Clarification Exit).
+  - **B** — Implementer fixes the violation in the referenced file directly (expands Phase 8 scope).
+
+### P8-D2 — "log the missing path" destination ambiguous (minor)
+- **Phase / Location**: 8 / T8.1.1 Check B.
+- **Problem**: "Files missing on disk are skipped silently … log the missing path and continue" — log to stdout (breaks verbatim PASS format) or stderr (breaks test wrapper's `r.stderr === ""`)?
+- **Options**:
+  - **A** — Silently skip, no log.
+  - **B** — Print `SKIP <path> (not found)` on stdout before the summary block; amend verbatim PASS format.
+  - **C** — Assert all BSCOPE_FILES present; fail if any missing.
+
+### P8-D3 — 10-second termination criterion not enforced (minor)
+- **Phase / Location**: 8 / T8.1.1 acceptance criteria.
+- **Problem**: Self-reported criterion not enforced by wrapper; no `spawnSync` timeout — hangs indefinitely on a runaway.
+- **Options**:
+  - **A** — Add `timeout: 10000` to `spawnSync` and a fourth assertion `r.signal === null`.
+  - **B** — Remove the 10-second criterion entirely (sub-second by design).
+
+### X-D1 — `tests/pipeline/_fixtures.js` `CS` export gap between Phase 5 and Phase 7 (major)
+- **Phase / Location**: cross / Phase 5 §T5.3.1 + Phase 7 §T7.1.1.
+- **Problem**: See cross-phase findings section above.
+- **Options**:
+  - **A** — Add `CS` export to Phase 5's `tests/pipeline/_fixtures.js` modification list.
+  - **B** — Phase 7 derives `CS` locally from `P.UnifiedMotor.ConfigSchema`.
 
 ---
 
-## Items resolved in aggregation (no action; recorded for traceability)
-- Phase 1 M1–M4, Phase 6 M3 — **false positives** (backslash paths; grep confirms none). Dropped.
-- Phase 8 D1 (perSliceField/lastSolve), D2 (importScripts), D4 (ctx); Phase 9 D3
-  (satScale), D5 (grid arithmetic), D6 (coggingConfig props), I1 (markers);
-  Phase 5 D2 (terminalStates DC); Phase 4 D1 (buildSalient); Phase 7 D7 (markers)
-  — **resolved by cross-phase view**; converted to cross-reference Mechanical
-  fixes X-M1…X-M7 (and confirmations).
-- Cross-phase shared-file (`field-render.js`, `index.html`) — sanctioned/additive
-  → `info`, no action.
+## Full per-phase reports
+Each phase's complete review is at `spec/reviews/spec-phase-{n}.md`.

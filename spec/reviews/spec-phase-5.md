@@ -1,4 +1,4 @@
-# Spec Review: Phase 5 — agnostic-pipeline
+# Spec Review: Phase 5 — FEA slice (the new MotorSlice)
 
 ## Verdict: needs-revision
 
@@ -6,133 +6,311 @@
 | Severity | Mechanical | Decision-Required | Total |
 |----------|------------|-------------------|-------|
 | critical | 0 | 0 | 0 |
-| major    | 1 | 3 | 4 |
-| minor    | 1 | 2 | 3 |
-| info     | 2 | 0 | 2 |
+| major    | 0 | 1 | 1 |
+| minor    | 0 | 4 | 4 |
+| info     | 0 | 2 | 2 |
 
 ## Plan Coverage
 | Plan Task | In Spec? | Notes |
 |-----------|----------|-------|
-| 5.1.1 config-schema.js + expand() | yes | Full vocabulary-complete requirement covered |
-| 5.1.2 motor-slice.js + SolveBackend | yes | API, coarse backend, extractCoeffs all specified |
-| 5.1.3 field-render.js drawGapField extension | yes | Function signature, geom, opts, cell mapping all present |
-| 5.2.1 motor-stack.js N≥1 aggregator | yes | No-bypass loop, coenergyTorque, clearWarmStart all present |
-| 5.3.1 motor-run.js temporal driver | yes | Per-tick chain, state tiers, reset, clearFieldCache all present |
-| 5.4.1 mount.js + index.html + user-required gate | yes | Registration seams, 3-zone layout, rAF loop, user-required flag all present |
-| 5.5.1 pipeline test suite + agnosticism milestone | yes | Four smoke configs, Maxwell-vs-co-energy, machine-name grep all present |
-| Plan verification: ≥3 structurally-different configs + N=2 through identical path | yes | Four configs in agnostic-pipeline.test.js §"all configs run the identical MotorRun path" |
-| Plan verification: rotor visibly turns | yes | `|θ| > 1e-3` assertion in 5.5.1 + browser checklist in 5.4.1 |
-| Plan verification: Maxwell-vs-co-energy agreement asserted as a test | yes | `≤ 0.10` relative in agnostic-pipeline.test.js |
-| Plan verification: grep of lib/ + mount.js for machine names returns zero | yes | Asserted in agnostic-pipeline.test.js §"lib/ and mount.js are free of machine names" |
-
----
+| 5.1.1 — FEM assembly + Brauer Newton (static rotor) | yes | Mapped to T5.1.1; all §11.3 guards (≤ 8 iters, tol < 1e-6, residual < 1e-9) present |
+| 5.2.1 — solve / torque / flux-linkage / mesh-native field | yes | Mapped to T5.2.1; D3 field shape fully specified; coggingTorque zero-not-skip present |
+| 5.3.1 — extractCoeffs + stack/run reconnection + pipeline re-green + perf diagnostic | yes | Mapped to T5.3.1; sliceGrid→sliceMesh rename, opts.poles passthrough, §11.4 escalation gate all present |
+| Verification: MotorSlice contract honored | yes | T5.2.1 contract.test.js covers all five public methods |
+| Verification: MotorStack/MotorRun drive it after sliceMesh rename | yes | T5.3.1 re-greens motor-stack.test.js and agnostic-pipeline.test.js |
+| Verification: static-rotor convergence (avg torque < 1 %, cogging < 2 % between refinements) | yes | T5.2.1 convergence.test.js with refine ∈ {1.0, √2, 2.0} |
+| Verification: Newton guards (§11.3) | yes | T5.1.1 newton.test.js |
+| Verification: field↔circuit bridge preserved formula-for-formula | yes | T5.3.1; bridge formula spelled out in the spec's §"Field ↔ circuit bridge" section |
+| Verification: mesh-native field return {rotor,stator,gap} | yes | D3 fully pinned; T5.2.1 contract.test.js shape assertions |
+| Verification: embed-vs-Schur diagnostic logged | yes | T5.3.1 perf.test.js; §11.4 Clarification Exit path explicit |
 
 ## Findings
 
 ### Mechanical Fixes
-| ID | Severity | Location | Problem | Proposed Fix |
-|----|----------|----------|---------|--------------|
-| M1 | minor | §Task 5.4.1 "Files to create" — index.html script load order | After `../../lib/util.js`, nine consecutive lib files (`canvas-type.js`, `registry.js`, `plot.js`, `integrate.js`, `draw.js`, `layout3d.js`, `em-physics.js`, `field-render.js`, `coil-render.js`, `app.js`) are listed without the `../../lib/` prefix. A literal reading would load them from `lessons/unified_motor/`. All nine exist in `lib/`. | Prefix each of those nine entries with `../../lib/`, making them `../../lib/canvas-type.js`, `../../lib/registry.js`, etc. Applies only to those nine; `airgap-grid.js` and the other engine libs listed immediately after already follow the `../../lib/` prefix convention in the spec text. |
 
----
+None found.
 
 ### Decision-Required Items
 
-#### D1 — `field-render.js` module-level `LIB.EM` guard vs. "no LIB.EM dependency" claim (major)
-- **Location**: §Task 5.1.3 "Files to modify" and "Acceptance criteria"
-- **Problem**: The existing `lib/field-render.js` opens with a hard dependency check:
-  ```js
-  if (!LIB.EM) throw new Error("LIB.FieldRender requires lib/em-physics.js");
+#### D1 — `_internals` inventory in T5.1.1 is missing functions that later tests require (major)
+
+- **Location**: phase-5 §Wave 5.1 Task T5.1.1 "Files to create" — `lib/motor-slice.js` internals hatch description; and §Wave 5.2 Task T5.2.1 Tests; and §Wave 5.3 Task T5.3.1 Tests
+
+- **Problem**: T5.1.1 defines the `_internals` object exposed under `slice.__internals` as exactly:
   ```
-  The spec states that `drawGapField` "adds no dependency on `LIB.EM`" and instructs that "existing entries [are] unchanged" / "loop-centric renderers byte-unchanged". It also says the acceptance criterion is that `drawGapField`'s **source** references no `LIB.EM` symbol. However, the module-level guard (which IS in the existing body) will throw at load time if `LIB.EM` is absent — regardless of whether `drawGapField` itself uses it. The `index.html` script list in §Task 5.4.1 includes `em-physics.js` before `field-render.js`, so browser loading is fine. But if a future headless test (Phase 9 render geometry test) tries to `require("field-render.js")` without a shim for `LIB.EM`, it will throw. The spec is silent on whether the implementer should relax or stub the guard, and whether "byte-unchanged" covers the guard.
-- **Why decision-required**: Two legitimate interpretations exist with different implementation consequences. "Byte-unchanged" could mean the guard stays and Phase 9 must shim `LIB.EM`; or "no LIB.EM dependency" could mean the guard should be relaxed to allow headless loading. The spec does not resolve this.
+  _internals = { prepare, assembleInteriorPatternAndValues,
+    assembleInteriorMagnetLoadAndJz, brauerNu, newtonSolve,
+    eliminateOuterStatorPin, remapGapTriplets, globalLayout }
+  ```
+  However, tests in later waves reference internals keys that are NOT in this list:
+
+  1. **`assembleCombinedTriplets`** — referenced in two T5.1.1 assembly tests:
+     `"combined pattern is symmetric"` and `"combined pattern is φ-invariant"` both call
+     `_internals.assembleCombinedTriplets(section, opts, φ)`. This function does not appear
+     in the declared `_internals` list at all. An implementer following the list will not
+     expose it.
+
+  2. **`bodies`** — `tests/slice/contract.test.js` asserts
+     `r.field.rotor.mesh === slice.__internals.bodies.rotor`. `bodies` is not in the
+     `_internals` list.
+
+  3. **`solveStaticRotor`** — `tests/slice/newton.test.js` calls
+     `_internals.solveStaticRotor(thetaR=0, currents)` in four tests. Not in the
+     `_internals` list.
+
+  4. **`K`** — `tests/slice/contract.test.js` asserts
+     `r.field.gap.harmonics.rotor.a.length === slice.__internals.K + 1`. `K` is not in
+     the `_internals` list.
+
+  5. **`solverSat` / `solverLin`** — `tests/slice/contract.test.js` asserts
+     `slice.__internals.solverSat !== slice.__internals.solverLin` and calls
+     `slice.__internals.solverSat.factorNnz()`. Neither name appears in the `_internals`
+     list.
+
+  6. **`derivedSlots` / `derivedPoles`** — T5.3.1 description says "expose
+     `slice.__internals.derivedSlots`/`derivedPoles` for the tests" but neither is in
+     the T5.1.1 `_internals` list and no specific test assertion uses them (the description
+     says "for the tests" without a named test).
+
+  An implementer who follows only the declared `_internals` list will build an accessor
+  that omits all of these. The wave-5.2 and wave-5.3 test files will then fail to compile
+  or run meaningful assertions.
+
+- **Why decision-required**: The spec author must decide whether to extend the T5.1.1
+  `_internals` list to enumerate all these additional keys, or whether to restructure the
+  internals into a different hatch shape. Different implementers would make different
+  choices about which internal name corresponds to which concept (e.g., is
+  `solveStaticRotor` a separate helper or part of `prepare`'s return? Is `bodies` a direct
+  reference to the prepare-time build result?). There is no single unambiguous fix.
+
 - **Options**:
-  - **Option A — Guard stays, future phases shim EM**: Leave the module-level guard byte-unchanged. Add a note in §Task 5.1.3 that any headless test importing `field-render.js` must shim `LIB.EM` (an empty object suffices).
-    - Pros: Truly "byte-unchanged"; no guard-relaxation logic needed; the browser path (where EM is always loaded) is unaffected.
-    - Cons: Future headless phases (Phase 9 render test) silently depend on a shimming convention not stated in this spec; inconsistent with the "no LIB.EM dependency" claim.
-  - **Option B — Relax the guard to a conditional**: Change the guard to check `LIB.EM` only for the three functions that actually use it (`drawLoopFieldLines`, `drawMomentArrow`, `drawBarMagnet`), or move it into those functions' bodies, so the module loads headless and `drawGapField` is callable without `LIB.EM`.
-    - Pros: Makes "no LIB.EM dependency" literally true at module load; headless tests for `drawGapField` work without shimming.
-    - Cons: Is NOT "byte-unchanged" for the existing guard; requires the implementer to edit existing code, which the spec says not to do.
-  - **Option C — Leave spec as-is, note the inconsistency as a known limitation**: Document in §Task 5.1.3 that the EM guard is retained and the "no LIB.EM dependency" claim refers only to `drawGapField`'s internal source (not load-time), and that the acceptance criterion "source references no `LIB.EM` symbol" is satisfied because the guard references `LIB.EM` for the module, not for `drawGapField` specifically.
-    - Pros: No code change needed; acceptance criterion is technically satisfiable.
-    - Cons: Leaves an inconsistency that will confuse the implementer; the acceptance criterion text would need to be made more precise to avoid a wrong implementation.
+  - **Option A — Extend the `_internals` list in T5.1.1 to enumerate all missing keys**:
+    Replace the current `_internals = { ... }` declaration with a complete list including
+    `assembleCombinedTriplets`, `bodies`, `solveStaticRotor`, `K`, `solverSat`, `solverLin`,
+    `derivedSlots`, `derivedPoles`, and add brief descriptions for each (what they accept,
+    what they return). Also specify where `assembleCombinedTriplets` is added relative to
+    the existing `prepare` function (is it a sub-step extracted from `prepare`?).
+    - Pros: The `_internals` inventory is the single authoritative list an implementer
+      consults. Extending it keeps the contract in one place and removes all ambiguity.
+    - Cons: The T5.1.1 task description becomes longer; requires the spec author to decide
+      on precise signatures for each missing item (especially `solveStaticRotor` and
+      `assembleCombinedTriplets`).
+
+  - **Option B — Remove the closed enumeration from T5.1.1 and replace with a rule**:
+    Instead of `_internals = { prepare, …, globalLayout }`, state: "expose every internal
+    function and named value the Phase-5 tests reference under `slice.__internals`; the
+    exhaustive list is derived from the test bodies below (Waves 5.1–5.3)." Then remove
+    the enumeration entirely from T5.1.1.
+    - Pros: Avoids the spec author needing to enumerate every internal up front; the tests
+      themselves become the authoritative list.
+    - Cons: The implementer must scan all three waves' test files to discover the full
+      set — this is mild discovery phrasing inside the spec task. Also loses the
+      explicitness of "these internals and no others are test-visible."
+
+  - **Option C — Keep the T5.1.1 list closed but add a "Test-only internals addendum"
+    subsection** that enumerates the additional keys introduced as the waves progressed
+    (bodies, solveStaticRotor, K, solverSat, solverLin, assembleCombinedTriplets,
+    derivedSlots, derivedPoles), each with a one-line signature:
+    - Pros: T5.1.1 stays as written (minimal churn); a clearly marked addendum gives
+      implementers the remainder without requiring them to infer it from test bodies.
+    - Cons: Two places define `_internals` content; a future edit could leave them
+      inconsistent.
 
 ---
 
-#### D2 — `motor-run.js` step(): circuit-step `terminalStates` mapping drops `AC`/`PULSE`/`STEP`/`DC` distinction (major)
-- **Location**: §Task 5.3.1 "Files to create" — `runtime.step(dt)` step 3
-- **Problem**: The spec says:
-  > "for each `k`, `terminalStates[k] = conditions[k].kind === "open" ? "OPEN" : conditions[k].kind === "short" ? "SHORT" : "DC"`"
+#### D2 — `θ_e` undefined in the harmonic torque sign-check test (minor)
 
-  `LIB.Excitation.evalDrive` (Phase 3) returns a `TerminalCondition` with `kind ∈ {"voltage", "open", "short"}`. When `kind === "voltage"`, the spec maps it to `"DC"` regardless of whether the original terminal type was `AC`, `PULSE`, or `STEP`. But Phase 4 (`motor-circuit.js`) defines `V = R·i + dλ/dt` per circuit and the `TerminalCondition` for a voltage source carries `{ kind:"voltage", V }` — so the only thing `motor-circuit.advance` needs is `V` and the `OPEN`/`SHORT` flags. Calling voltage sources `"DC"` in `terminalStates` is a naming convention the implementer must align with Phase 4's `advance` signature. If `LIB.MotorCircuit.advance` uses `terminalStates` values as an enum (and they could be `{"voltage","open","short"}` or `{"DC","AC","OPEN","SHORT"}` — Phase 4's spec determines this), there is a mismatch. The Phase 5 spec does not reproduce the `advance` signature, nor does it state which enum values `motor-circuit.advance` accepts for `terminalStates`.
-- **Why decision-required**: The implementer of `motor-run.js` must know what enum values `LIB.MotorCircuit.advance` accepts for `terminalStates[k]`. The Phase 4 spec is the authority, but Phase 5 uses `"DC"` as the voltage fallback without cross-referencing that value against Phase 4's vocabulary. This is a cross-phase interface underspecification that could produce a silent no-op (wrong enum value → branch not taken).
+- **Location**: phase-5 §Wave 5.2 Task T5.2.1 Tests — `tests/slice/contract.test.js`,
+  test `"harmonic torque sign convention matches motor convention"`
+
+- **Problem**: The test asserts "the sign matches the sign of `−sin(2·θ_e)` (reluctance
+  machines pull toward alignment)." `θ_e` is the electrical angle, but the test fixture
+  is `salientConfig` whose pole count is not stated in the Phase-5 spec. The implementer
+  must look up the `salientConfig` fixture (in `lessons/unified_motor/machines/`) to learn
+  its pole count in order to know `θ_e = (poles/2) · thetaR`. The spec does not provide
+  `poles` for `salientConfig` in this context.
+
+- **Why decision-required**: The relationship `θ_e = (poles/2) · thetaR` is not spelled
+  out, and different salient fixture pole counts would require different `thetaR` values
+  to sit between aligned and unaligned. The spec says `θ = π/8` — whether that is
+  electrical or mechanical angle matters for the sign assertion.
+
 - **Options**:
-  - **Option A — Add a cross-reference note**: Add a sentence to §Task 5.3.1 step 3 stating: "`terminalStates[k]` must use the enum values accepted by `LIB.MotorCircuit.advance` for voltage sources — confirm against the Phase-4 spec (`motor-circuit.js`) that `"DC"` is the accepted value; if the enum there is `"voltage"`, substitute accordingly."
-    - Pros: Makes the cross-phase dependency explicit without changing the logic; implementer has exact guidance.
-    - Cons: Leaves ambiguity until the implementer reads Phase 4; requires two-spec coordination at implementation time.
-  - **Option B — Reproduce the accepted enum values from Phase 4 inline**: Inline the relevant excerpt from the Phase 4 spec (the `terminalStates` vocabulary) into §Task 5.3.1 step 3, so the implementer has no cross-phase lookup.
-    - Pros: Task 5.3.1 is self-contained; no Phase-4 consultation needed.
-    - Cons: Risks desync if Phase 4's spec is revised; duplication.
-  - **Option C — Remove the `terminalStates` intermediary, pass `conditions` directly**: Rewrite step 3 to pass `conditions[k]` (the raw `TerminalCondition`) to `LIB.MotorCircuit.advance` directly, and specify that `advance` accepts `{kind:"voltage"|"open"|"short", V}` objects — eliminating the enum-rename step entirely.
-    - Pros: No enum translation, no cross-phase naming mismatch, matches the Phase-3 output shape directly.
-    - Cons: Would require confirming Phase 4's `advance` accepts this form; may be a change to the Phase 4 contract.
+  - **Option A — Add a sentence specifying `θ_e` for the test**: Add "For `salientConfig`
+    (`poles = P`), `θ_e = (P/2) · θ_mech`; pick `thetaR = π/8 · (2/P)` so that `θ_e =
+    π/8` falls between aligned and unaligned." (The spec author fills in `P` from the
+    fixture.) This makes the assertion self-contained.
+    - Pros: Implementer needs no external lookup. The sign assertion is unambiguous.
+    - Cons: The spec must look up and hard-code the fixture's pole count.
+
+  - **Option B — Change `salientConfig` to a synthetic 2-pole salient section built
+    inline**: Replace the test's fixture reference with a hand-constructed 2-pole
+    salient section where `θ_e = θ_mech` by definition, making `−sin(2·θ)` directly
+    evaluable from `thetaR = π/8`.
+    - Pros: Completely self-contained; no fixture lookup.
+    - Cons: More setup code in the test; the synthetic section may differ subtly from
+      the production fixture.
+
+  - **Option C — Relax the assertion to "torque is non-zero at θ = π/8 and `torque(π/8)
+    · torque(0)` have opposite sign"**: This requires only that the reluctance torque
+    changes sign across the aligned position, which is pole-count-independent.
+    - Pros: The assertion is always correct regardless of `salientConfig`'s pole count.
+    - Cons: Weaker — doesn't verify the sign convention explicitly, only that the torque
+      is non-trivial.
 
 ---
 
-#### D3 — `mount.js` built-in default config is underspecified (major)
-- **Location**: §Task 5.4.1 "Files to create" — `UnifiedMotor.mount(host)` step 1
-- **Problem**: The spec says:
-  > "Resolves the initial config: `UnifiedMotor.defaultConfig` if set (Phase 6/7 override it), else a **built-in default it constructs inline** (a current-fed wound machine via `ConfigSchema.expand`)"
+#### D3 — `r1` referent ambiguous in the `"N=2 zero-offset sums torque"` motor-stack test (minor)
 
-  The built-in default config's full parameter set — grid dimensions, `gapBand`, `poles`, `mechanical`, ring definitions, circuit topology, and `stack` — is not specified. The implementer must invent these values. A wrong default (e.g., grid too coarse to produce non-zero torque, or a geometry where no field lines reach the gap band) would cause the "rotor visibly turns" browser acceptance criterion to fail, but the spec provides no grounding values to prevent this. The `woundConfig()` fixture in §Task 5.5.1 specifies a working wound machine that could serve as this default, but the spec does not say to reuse it.
-- **Why decision-required**: The implementer could use any geometry that works; the spec author likely has a canonical set of parameters in mind that should be stated explicitly to ensure the browser acceptance criterion is met without trial-and-error.
+- **Location**: phase-5 §Wave 5.3 Task T5.3.1 "Files to modify" — `tests/pipeline/motor-stack.test.js`
+  rewrite, item 4 bullet `"N=2 zero-offset sums torque and flux"`.
+
+- **Problem**: The test asserts "`r2.torque ≈ 2·r1.torque` within `1e-9`" and
+  "`r2.fluxLinkages[0] ≈ 2·r1.fluxLinkages[0]` within `1e-9`." `r2` is the N=2 result,
+  but `r1` is not defined in this test's body. The preceding bullet (`"N=1 stack equals
+  its single slice"`) uses the variable name `r1` but it is in a different `it(...)` block
+  and therefore out of scope. An implementer must guess whether to re-run the N=1 stack
+  or a fresh single slice.
+
+- **Why decision-required**: Two reasonable interpretations exist: (a) `r1` is a
+  `woundConfig` N=1 stack solve result computed inline in this test's `it(...)` body,
+  or (b) `r1` is a single-slice direct `MotorSlice.solve` result. The tolerance `1e-9`
+  relative is tight enough that the wrong interpretation would produce test failures.
+
 - **Options**:
-  - **Option A — Specify the default config parameters inline**: Add to §Task 5.4.1 step 1 the exact config values the built-in default should use — grid, gapBand, poles, ring definitions, and mechanical params. This could be the same parameters as `woundConfig()` in §Task 5.5.1, stated explicitly.
-    - Pros: Implementer has no decisions to make; browser acceptance criterion is deterministically satisfiable.
-    - Cons: Duplicates information from §Task 5.5.1 if reusing `woundConfig` values.
-  - **Option B — Reference `woundConfig()` explicitly**: Add to §Task 5.4.1 step 1: "The built-in default uses the same parameter values as the `woundConfig()` fixture defined in §Task 5.5.1."
-    - Pros: No duplication; unambiguous; the fixture already exists in the spec.
-    - Cons: Creates a cross-task dependency (5.4.1 depends on reading 5.5.1); both tasks are in different waves, but `_fixtures.js` is authored in wave 5.5, not available to `mount.js` at wave 5.4 implementation time.
-  - **Option C — Defer to implementer judgment with a constraint**: Add a note that the built-in default must be a 2-pole single-stator `W` ring + salient `I` rotor config with `mechanical.J ≥ 1e-5` and grid `Ntheta ≥ 64` — bounding the parameter space without prescribing exact values.
-    - Pros: Gives the implementer some freedom while ruling out degenerate configs.
-    - Cons: Still leaves parameter guessing; "Ntheta ≥ 64" is not the same as "Ntheta = 256"; the specific torque output is unpredictable.
+  - **Option A — Define `r1` explicitly in the test bullet**: Replace "`r2.torque ≈
+    2·r1.torque`" with "`r2.torque ≈ 2 · (N=1 stack solve result at the same θ and
+    currents, computed inline in this test body)`" and specify the variable name.
+    - Pros: No ambiguity; implementer knows exactly where `r1` comes from.
+    - Cons: Slightly more verbose.
+
+  - **Option B — Express the N=2 zero-offset assertion without referencing `r1`**: Change
+    the assertion to "both slices have equal torque contributions: sum equals `2 ·
+    slice[0].solve(0.2, [5]).torque` (where `slice[0]` is the stack's first slice built
+    directly)."
+    - Pros: Completely self-contained.
+    - Cons: Requires accessing the stack's internal slice objects directly, which may
+      or may not be exposed.
 
 ---
 
-#### D4 — `motor-slice.js` acceptance criterion: "coarse backend uses PCG + global ceiling" is only partially checkable (minor)
-- **Location**: §Task 5.1.2 "Acceptance criteria" — second bullet
-- **Problem**: The spec states:
-  > "With no `opts.backend`, `create` uses the coarse backend (PCG + global ceiling): `prepare` builds the operator at `section.grid` and `solve` delegates to `LIB.AirgapSolve.solveSaturated`, `extractCoeffs` to `LIB.AirgapSolve.pcg`."
+#### D4 — "compute the equivalent two extra solves manually" in the `derivStep` test is vague (minor)
 
-  The test for this criterion in `motor-slice.test.js` is described as asserting the spy backend behavior in the fourth bullet ("honors a custom SolveBackend"). However, there is no test described that asserts the *default* backend actually calls `LIB.AirgapSolve.solveSaturated` (rather than `.pcg`) for `solve` and `.pcg` for `extractCoeffs`. The spy test only verifies routing with a *custom* backend. Without a default-backend spy test, an implementer who wires both paths to `.pcg` (skipping the ceiling) would satisfy every stated test while violating this criterion.
-- **Why decision-required**: Adding a test requires choosing what to assert: a spy on `LIB.AirgapSolve`, a nominal result comparison, or a structural check of the coarse backend object. Each has different tradeoffs in coupling.
+- **Location**: phase-5 §Wave 5.3 Task T5.3.1 Tests — `tests/slice/extract.test.js`,
+  test `"derivStep override is honored"`
+
+- **Problem**: The test says: "call `extractCoeffs(0.3, { derivStep: Math.PI/360 })`; compute
+  the equivalent two extra solves at θ=0.3±π/360 manually and assert `dLdth` matches."
+  The phrase "compute the equivalent two extra solves manually" does not specify what
+  "manually" means — does it mean calling `extractCoeffs(0.3 + Math.PI/360)` and
+  `extractCoeffs(0.3 - Math.PI/360)` separately and reading their `.L` matrices, or
+  calling `slice._internals.solveStaticRotor(...)` directly, or something else?
+
+- **Why decision-required**: `extractCoeffs` returns the center-angle `L`, not the raw
+  per-angle `L` at the probe angles. Reproducing `dLdth` manually requires either (a)
+  calling `extractCoeffs` at offset angles and recovering `L` from them (but the returned
+  `L` is already the center value), or (b) driving the linear solver at the two probe
+  angles directly. These are meaningfully different implementations of "manually."
+
 - **Options**:
-  - **Option A — Add a default-backend spy test in motor-slice.test.js**: Describe a test `"default backend delegates to AirgapSolve.solveSaturated"` that temporarily replaces `LIB.AirgapSolve.solveSaturated` with a spy, calls `slice.solve`, asserts the spy was called, then restores it. Similarly for `LIB.AirgapSolve.pcg` on `extractCoeffs`.
-    - Pros: Directly verifiable; catches wrong-method routing.
-    - Cons: Couples the test to the internal delegation structure; fragile if Phase 1 renames the method.
-  - **Option B — Assert the satScale is present**: Add to the first `motor-slice.test.js` bullet: `r.field.satScale` is a finite number (it is only populated by `solveSaturated`, not `linearSolve`/`pcg`), confirming the ceiling path was taken.
-    - Pros: Tests behavior rather than internal delegation; non-fragile to method renaming.
-    - Cons: If `pcg` is incorrectly used but happens to set `satScale`, the test would pass; relies on Phase 1's contract that `pcg` returns no `satScale`.
-  - **Option C — Leave as-is with an info note**: Accept that the coarse backend delegation is verified implicitly by the end-to-end behavior (if the ceiling weren't applied, saturation tests elsewhere would catch it) and document this as a known coverage gap.
-    - Pros: No spec change needed.
-    - Cons: The coverage gap remains; a wrong implementation could pass all Phase-5 tests and fail only at Phase 9 saturation tests — late failure detection.
+  - **Option A — Specify that "manually" means two additional `extractCoeffs` calls at
+    the shifted centers**: "Call `extractCoeffs(0.3 + Math.PI/360)` and `extractCoeffs(0.3
+    − Math.PI/360)` with the default `derivStep`; compute `(L_plus − L_minus) / (2 ·
+    Math.PI/360)` from the two `L` center values and compare to `coeffs.dLdth`."
+    - Pros: Fully self-contained using the public API; no internal access required.
+    - Cons: The "manual" check uses a different derivStep (the default π/180) for the
+      outer calls, introducing a mismatch — it would only be a true cross-check if those
+      outer calls also use π/360.
+
+  - **Option B — Specify that "manually" means calling `extractCoeffs` at the same base
+    angle with a very small `derivStep` and comparing the resulting `dLdth`**: This
+    simplifies the test to "assert `dLdth` from `derivStep=π/360` call agrees with
+    `dLdth` from `derivStep=π/180` call within some tolerance on a smooth-enough operating
+    point (e.g., `< 1e-4` relative on a salientConfig at θ=0.3)." Weaker but unambiguous.
+    - Pros: No "manual" solve needed; uses only the public API.
+    - Cons: Looser — tests only that derivStep doesn't change the answer drastically, not
+      that it is used correctly.
+
+  - **Option C — Remove this test and subsume its intent into the `dLdth from extract
+    matches central-difference` test** (which already tests the derivStep=π/180 default
+    path): The `derivStep` override is then verified by the implementation contract only,
+    not by a test assertion.
+    - Pros: Removes ambiguity entirely; the existing test already validates the central-
+      difference construction.
+    - Cons: No test coverage of the `derivStep` override parameter.
 
 ---
 
-### Info Items
+#### D5 — Production behavior of `create` when called before `LIB.FeaSolver.init()` resolves is unspecified (info)
 
-#### I1 — `MACHINE_NAMES` grep list excludes "stepper" in some forms but includes it in others (info)
-- **Location**: §Task 5.5.1 `tests/pipeline/_fixtures.js` — `MACHINE_NAMES` definition
-- **Problem**: The spec lists `MACHINE_NAMES` as `["bldc","pmsm","srm","squirrel","stepper","brushed","universal-motor","wound-field"]`. The token `"stepper"` is included, but the Phase-6 machine fixture filenames include `vr-stepper`, `pm-stepper`, and `hybrid-stepper` (which would match "stepper" as a substring). Meanwhile, `"synchronous"` is excluded from `MACHINE_NAMES` because it "names physics, not a machine identity" — yet `wound-field-synchronous` is a machine. The list is described as intentionally partial ("the exhaustive repo-wide audit is Phase 10"), so these exclusions are deliberate. This is an observation, not a defect; the rationale is documented inline.
-- **No action required** — the spec explains the scope limitation explicitly. Recorded for awareness.
+- **Location**: phase-5 §Wave 5.1 Task T5.1.1 "Files to create" — `lib/motor-slice.js`,
+  prepare discussion paragraph: "the slice's `create` contract is sync, so the wrapper
+  awaits `init` lazily on first `solve` via a cached promise; the tests await
+  `LIB.FeaSolver.init()` themselves before calling `create`."
 
-#### I2 — `rctx` parameter naming inconsistency in `registerRender3D` contract (info)
-- **Location**: §Task 5.4.1 "Files to create" — `UnifiedMotor.RENDER3D` / `registerRender3D`
-- **Problem**: In the `RENDER3D` slot definition, the paint signature is:
-  > `entry = { id:string, paint(ctx, L3, rctx) → void }` where `rctx = { runtime, config, expanded, W, H }`
+- **Problem**: The spec specifies what tests must do (await `init` before `create`) but
+  does not define what `create` or `solve` do if called before `init` resolves.
+  "Awaits `init` lazily on first `solve` via a cached promise" implies `solve` is
+  asynchronous or blocks until init completes, but the `MotorSlice` contract section
+  declares `solve(thetaR, currents) → { torque, fluxLinkages, field }` as a synchronous
+  call. These are in tension.
 
-  But in the mount's render step (step 4), the call is written as:
-  > `UnifiedMotor.RENDER3D.paint(ctx, L3, { runtime, config, expanded, W, H })`
+- **Why decision-required**: Two interpretations: (a) `solve` returns a Promise when init
+  is pending (breaking the sync contract), or (b) `solve` throws synchronously if `init`
+  has not yet completed (a guard). Neither is stated. The implementer cannot resolve this
+  without a decision.
 
-  The inline call does not name the third argument `rctx` — it constructs the object literal directly. This is not a contradiction (the object shape matches), but the parameter name `rctx` in the type signature is never used in the call site example. Future consumers of the seam (Phase 9) read the paint signature first and may expect a named object, which is fine, but the two presentations could be unified for clarity.
-- **No action required** — purely stylistic. Recorded for awareness.
+- **Options**:
+  - **Option A — Specify that `create` throws (or returns `null`) if called before `init`
+    has resolved**: Add to T5.1.1: "`create` asserts `LIB.FeaSolver._ready === true`
+    (or equivalent cached promise state) and throws `Error('FeaSolver not initialized;
+    await LIB.FeaSolver.init() first')` if called early. This preserves the synchronous
+    contract for `solve`."
+    - Pros: Synchronous contract preserved end-to-end; production misuse is caught early
+      with a clear error.
+    - Cons: Caller must always await `init` before calling `create`; the cached-promise
+      description implies lazy init was intended.
+
+  - **Option B — Specify that `solve` is async when `init` is pending, resolving after
+    init completes**: Update the MotorSlice contract section to declare `solve` as
+    returning either `{ torque, … }` synchronously (after init) or a `Promise<{ torque,
+    … }>` (before init). Update the test fixture's `initSolver()` helper description to
+    clarify this is a convenience, not a requirement.
+    - Pros: Lazy-init works; callers can call `create` early and `solve` later.
+    - Cons: Breaking change to the "preserved unchanged contract" framing — the original
+      MotorSlice contract was synchronous and `MotorStack` is not written to handle a
+      Promise from `solve`.
+
+---
+
+#### D6 — Technically discovery-phrased conditional in agnostic-pipeline edit, immediately resolved (info)
+
+- **Location**: phase-5 §Wave 5.3 Task T5.3.1 "Files to modify" — `tests/pipeline/agnostic-pipeline.test.js`
+  edit point 4: "extend the `CARVE_OUTS` set ONLY if the agnosticism audit Phase-8
+  allow-list (per `spec/plan.md` Phase 8) so dictates"
+
+- **Problem**: The phrase "ONLY if...so dictates" is technically discovery phrasing — it
+  requires the implementer to consult Phase 8's spec to determine the action. The sentence
+  immediately resolves it by stating the concrete answer ("CARVE_OUTS stays exactly:
+  `{ "app.js", "registry.js", "header-buttons.js", "stepper-drive.js", "three-phase.js" }`"),
+  but the conditional clause still requires the implementer to understand the dependency
+  relationship to trust the stated answer.
+
+- **Why decision-required**: The concrete answer is given and is almost certainly correct;
+  the issue is that a future Phase-5 edit that adds a new `lib/` file with a machine name
+  would require the implementer to reason about Phase 8 again. The residual discovery risk
+  is low, but it exists.
+
+- **Options**:
+  - **Option A — Delete the conditional clause entirely**: Replace "extend the `CARVE_OUTS`
+    set ONLY if the agnosticism audit Phase-8 allow-list (per `spec/plan.md` Phase 8) so
+    dictates; since no new lib file introduces a machine name...CARVE_OUTS stays exactly:
+    `{...}`" with simply "`CARVE_OUTS` stays exactly: `{...}`; do not add any entry."
+    - Pros: Eliminates discovery phrasing entirely; the concrete answer stands alone.
+    - Cons: Loses the rationale for why CARVE_OUTS doesn't grow here.
+
+  - **Option B — Keep as-is with a note**: Add parenthetically "(This determination is
+    already made: no new file in Phase 5 introduces a machine name; no further lookup
+    required.)"
+    - Pros: Preserves the rationale while neutralizing the discovery phrasing.
+    - Cons: Slightly more text; still contains the conditional, just clarified.

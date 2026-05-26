@@ -1,13 +1,12 @@
 {
-  "_note": "Task IDs carry a 'T' prefix corresponding to the bare numeric IDs in plan.md and the phase-spec headings (e.g. manifest 'T1.1.1' == spec 'Task 1.1.1'). MERGED PHASES: phases 3+4 are bundled under one manifest phase (phase 3, 'core-rest') and phases 6+7+8 under one (phase 6, 'feature-layers') so implement-hybrid runs their independent sub-phases concurrently (cross-phase task_groups share a wave). Group/task IDs keep their ORIGIN-phase prefix (3.x, 4.x, 6.x, 7.x, 8.x). The merged phase's spec_file is a ROUTER STUB (spec/phase-34-core-rest.md, spec/phase-678-feature-layers.md) that redirects each task ID to its authoritative original spec (spec/phase-3-*.md, phase-4-*.md, phase-6-*.md, phase-7-*.md, phase-8-*.md), which are unchanged. The stub is only consumed by the implementer/verifier prompt; review-spec's 'task ID exists in spec_file' invariant is therefore satisfied via the router redirect, not by inlining tasks. Wave ordering within a merged phase preserves each origin phase's internal chain; the two index.html appenders in the feature phase (7.5.a, 8.3.a) are split across waves 6.3 and 6.4 so no two implementers write index.html in the same wave.",
-  "test_command": "npm test",
+  "test_command": "node --test",
   "verification": [
-    "npm test (node --test) exits 0 across the whole Phase-1-9 suite.",
-    "node scripts/agnosticism-audit.js exits 0 (prints 'AGNOSTICISM AUDIT: PASS'), covering the four checks below.",
-    "Check 1 (machine names): none of the 15 fixture ids as quoted string literals, and none of the 7 word-tokens (bldc, pmsm, srm, squirrel, brushed, stepper, wound-field), appear in any of the 22 unified-motor-owned lib/ engine + runtime-UI files; machines/, tests/, docs, and pre-existing non-unified-motor token sites (stepper-drive.js, the app.js/registry.js/header-buttons.js comments, frozen three-phase.js) are out of scope.",
-    "Check 2 (machine-type field): none of machineType/machine_type/machineKind/machineName/motorType/motorKind is referenced by those 22 files.",
-    "Check 3 (single-slice bypass): lib/motor-stack.js and lib/motor-run.js contain none of the patterns nSlices===1, nSlices<2, slices.length===1, slices.length<2.",
-    "Check 4 (frozen set): git diff motor-baseline -- index.html lib/em-physics.js lib/coil-render.js lib/three-phase.js lib/layout3d.js lessons/ac_motor/ is empty (frozen EM-ecosystem set byte-unchanged from the Phase 0 baseline; lib/field-render.js is excluded — Phase 5 extends it)."
+    "node --test runs green across the whole suite (no failing or erroring test files)",
+    "Saturated cogging/detent torque is grid-convergent to < 5% under Richardson mesh refinement (tests/fea-engine/saturated-cogging.test.js)",
+    "Cross-method torque consistency: harmonic (gap) vs mesh-Arkkio vs co-energy agree within 2% at a loaded operating point",
+    "No-load back-EMF vs numerical dλpm/dθ·ω < 1%; slotless/Carter gap and round-rotor linear inductance < 3%",
+    "scripts/agnosticism-audit.js exits 0 (zero machine-name refs; no machine-type field read; no single-slice fast path in motor-stack/motor-run; git diff motor-baseline over the frozen EM set is empty)",
+    "Repo-wide grep finds zero stale grid references (airgap-grid/solve/torque/refine/worker, motor-compile, the grid motor-slice, LIB.Airgap*, LIB.MotorCompile, drawGapField) in any form"
   ],
   "phases": [
     {
@@ -21,7 +20,9 @@
             {
               "group_id": "0.1.a",
               "tasks": [
-                { "id": "T0.1.1", "complexity": "S" }
+                { "id": "T0.1.1", "complexity": "M" },
+                { "id": "T0.1.2", "complexity": "M" },
+                { "id": "T0.1.3", "complexity": "L" }
               ],
               "user_required_tasks": []
             }
@@ -31,8 +32,8 @@
     },
     {
       "phase": 1,
-      "name": "engine-core",
-      "spec_file": "spec/phase-1-engine-core.md",
+      "name": "fea-sparse-solver",
+      "spec_file": "spec/phase-1-fea-sparse-solver.md",
       "waves": [
         {
           "wave": "1.1",
@@ -40,7 +41,7 @@
             {
               "group_id": "1.1.a",
               "tasks": [
-                { "id": "T1.1.1", "complexity": "M" }
+                { "id": "T1.1.1", "complexity": "L" }
               ],
               "user_required_tasks": []
             }
@@ -52,32 +53,7 @@
             {
               "group_id": "1.2.a",
               "tasks": [
-                { "id": "T1.2.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            }
-          ]
-        },
-        {
-          "wave": "1.3",
-          "task_groups": [
-            {
-              "group_id": "1.3.a",
-              "tasks": [
-                { "id": "T1.3.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            }
-          ]
-        },
-        {
-          "wave": "1.4",
-          "task_groups": [
-            {
-              "group_id": "1.4.a",
-              "tasks": [
-                { "id": "T1.4.1", "complexity": "L" },
-                { "id": "T1.4.2", "complexity": "M" }
+                { "id": "T1.2.1", "complexity": "M" }
               ],
               "user_required_tasks": []
             }
@@ -87,8 +63,8 @@
     },
     {
       "phase": 2,
-      "name": "winding-model-and-compile",
-      "spec_file": "spec/phase-2-winding-model-and-compile.md",
+      "name": "parametric-ring-stack-mesher",
+      "spec_file": "spec/phase-2-parametric-ring-stack-mesher.md",
       "waves": [
         {
           "wave": "2.1",
@@ -120,7 +96,29 @@
             {
               "group_id": "2.3.a",
               "tasks": [
-                { "id": "T2.3.1", "complexity": "M" }
+                { "id": "T2.3.1", "complexity": "L" },
+                { "id": "T2.3.2", "complexity": "M" }
+              ],
+              "user_required_tasks": ["T2.3.2"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "current-source-terminal",
+      "spec_file": "spec/phase-3-current-source-terminal.md",
+      "waves": [
+        {
+          "wave": "3.1",
+          "task_groups": [
+            {
+              "group_id": "3.1.a",
+              "tasks": [
+                { "id": "T3.1.1", "complexity": "M" },
+                { "id": "T3.1.2", "complexity": "S" },
+                { "id": "T3.1.3", "complexity": "S" }
               ],
               "user_required_tasks": []
             }
@@ -129,20 +127,13 @@
       ]
     },
     {
-      "phase": 3,
-      "name": "core-rest",
-      "spec_file": "spec/phase-34-core-rest.md",
+      "phase": 4,
+      "name": "harmonic-gap-sliding-interface",
+      "spec_file": "spec/phase-4-harmonic-gap-sliding-interface.md",
       "waves": [
         {
-          "wave": "3.1",
+          "wave": "4.1",
           "task_groups": [
-            {
-              "group_id": "3.1.a",
-              "tasks": [
-                { "id": "T3.1.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            },
             {
               "group_id": "4.1.a",
               "tasks": [
@@ -153,19 +144,12 @@
           ]
         },
         {
-          "wave": "3.2",
+          "wave": "4.2",
           "task_groups": [
-            {
-              "group_id": "3.2.a",
-              "tasks": [
-                { "id": "T3.1.2", "complexity": "M" }
-              ],
-              "user_required_tasks": []
-            },
             {
               "group_id": "4.2.a",
               "tasks": [
-                { "id": "T4.2.1", "complexity": "M" }
+                { "id": "T4.2.1", "complexity": "L" }
               ],
               "user_required_tasks": []
             }
@@ -175,8 +159,8 @@
     },
     {
       "phase": 5,
-      "name": "agnostic-pipeline",
-      "spec_file": "spec/phase-5-agnostic-pipeline.md",
+      "name": "fea-slice",
+      "spec_file": "spec/phase-5-fea-slice.md",
       "waves": [
         {
           "wave": "5.1",
@@ -185,20 +169,6 @@
               "group_id": "5.1.a",
               "tasks": [
                 { "id": "T5.1.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "5.1.b",
-              "tasks": [
-                { "id": "T5.1.2", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "5.1.c",
-              "tasks": [
-                { "id": "T5.1.3", "complexity": "M" }
               ],
               "user_required_tasks": []
             }
@@ -227,37 +197,13 @@
               "user_required_tasks": []
             }
           ]
-        },
-        {
-          "wave": "5.4",
-          "task_groups": [
-            {
-              "group_id": "5.4.a",
-              "tasks": [
-                { "id": "T5.4.1", "complexity": "L" }
-              ],
-              "user_required_tasks": ["T5.4.1"]
-            }
-          ]
-        },
-        {
-          "wave": "5.5",
-          "task_groups": [
-            {
-              "group_id": "5.5.a",
-              "tasks": [
-                { "id": "T5.5.1", "complexity": "M" }
-              ],
-              "user_required_tasks": []
-            }
-          ]
         }
       ]
     },
     {
       "phase": 6,
-      "name": "feature-layers",
-      "spec_file": "spec/phase-678-feature-layers.md",
+      "name": "mesh-render-and-live-ui",
+      "spec_file": "spec/phase-6-mesh-render-and-live-ui.md",
       "waves": [
         {
           "wave": "6.1",
@@ -265,49 +211,7 @@
             {
               "group_id": "6.1.a",
               "tasks": [
-                { "id": "T6.1.1", "complexity": "M" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "6.1.b",
-              "tasks": [
-                { "id": "T6.1.2", "complexity": "M" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "6.1.c",
-              "tasks": [
-                { "id": "T6.1.3", "complexity": "S" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "7.1.a",
-              "tasks": [
-                { "id": "T7.1.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "7.3.a",
-              "tasks": [
-                { "id": "T7.3.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "7.4.a",
-              "tasks": [
-                { "id": "T7.4.1", "complexity": "M" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "8.1.a",
-              "tasks": [
-                { "id": "T8.1.1", "complexity": "L" }
+                { "id": "T6.1.1", "complexity": "L" }
               ],
               "user_required_tasks": []
             }
@@ -319,28 +223,7 @@
             {
               "group_id": "6.2.a",
               "tasks": [
-                { "id": "T6.2.1", "complexity": "M" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "7.2.a",
-              "tasks": [
-                { "id": "T7.2.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "8.2.a",
-              "tasks": [
-                { "id": "T8.2.1", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "8.2.b",
-              "tasks": [
-                { "id": "T8.2.2", "complexity": "M" }
+                { "id": "T6.2.1", "complexity": "L" }
               ],
               "user_required_tasks": []
             }
@@ -354,83 +237,62 @@
               "tasks": [
                 { "id": "T6.3.1", "complexity": "L" }
               ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "6.3.b",
-              "tasks": [
-                { "id": "T6.3.2", "complexity": "L" }
-              ],
-              "user_required_tasks": []
-            },
-            {
-              "group_id": "8.3.a",
-              "tasks": [
-                { "id": "T8.3.1", "complexity": "M" }
-              ],
-              "user_required_tasks": ["T8.3.1"]
-            }
-          ]
-        },
-        {
-          "wave": "6.4",
-          "task_groups": [
-            {
-              "group_id": "7.5.a",
-              "tasks": [
-                { "id": "T7.5.1", "complexity": "M" }
-              ],
-              "user_required_tasks": ["T7.5.1"]
+              "user_required_tasks": ["T6.3.1"]
             }
           ]
         }
       ]
     },
     {
-      "phase": 9,
-      "name": "saturation-and-render-polish",
-      "spec_file": "spec/phase-9-saturation-and-render-polish.md",
+      "phase": 7,
+      "name": "validation",
+      "spec_file": "spec/phase-7-validation.md",
       "waves": [
         {
-          "wave": "9.1",
+          "wave": "7.1",
           "task_groups": [
             {
-              "group_id": "9.1.a",
+              "group_id": "7.1.a",
               "tasks": [
-                { "id": "T9.1.1", "complexity": "L" },
-                { "id": "T9.1.2", "complexity": "M" }
+                { "id": "T7.1.2", "complexity": "M" }
+              ],
+              "user_required_tasks": []
+            },
+            {
+              "group_id": "7.1.b",
+              "tasks": [
+                { "id": "T7.1.1", "complexity": "L" }
               ],
               "user_required_tasks": []
             }
           ]
         },
         {
-          "wave": "9.2",
+          "wave": "7.2",
           "task_groups": [
             {
-              "group_id": "9.2.a",
+              "group_id": "7.2.a",
               "tasks": [
-                { "id": "T9.2.1", "complexity": "M" },
-                { "id": "T9.2.2", "complexity": "M" }
+                { "id": "T7.2.1", "complexity": "M" }
               ],
-              "user_required_tasks": ["T9.2.2"]
+              "user_required_tasks": []
             }
           ]
         }
       ]
     },
     {
-      "phase": 10,
-      "name": "agnosticism-guard",
-      "spec_file": "spec/phase-10-agnosticism-guard.md",
+      "phase": 8,
+      "name": "legacy-reference-review-and-agnosticism-guard",
+      "spec_file": "spec/phase-8-legacy-reference-review-and-agnosticism-guard.md",
       "waves": [
         {
-          "wave": "10.1",
+          "wave": "8.1",
           "task_groups": [
             {
-              "group_id": "10.1.a",
+              "group_id": "8.1.a",
               "tasks": [
-                { "id": "T10.1.1", "complexity": "M" }
+                { "id": "T8.1.1", "complexity": "M" }
               ],
               "user_required_tasks": []
             }

@@ -14,7 +14,6 @@
 const LIB = require("../_shim.js");
 
 // Phase-2 modules
-require("../../lib/motor-compile.js");
 require("../../lib/winding-model.js");
 
 // Phase-3 module
@@ -24,15 +23,13 @@ require("../../lib/excitation.js");
 require("../../lib/motor-circuit.js");
 
 // Phase-5 lib modules
-require("../../lib/motor-slice.js");
 require("../../lib/motor-stack.js");
 require("../../lib/motor-run.js");
 
 // Phase-5 app module (attaches window.UnifiedMotor.ConfigSchema)
 require("../../lessons/unified_motor/config-schema.js");
 
-// Re-export assertClose from the engine fixtures
-const { assertClose } = require("../engine/_fixtures.js");
+const { assertClose } = require("../_assert.js");
 
 // ---------------------------------------------------------------------------
 //  MACHINE_NAMES — token list grepped for (case-insensitive) to assert that
@@ -170,7 +167,7 @@ function skewN2Config() {
 // ---------------------------------------------------------------------------
 //  tinySection({ withMagnet, withIron, turns }) → Phase-2 section
 //
-//  A hand-built Phase-2 section for motor-slice / motor-stack unit tests.
+//  A hand-built Phase-2 section for motor-stack unit tests.
 //  No dependence on config-schema.
 //  grid: Nr:6, Ntheta:24, rInner:0.04, rOuter:0.05, ell:0.1
 //  gapBand: { iInner:2, iOuter:4 }

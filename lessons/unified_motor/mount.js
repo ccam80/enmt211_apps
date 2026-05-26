@@ -571,17 +571,34 @@
       { key: "damping",   label: "damping",    min: 0.001, max: 0.2, step: 0.001, value: 0.05, log: true, tip: "Viscous damping coefficient" },
     ];
 
-    const sliderReg = buildSliders(shelf, sliderDefs, function (key, v) {
-      if (key === "amp" && runtime.circuits.length > 0) {
-        runtime.circuits[0].terminal.amp = v;
-      } else if (key === "freq" && runtime.circuits.length > 0) {
-        runtime.circuits[0].terminal.freq = v;
+    // Drive/load application. `amp` and `freq` apply to ALL circuits (so a
+    // polyphase machine stays balanced — the per-phase phaseOffsets in the config
+    // are preserved), not just circuit 0. `drive` tracks the current values so
+    // they can be re-applied after a geometry rebuild.
+    const drive = {};
+    function applyDrive(key, v) {
+      drive[key] = v;
+      if (key === "amp") {
+        for (const c of runtime.circuits) c.terminal.amp = v;
+      } else if (key === "freq") {
+        for (const c of runtime.circuits) c.terminal.freq = v;
       } else if (key === "loadTorque") {
         runtime.mechanical.loadTorque = v;
       } else if (key === "damping") {
         runtime.mechanical.damping = v;
       }
-    });
+    }
+    function reapplyDrive() {
+      for (const k in drive) applyDrive(k, drive[k]);
+    }
+
+    const sliderReg = buildSliders(shelf, sliderDefs, applyDrive);
+
+    // Apply the slider defaults to the runtime at mount so the displayed controls
+    // are the single source of truth for drive/load — otherwise the sim silently
+    // ran the config's own amp/damping and the UI was a lie (and the config's
+    // tiny damping left the rotor with no sane steady state).
+    for (const d of sliderDefs) applyDrive(d.key, d.value);
 
     // -----------------------------------------------------------------------
     //  5. Orbit-camera tool state + smoothed magScale for gap-field viz
@@ -601,6 +618,7 @@
     function requestRebuild() {
       expanded = expand(config);
       runtime  = LIB.MotorRun.create(expanded);
+      reapplyDrive();
     }
 
     function buildCtx() {
@@ -653,6 +671,12 @@
     let histAcc = 0;
     let rafId = null;
     let lastTime = null;
+
+    // Physics steps per render frame. The full nonlinear air-gap solve runs on
+    // EVERY step (full accuracy), so this is decoupled from wall-clock: the sim
+    // plays in smooth slow-motion. 1 step/frame keeps the frame light (one solve)
+    // for the highest frame rate; the rotor turns at ~frameRate × PHYS_DT realtime.
+    const STEPS_PER_FRAME = 1;
 
     // -----------------------------------------------------------------------
     //  7. Readout builder
@@ -912,24 +936,22 @@
       const dtFrame = Math.min((now - lastTime) / 1000, 0.05);
       lastTime = now;
 
-      // Physics accumulator
+      // Physics — solve-every-step (full Ntheta=256 + saturation, bit-accurate),
+      // a FIXED small number of steps per render frame, decoupled from wall-clock.
+      // The full nonlinear air-gap solve (~tens of ms) cannot run realtime at this
+      // resolution without sacrificing accuracy (every cheap torque shortcut —
+      // coarsening, held-torque, co-energy — costs 10–40% accuracy), so the sim
+      // plays in smooth slow-motion (~0.1× realtime) instead of choppily at
+      // realtime. Field, torque and dynamics are exact on every step.
       if (!paused) {
-        acc += dtFrame;
-        while (acc >= PHYS_DT) {
+        for (let s = 0; s < STEPS_PER_FRAME; s++) {
           runtime.step(PHYS_DT);
-          acc -= PHYS_DT;
         }
-
-        // Plot history at HIST_HZ
-        histAcc += dtFrame;
-        const histDt = 1 / HIST_HZ;
-        if (histAcc >= histDt) {
-          histAcc -= histDt;
-          const st  = runtime.state;
-          const tau = runtime.lastSolve ? runtime.lastSolve.torque : 0;
-          const i0  = st.i.length > 0 ? st.i[0] : 0;
-          history.push(st.t, tau, st.omega, i0);
-        }
+        // Plot history — one sample per frame, on the sim-time axis.
+        const st  = runtime.state;
+        const tau = runtime.lastSolve ? runtime.lastSolve.torque : 0;
+        const i0  = st.i.length > 0 ? st.i[0] : 0;
+        history.push(st.t, tau, st.omega, i0);
       }
 
       // Render 3D viewport
@@ -986,29 +1008,6 @@
             const planeZ   = expanded.slices[k].offset || 0;
             const features = expanded.slices[k].section.features;
             drawFeatureSectors3D(ctx3, L3, features, planeZ, st.theta, st.i);
-          }
-
-          // Draw gap-field heatmap overlay for each slice.
-          if (solved) {
-            for (let k = 0; k < expanded.slices.length; k++) {
-              const sliceField = solved.perSliceField[k];
-              if (!sliceField) continue;
-              const sliceGrid = runtime.stack.sliceGrid(k);
-              const geom = {
-                Nr:     sliceGrid.Nr,
-                Ntheta: sliceGrid.Ntheta,
-                r:      sliceGrid.r,
-                rInner: sliceGrid.rInner,
-                rOuter: sliceGrid.rOuter,
-                planeZ: expanded.slices[k].offset || 0,
-              };
-              LIB.FieldRender.drawGapField(ctx3, L3, sliceField, geom, {
-                alpha:        0.55,
-                vectors:      true,
-                vectorStride: 12,
-                magScale:     smoothedMagScale,
-              });
-            }
           }
 
           // Stator bore outline (rOuter ring) in each slice plane.

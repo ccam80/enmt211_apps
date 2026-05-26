@@ -1,118 +1,92 @@
-# Spec Review: Phase 3 — excitation-commutation
+# Spec Review: Phase 3 — CURRENT-source terminal
 
 ## Verdict: needs-revision
 
 ## Tally
 | Severity | Mechanical | Decision-Required | Total |
 |----------|------------|-------------------|-------|
-| critical | 0          | 0                 | 0     |
-| major    | 1          | 3                 | 4     |
-| minor    | 1          | 1                 | 2     |
-| info     | 0          | 1                 | 1     |
+| critical | 0 | 1 | 1 |
+| major    | 0 | 1 | 1 |
+| minor    | 2 | 1 | 3 |
+| info     | 0 | 1 | 1 |
 
 ## Plan Coverage
 | Plan Task | In Spec? | Notes |
 |-----------|----------|-------|
-| 3.1.1 — `excitation.js`: `commutationPhase`/`supplyValue`/`sectorGate`/`evalTerminal`/`evalDrive`; terminal states `{AC,DC,PULSE,STEP,OPEN,SHORT}`; commutation `{none,mechanical,electronic-trap,electronic-sine,sequencer}`; zero deps, DOM-free | yes | Full API spelled out with signatures, return types, and dispatch table |
-| 3.1.2 — Closed-form suite: supply waveforms; emergent balanced/N-phase summing to zero; single-phasing `OPEN`; 6-step `electronic-trap` conduction table; `mechanical` DC-chop + AC-commutation; `sequencer` step pattern; each `commutationPhase` mode vs formula. Own headless loader `tests/excitation/_fixtures.js` | yes | All enumerated closed-form checks appear; three tests use discovery phrasing instead of concrete values (see D1, D2, D3) |
-| Plan verification: "each excitation source and commutation mapping matches its closed form" | yes | Covered by `sources.test.js` and `commutation.test.js` assertions |
-| Plan verification: "semi-implicit current step stable for `dt > L/R`" | n/a | Phase 4 concern; correctly absent |
-| Plan verification: "shorted-winding config shows induced current" | n/a | Phase 4 concern; correctly absent |
-
----
+| 3.1.1 — CURRENT terminal vocabulary, circuit enforcement, run routing, schema validation | yes | Full detail; all four files covered; three test files specified |
+| 3.1.2 — Wound-field-synchronous fixture flip DC→CURRENT | yes | Exact field change specified; acceptance criteria clear |
+| 3.1.3 — Per-iron `Bknee` passthrough in config-schema | yes | All three edit sites in config-schema.js identified; seven test cases specified |
+| Phase 3 verification measure: engine-independent tests prove CURRENT mechanism | yes | Tests listed in T3.1.1/T3.1.3; dynamic self-start deferred to Phase 7 with justification |
+| Phase 3 verification measure: WFS fixture uses regulated CURRENT field | yes | T3.1.2 |
 
 ## Findings
 
 ### Mechanical Fixes
 | ID | Severity | Location | Problem | Proposed Fix |
 |----|----------|----------|---------|--------------|
-| M1 | minor | Phase 3 §"Wave 3.2: Tests" section heading | Wave heading reads "Wave 3.2" but the task immediately underneath is numbered `3.1.2` (prefix `3.1`). Every other phase uses wave-aligned task IDs (wave 1.4 → tasks 1.4.1/1.4.2; wave 2.3 → task 2.3.1). The plan assigns this task `3.1.2` and the manifest correctly records `T3.1.2` in wave `3.2`; the inconsistency is in the spec heading only. | Add a parenthetical to the wave heading only: rename "Wave 3.2: Tests" → "Wave 3.2: Tests (Task 3.1.2 — plan numbering retained)". This is mechanical because it adds only a clarifying label without changing any ID, restructuring any wave, or touching the manifest. (A full renumber to `3.2.1` would require coordinated edits to both the spec and the manifest and is Decision-Required — see D4.) |
-
----
+| M1 | minor | §Task 3.1.1 "Tests" — `"CURRENT under sequencer imposes a constant current"` | The test specifies `commutation { mode: "sequencer", stepAngleElec: Math.PI/2 }` and `stepIndex ∈ {0, 2}` but provides no `t` or `theta` for the `ctx` argument. `evalTerminal` receives a full ctx object; without explicit values an implementer must guess. For CURRENT the result is `t`/`theta`-invariant, so the correct default is `t: 0, theta: 0` (matching every other test in the file). | Add `ctx = { t: 0, theta: 0, stepIndex: 0 }` / `{ t: 0, theta: 0, stepIndex: 2 }` to the two test calls. |
+| M2 | minor | §Task 3.1.1 "Files to modify" — `lib/motor-circuit.js`, `stepCurrents` spec, return-value description | The spec defines `mutual2` in the `current-terminal.test.js` setup block using the notation `Float64Array[L0,M,M,L1]`. This is not valid JavaScript constructor syntax (square brackets are array literals, not constructor arguments). An implementer must guess the intent. The correct form is `new Float64Array([L0,M,M,L1])`. | Replace `Float64Array[L0,M,M,L1]` → `new Float64Array([L0,M,M,L1])` in the `mutual2` helper description. |
 
 ### Decision-Required Items
 
-#### D1 — "PULSE dead sector" test lacks a concrete theta value (major)
+#### D1 — `current-schema.test.js` require path for `config-schema.js` is wrong (critical)
 
-- **Location**: Phase 3 §Task 3.1.2, `tests/excitation/sources.test.js`, test `"PULSE dead sector is open, active sector is ±amp"`
-- **Problem**: The spec reads:
-  > `evalTerminal` with `terminal:{type:"PULSE",amp:48,conductionAngle:2π/3}`, `commutation:{mode:"electronic-trap",poles:2}`: at `theta = π/6` → `{kind:"voltage", V:48}`; **at `theta` giving `θ_comm ∈ [2π/3, π)` → `{kind:"open"}`**.
-  The first assertion pins `theta = π/6`. The second does not pin a concrete theta — "at `theta` giving `θ_comm ∈ [2π/3, π)`" requires the implementer to derive or choose a theta that lands in the dead sector. With `poles:2` and `loadAngle` defaulting to `0`, `θ_comm = theta`, so any `theta ∈ [2π/3, π)` satisfies the condition — but the implementer must make that deduction and choose a specific value. This is discovery phrasing at `major` severity per the review rules.
-- **Why decision-required**: Multiple concrete theta values are valid (e.g. `3π/4`, `5π/6`). Pinning one is an arbitrary choice; a reasonable reviewer might pick a different value.
+- **Location**: §Task 3.1.1 "Files to create" — `tests/excitation/current-schema.test.js` setup block
+- **Problem**: The spec states: "Setup: `if (!globalThis.window) globalThis.window = globalThis;` then `require` (relative to `lib/`) `util.js`, `winding-model.js`, `config-schema.js` in that order." `config-schema.js` does **not** live in `lib/` — it lives at `lessons/unified_motor/config-schema.js`. A `require("../../lib/config-schema.js")` from `tests/excitation/` would fail with `MODULE_NOT_FOUND` and the test file would not load. The sibling task T3.1.3 gets this right: its `bknee-schema.test.js` setup block specifies `lessons/unified_motor/config-schema.js` by its full repo-relative path. The discrepancy makes the T3.1.1 test file unrunnable as written.
+- **Why decision-required**: Two plausible readings exist. Option A is that the sentence means to use the same pattern as T3.1.3 and the short path is a typo. Option B is that the test was intended to live in a different directory (e.g., `tests/pipeline/` alongside `bknee-schema.test.js`) and the file placement is what needs correcting. Both fix the load error but produce different test-file paths and different require depths, which affects the manifest file-list if either path was intended to be the canonical one.
 - **Options**:
-  - **Option A — Pin `theta = 3π/4`**: Replace `at theta giving θ_comm ∈ [2π/3, π)` with `at theta = 3π/4 (θ_comm = 3π/4 ∈ [2π/3, π))`.
-    - Pros: `3π/4` is the midpoint of the dead sector; easy to verify by inspection; unambiguous.
-    - Cons: None material — any value in the range is equally valid; midpoint is as good as any other.
-  - **Option B — Pin `theta = 5π/6`**: Replace with `at theta = 5π/6 (θ_comm = 5π/6 ∈ [2π/3, π))`.
-    - Pros: Tests the far end of the dead sector, away from the boundary.
-    - Cons: Less intuitive than the midpoint; no functional difference.
-  - **Option C — Reword as two concrete assertions**: `theta = π/6 → {kind:"voltage", V:48}; theta = 3π/4 → {kind:"open"}`. Remove the range qualifier entirely.
-    - Pros: Both values pinned; no range description needed; no discovery required.
-    - Cons: Slightly rewords the test structure; functionally equivalent to Option A.
+  - **Option A — Fix the require path, keep file at `tests/excitation/`**: In the `current-schema.test.js` setup block, change the require of `config-schema.js` to `require("../../lessons/unified_motor/config-schema.js")` (relative to `tests/excitation/`), matching the depth-corrected form of T3.1.3.
+    - Pros: File stays in the excitation test directory, which is thematically correct (it validates the `CURRENT` terminal type through the schema). Minimal change.
+    - Cons: Introduces a `lessons/` require from a `tests/excitation/` file, which is slightly unconventional (T3.1.3's test sits in `tests/pipeline/` which is arguably closer to config-schema). Requires the implementer to notice the path depth mismatch.
+  - **Option B — Move the file to `tests/pipeline/`**: Place `current-schema.test.js` at `tests/pipeline/current-schema.test.js` instead of `tests/excitation/`, matching the directory already used by `bknee-schema.test.js`. Update the require path to `require("../../lessons/unified_motor/config-schema.js")` (same depth as T3.1.3). Update Files Owned and the manifest file list for group 3.1.a accordingly.
+    - Pros: All config-schema tests live together in `tests/pipeline/`, making the test directory structure consistent. The require path is the same as T3.1.3.
+    - Cons: The test name (`current-schema.test.js`) validates the CURRENT terminal type's schema acceptance — splitting a conceptually excitation-related test into the pipeline directory may confuse future contributors. The Files Owned and manifest entries need updating.
+  - **Option C — Require by absolute path using `path.join(__dirname, ...)`**: Keep the file at `tests/excitation/current-schema.test.js` and use `require(path.join(__dirname, "../../lessons/unified_motor/config-schema.js"))` to make the path self-documenting and immune to working-directory assumptions.
+    - Pros: Explicit, unambiguous, consistent with how Node test files in this repo already handle cross-directory requires (the bknee test uses relative paths so this would be novel but safe).
+    - Cons: Adds a `const path = require("path");` preamble not present in any other test file in the repo. Introduces a style divergence.
 
 ---
 
-#### D2 — "STEP in mode:none" test lacks a concrete `t` value (major)
+#### D2 — `supplyValue` fallthrough comment update is factually inaccurate for `CURRENT` (major)
 
-- **Location**: Phase 3 §Task 3.1.2, `tests/excitation/sources.test.js`, test `"STEP in mode:none at a dead-sector angle holds voltage, not open"`
-- **Problem**: The spec reads:
-  > `evalTerminal` `terminal:{type:"STEP",amp:10,freq:1,phaseOffset:0,conductionAngle:2π/3}`, `commutation:{mode:"none"}`, **at `t` such that `sectorGate(2π·1·t, 2π/3) === 0`**: result is `{kind:"voltage", V:10}`, not `{kind:"open"}`.
-  The phrase "at `t` such that…" requires the implementer to find a `t` in the dead sector of a `freq:1` gate. With `freq:1`, the first dead sector falls at `ψ = 2πt ∈ [2π/3, π)`, i.e. `t ∈ [1/3, 1/2)`. The implementer must compute this interval and pick a value. This is discovery phrasing at `major` severity.
-- **Why decision-required**: Multiple concrete values of `t` satisfy the condition. Choosing one is an arbitrary decision; a reasonable reviewer might pick `t = 5/12`, `t = 0.40`, or `t = 0.45`.
+- **Location**: §Task 3.1.1 "Files to modify" — `lib/excitation.js`, last bullet of the `evalTerminal` changes
+- **Problem**: The spec instructs: "Update the `supplyValue` fallthrough comment to read `// DC, PULSE, STEP, CURRENT — return raw amplitude; shape applied by sectorGate`." The existing comment is `// DC, PULSE, STEP — return raw amplitude; shape is applied by sectorGate`. Adding `CURRENT` to this comment is inaccurate: in modes `none`, `electronic-sine`, `electronic-trap`, and `sequencer`, CURRENT returns `{ kind: "current", I: supplyValue(...) }` **before** any `sectorGate` call — `sectorGate` is never applied to the CURRENT value in those modes. Only in `mechanical` mode does the spec gate the CURRENT value through `sectorGate` (Step 4). The proposed comment implies `sectorGate` always shapes CURRENT's output, which is false for three of the four mode families.
+- **Why decision-required**: Two different approaches fix this, and the choice affects what the comment communicates going forward.
 - **Options**:
-  - **Option A — Pin `t = 5/12`**: Replace `at t such that sectorGate(2π·1·t, 2π/3) === 0` with `at t = 5/12 (ψ = 5π/6, in the dead sector [2π/3, π))`.
-    - Pros: `5/12` is the midpoint of the first dead sector `[1/3, 1/2)`; the derivation is self-documenting. Verify: `2π·(5/12) = 5π/6 ≈ 2.618`; `sectorGate(5π/6, 2π/3) = 0` because `5π/6 ∈ [2π/3, π)`.
-    - Cons: None material.
-  - **Option B — Pin `t = 0.40`**: Use `t = 0.40` (ψ ≈ 2.513 rad ∈ `[2π/3, π)`).
-    - Pros: Decimal is simpler to type in test code.
-    - Cons: Less self-documenting than `5/12`; requires a comment to explain why `0.40` is in the dead sector.
+  - **Option A — Add `CURRENT` to the type list but clarify the gating**: Change the comment to `// DC, PULSE, STEP, CURRENT — return raw amplitude; sectorGate applied by evalTerminal for PULSE/STEP/mechanical-CURRENT`. This is accurate but verbose.
+    - Pros: Preserves the intent of enumerating which types reach the fallthrough, while not misleading about CURRENT gating.
+    - Cons: The comment is now longer and more qualified than the original; it mixes documentation about two different functions.
+  - **Option B — Keep `CURRENT` off the `sectorGate` comment; add a separate note**: Leave the `sectorGate` mention applying only to DC/PULSE/STEP: `// DC, PULSE, STEP, CURRENT — return raw amplitude` (drop "; shape applied by sectorGate" entirely, since that clause only holds for PULSE/STEP). The gating behaviour is already documented in `evalTerminal`'s JSDoc.
+    - Pros: Accurate. Short. The gating detail belongs in `evalTerminal`'s comment, not `supplyValue`'s.
+    - Cons: Removes the only inline mention that `sectorGate` does the shaping for PULSE/STEP, which may reduce discoverability.
+  - **Option C — Do not update the `supplyValue` fallthrough comment at all**: `CURRENT` terminals never reach the `return amp` fallthrough in practice (they are intercepted by `if (type === "CURRENT") return ...` in `evalTerminal` before calling `supplyValue` in modes none/electronic/sequencer, and in mechanical mode they call `supplyValue` then gate via `sectorGate` exactly like DC). The comment is a documentation convenience and keeping it as-is (`// DC, PULSE, STEP`) is marginally less accurate but not misleading.
+    - Pros: Eliminates the inaccuracy entirely. No comment change needed.
+    - Cons: The comment omits `CURRENT` even though `supplyValue` does return `amp` for it when called from the mechanical-mode branch of `evalTerminal`. A future reader may wonder why CURRENT is absent.
 
 ---
 
-#### D3 — "Mechanical AC commutation" test lacks concrete `(t, theta)` values (major)
+#### D3 — T3.1.2 acceptance criterion "Loading the fixture throws no error" is unverifiable as specified (minor)
 
-- **Location**: Phase 3 §Task 3.1.2, `tests/excitation/commutation.test.js`, test `"mechanical commutates AC (universal motor) — both phases present"`
-- **Problem**: The spec reads:
-  > `AC`+`mechanical` `{poles:2}`, `conductionAngle:π`: `V` equals `sectorGate((poles/2)·theta) · amp·cos(2π·freq·t + phaseOffset)` (`assertClose`) **for a `(t, theta)` where the gate is `−1` and the cosine is positive** (so the product is negative — confirms both arguments enter).
-  "For a `(t, theta)` where the gate is `−1` and the cosine is positive" requires the implementer to find a pair. With `poles:2` and `conductionAngle:π`, the gate is `−1` when `θ_comm = theta ∈ [π, 2π)`. Choosing e.g. `theta = 3π/2` gives gate `−1`. A positive cosine requires `cos(2π·freq·t + phaseOffset) > 0`. Neither `theta` nor `t` (nor `freq`, `amp`, `phaseOffset`) are pinned. The implementer must jointly satisfy two inequality conditions and also choose all four free parameters. This is discovery phrasing at `major` severity.
-- **Why decision-required**: The correct `(t, theta, freq, amp, phaseOffset)` tuple is not unique. The choice affects the exact numeric assertion value. A reasonable reviewer might choose different parameters.
-- **Options**:
-  - **Option A — Pin all parameters and expected value**: Replace the vague qualifier with explicit fixture: `terminal:{type:"AC",amp:10,freq:1,phaseOffset:0}`, `commutation:{mode:"mechanical",poles:2,conductionAngle:π}`, `ctx:{t:0, theta:3π/2}`. Expected: `sectorGate(3π/2, π) = −1`; `cos(0) = 1`; `V = −1 · 10 · 1 = −10`. Assert `assertClose(result.V, −10, 1e-9)`.
-    - Pros: Fully pinned; exactly one expected value; no implementer judgement required. Arithmetic verifiable: `3π/2 ∈ [π, 2π)` → gate `= −1`; `cos(0) = 1` → product `= −10`.
-    - Cons: Requires spec author to verify the arithmetic (done above).
-  - **Option B — Pin values inline as "e.g." and require them**: Reword as: "use `amp=10, freq=1, phaseOffset=0, theta=3π/2, t=0`; `sectorGate(3π/2) = −1`, `cos(0) = 1`, assert `assertClose(V, −10, 1e-9)`." Make clear these are the required values, not suggestions.
-    - Pros: Preserves the explanatory formula context while pinning the concrete case.
-    - Cons: Must say "use these values" not "e.g." to eliminate any discovery residual.
-  - **Option C — Split into two separate assertions**: One assertion: `sectorGate(theta, π) === −1` at `theta = 3π/2` (tests gate logic). Second assertion: the combined product at `(t=0, theta=3π/2)` equals `−10` (tests end-to-end composition). Eliminates the joint-condition discovery while keeping each assertion individually simple.
-    - Pros: Decomposed assertions are individually easier to diagnose on failure.
-    - Cons: Slightly more test code; marginally increases task 3.1.2 scope.
+- **Location**: §Task 3.1.2 "Acceptance criteria" — third bullet
+- **Problem**: The spec states: "Loading the fixture (`require` of the file) throws no error and registers the machine as before." `wound-field-synchronous.js` is an IIFE that assigns to `window.UnifiedMotor.MACHINES`. A plain `node -e "require('./...')"` would throw `ReferenceError: window is not defined` unless the `if (!globalThis.window) globalThis.window = globalThis;` shim is applied first. The spec does not state how the load check is to be performed — whether via a Node shim, a headless browser, or by inspection. This leaves the implementer to decide what "loading throws no error" means operationally.
+- **Why decision-required**: Options differ in where the shim lives and whether a test file is created.
+  - **Option A — Verify by inspection only**: Accept that "loading throws no error" is a code-review criterion (no runtime check), verified by human inspection of the IIFE structure after the edit. No test file required. The first real runtime exercise is Phase 7.
+    - Pros: Consistent with the spec's statement that "This fixture-only edit has no Phase-3-runnable test of its own."
+    - Cons: Acceptance criteria are supposed to be verifiable. Inspection-only criteria are weak.
+  - **Option B — Specify the load check via a one-liner with a shim**: Amend the acceptance criterion to say: `node -e "globalThis.window = globalThis; require('./lessons/unified_motor/machines/wound-field-synchronous.js'); const m = window.UnifiedMotor.MACHINES.find(x => x.id === 'wound-field-synchronous'); if (!m || m.config.circuits[0].terminal.type !== 'CURRENT') process.exit(1);"` exits 0. This makes the criterion runnable from a shell.
+    - Pros: Verifiable without a test file. Does not contradict the "no Phase-3 test" statement.
+    - Cons: Inline shell one-liners are fragile on Windows (path quoting). Adds a criterion that the spec says it deliberately avoids.
 
 ---
 
-#### D4 — Full renumber of task `3.1.2` to `3.2.1` requires coordinated spec + manifest edits (minor)
+#### D4 — `Iimp` undefined guard not specified in `stepCurrents` (info)
 
-- **Location**: Phase 3 §Wave 3.2 heading; §Task 3.1.2 heading; manifest `phases[3].waves[1].task_groups[0].tasks[0].id = "T3.1.2"`; Task 3.1.1 cross-reference "authored in Task 3.1.2"
-- **Problem**: M1 above proposes a heading-only annotation as the mechanical fix. The underlying mismatch between wave `3.2` and task prefix `3.1` can also be resolved by renumbering the task to `3.2.1` — but that requires editing three locations (spec task heading, manifest task ID, and the Task 3.1.1 cross-reference). This is a broader change than a heading annotation and is a decision, not a mechanical fix, because it deviates from the plan's numbering (`3.1.2`) and breaks any external cross-references to that ID.
-- **Why decision-required**: Two valid approaches exist with different tradeoffs. The right choice depends on whether plan-alignment or wave-alignment is the canonical source of task IDs.
-- **Options**:
-  - **Option A — Renumber to `3.2.1`**: Change spec task heading to `Task 3.2.1`, update manifest `T3.1.2` → `T3.2.1`, update the Task 3.1.1 body cross-reference "authored in Task 3.1.2" → "authored in Task 3.2.1".
-    - Pros: Consistent with every other phase's wave-aligned convention (wave `N.M` → task `N.M.k`); removes the anomaly permanently.
-    - Cons: Deviates from the plan's numbering; any external reference to `3.1.2` (e.g., tickets, changelogs) breaks.
-  - **Option B — Keep `3.1.2` with M1 annotation only**: Apply the M1 mechanical fix (add parenthetical to wave heading). Leave the task ID, manifest, and cross-references unchanged.
-    - Pros: Plan-consistent; no manifest change; minimum diff.
-    - Cons: The heading annotation is unusual; the anomaly persists for future readers.
-
----
-
-#### D5 — `DC` in `evalTerminal` step 3 reads `terminal.amp` directly while step 2 routes DC through `supplyValue` (info)
-
-- **Location**: Phase 3 §Task 3.1.1 `evalTerminal` step 2 (mode `"none"`, AC/DC clause) and step 3 (electronic-sine/trap/sequencer, DC clause)
-- **Problem**: Step 2 specifies `AC/DC → { kind: "voltage", V: supplyValue(terminal, ctx.t) }` — routing DC through `supplyValue`. Step 3 specifies `DC → { kind: "voltage", V: supplyValue(terminal, ctx.t) }` — the same wording. On re-reading, step 3's DC clause actually does say `supplyValue`, matching step 2. So there is no functional inconsistency. However, step 3 also says for the electronic modes: `"base = commutationPhase(commutation, ctx)"` is computed and then DC ignores `base` entirely. An implementer may ask why `base` is computed and discarded for DC. The spec does not explain this.
-- **Why decision-required**: Whether to add an explanatory note is a judgment call; the behaviour is correctly specified.
-- **Options**:
-  - **Option A — Add one clarifying sentence in step 3**: After the `DC` bullet in step 3, add: "(DC is a constant bus voltage; commutation phase `base` is irrelevant for DC — only `PULSE`, `STEP`, and `mechanical` modes shape DC into a switched waveform.)"
-    - Pros: Prevents implementer confusion about why `base` is computed but not used for DC; documents design intent inline; consistent with the plan's "zero machine identity" explanation style.
-    - Cons: Minor prose addition; a careful reader of the dispatch table can already infer this.
-  - **Option B — Leave as-is**: The spec is logically complete. A conforming implementer will produce correct code from the dispatch table alone.
-    - Pros: No change; shorter spec.
-    - Cons: Discovery risk if an implementer "corrects" the DC case in step 3 by applying `base` (e.g. as `supplyValue(terminal, ctx.t, base)`), which would break DC behaviour under electronic commutation.
+- **Location**: §Task 3.1.1 "Files to modify" — `lib/motor-circuit.js`, `stepCurrents` spec
+- **Problem**: The spec says `advance` passes `Iimp` as `default undefined when absent, preserving existing callers`. If `stepCurrents` receives `Iimp: undefined` and encounters a circuit with `terminalStates[k] === "CURRENT"`, the line `iNext[k] = Iimp[k]` would throw `TypeError: Cannot read properties of undefined`. The spec relies on the invariant that `CURRENT` terminal states are only ever produced by `motor-run.js`, which always constructs a real `Float64Array(m)` before calling `advance`. However, this invariant is not stated in the spec, leaving an implementer uncertain whether `stepCurrents` must guard against `Iimp === undefined` when CURRENT states are present.
+- **Why decision-required**: Whether to add a guard is a design choice.
+  - **Option A — State the invariant explicitly in the spec**: Add a note to the `stepCurrents` description: "Callers that never produce `terminalStates[k] === 'CURRENT'` may omit `Iimp`; `stepCurrents` does not guard against a missing `Iimp` when CURRENT states are present — the caller (motor-run.js) is responsible for always providing one."
+    - Pros: Documents the contract without adding defensive code. Matches the existing codebase style (no defensive wrappers per `rules.md`).
+    - Cons: Any future caller that forgets `Iimp` will get a cryptic TypeError at runtime.
+  - **Option B — Add a guard in `stepCurrents`**: Add `if (terminalStates[k] === "CURRENT" && Iimp == null) throw new Error("Iimp required when CURRENT terminal states are present")` before the pinning line.
+    - Pros: Fail-fast with a clear message.
+    - Cons: Adds a runtime check that `rules.md` cautions against ("No fallbacks. No backwards compatibility shims. No safety wrappers.").

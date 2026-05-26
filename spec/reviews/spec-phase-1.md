@@ -1,147 +1,120 @@
-# Spec Review: Phase 1 — engine-core
+# Spec Review: Phase 1 — FEA sparse solver
 
 ## Verdict: needs-revision
 
 ## Tally
 | Severity | Mechanical | Decision-Required | Total |
 |----------|------------|-------------------|-------|
-| critical | 0          | 0                 | 0     |
-| major    | 0          | 2                 | 2     |
-| minor    | 4          | 2                 | 6     |
-| info     | 0          | 1                 | 1     |
+| critical | 0 | 0 | 0 |
+| major    | 0 | 3 | 3 |
+| minor    | 0 | 1 | 1 |
+| info     | 1 | 1 | 2 |
 
 ## Plan Coverage
 | Plan Task | In Spec? | Notes |
 |-----------|----------|-------|
-| 1.1.1 — package.json + node:test runner + window shim | yes | Fully covered; smoke test assertions, shim design, guarded-require pattern all specified |
-| 1.2.1 — airgap-grid.js (polar FV operator, sliding band, field/flux, per-cell ν r/w) | yes | Full API including `getReluctivity`/`setIronReluctivity` primitives for Phase 9 |
-| 1.3.1 — airgap-solve.js (PCG + warm-start + global flux-dependent ceiling) | yes | Full API with ceiling algorithm and warm-start budget specified |
-| 1.4.1 — airgap-torque.js (Arkkio gap-band torque + co-energy decomposition) | yes | Full API; one ambiguity in `coenergy` parameter (see D2) |
-| 1.4.2 — Core physics tests (salient closed form, flux balance, convergence, solver) | yes | Five test files with named tests and numeric tolerances |
-| Plan verification: `npm test` green | yes | Task 1.4.2 acceptance criteria require all tests pass |
-| Plan verification: Arkkio vs analytic salient to gap-resolution tolerance over θ sweep | yes | Spec pins at `< 0.03` relative L∞ at Ntheta=256 and adds justifying note |
-| Plan verification: flux balance `∮ B dθ = 0` | yes | `flux-balance.test.js` asserts `< 1e-9` |
-| Plan verification: torque/energy convergence with grid resolution | yes | `convergence.test.js` asserts monotone decrease + `< 0.03` at Ntheta=256 |
-| Plan verification: warm-started PCG within budget on coarse grid | yes | `solver.test.js` asserts `warm.iters ≤ 0.5·cold_iters` and `< Ntheta` |
+| 1.1.1 — Production WASM solver wrapper (`lib/fea-solver.js` + artifacts + C++ source/build) | yes | All six files specified; handle-based ABI, non-streaming load, pattern/values split all covered. |
+| 1.2.1 — Headless solver tests + host-compat check | yes | All three test files specified; every named test case from the plan is present with concrete assertions. |
+| Plan verification: residual ~1e-10 on proxy at N=12100 and N=50176 | yes | Spec asserts `< 1e-9` at both sizes (measured ~1.4e-10 at N=50176 per plan §2.3). |
+| Plan verification: analyze/factorize/solve split exposed | yes | "numeric refactor reuses symbolic ordering" test asserts one `analyze` + multiple `factorize`/`solve`. |
+| Plan verification: Moodle/static-host non-streaming load path | yes | `host-compat.test.js` stubs `fetch`/`instantiateStreaming`, asserts no Worker, verifies solve works. |
 
 ---
 
 ## Findings
 
 ### Mechanical Fixes
-| ID | Severity | Location | Problem | Proposed Fix |
-|----|----------|----------|---------|--------------|
-| M1 | minor | phase-1 §Task 1.1.1 "Files to create", first bullet | Path written with backslash: `` `tests\_shim.js` ``. Shell Compatibility rules require forward slashes. | Replace `` `tests\_shim.js` `` → `` `tests/_shim.js` `` |
-| M2 | minor | phase-1 §Task 1.2.1 "Files to create", first bullet | Path written with backslash: `` `lib\airgap-grid.js` ``. | Replace `` `lib\airgap-grid.js` `` → `` `lib/airgap-grid.js` `` |
-| M3 | minor | phase-1 §Task 1.4.1 "Files to create", first bullet | Path written with backslash: `` `lib\airgap-torque.js` ``. | Replace `` `lib\airgap-torque.js` `` → `` `lib/airgap-torque.js` `` |
-| M4 | minor | phase-1 §Task 1.4.2 "Files to create", first bullet | Path written with backslash: `` `tests\engine\_fixtures.js` ``. | Replace `` `tests\engine\_fixtures.js` `` → `` `tests/engine/_fixtures.js` `` |
+
+None found.
 
 ---
 
 ### Decision-Required Items
 
-#### D1 — `arkkio` formula: `rOuter_gap`/`rInner_gap` undefined (major)
+#### D1 — `buildSmallSPD()` size is ambiguous ("4×4 (or 3×3)") (major)
 
-- **Location**: phase-1 §Task 1.4.1 "Files to create" → `LIB.AirgapTorque.arkkio` formula
-- **Problem**: The formula reads:
-
-  > `T = (ell / (μ₀·(rOuter_gap − rInner_gap))) · Σ_{i∈gapBand} Σ_j r[i]·Br[idx]·Bt[idx]·dr·dtheta`, where `rOuter_gap`/`rInner_gap` are the gap-band radial extent.
-
-  The `gapBand` property is defined as `{ iInner, iOuter }` — integer radial row indices. The spec never says how to derive physical radii `rOuter_gap` and `rInner_gap` from those indices. At least three interpretations exist (cell-centre radii at the boundary rows, face radii, or full annular span), each producing a different normalization denominator and therefore a different numerical torque value. The implementer of Task 1.4.1 has no unambiguous instruction.
-
-- **Why decision-required**: The derivation is a physics/numerics choice. Cell-centre vs face-centre placement changes the denominator by one `dr/2` on each side; for a small gap band this can be a non-negligible fraction. A correct analytic comparison test can be tuned to pass with any consistent convention, so tests alone will not catch the wrong choice.
-
+- **Location**: Phase 1 §Wave 1.2 Task 1.2.1 "Files to create" → `tests/solver/_fixtures.js`
+- **Problem**: The spec reads: "a fixed 4×4 (or 3×3) SPD system with full-symmetric triplets and a hand-computed exact solution `{ I, J, V, b, xExact }`". The parenthetical "or 3×3" leaves the implementer to choose the matrix size. `xExact` is by definition size-dependent. The `setValues` test then asserts `solution matches xExact/2 within 1e-10` and the host-compat test asserts `solution matches xExact within 1e-10`. The exact values of `xExact` and the hand-computed `V` entries will differ between the two choices. A reviewer cannot verify correctness without knowing which size was intended.
+- **Why decision-required**: 3×3 is simpler to hand-compute; 4×4 gives slightly more coverage of the scatter-map (more off-diagonal entries possible); neither is obviously wrong. The plan does not specify a size.
 - **Options**:
-  - **Option A — Cell-centre span**: Add to the `arkkio` description: "where `rOuter_gap = op.r[gapBand.iOuter]` and `rInner_gap = op.r[gapBand.iInner]`."
-    - Pros: Uses the already-public `op.r` property; simple one-liner.
-    - Cons: Excludes the half-cell margin at each edge of the band; slightly underestimates physical gap width.
-  - **Option B — Face-to-face span**: Add: "where `rOuter_gap = op.r[gapBand.iOuter] + op.dr/2` and `rInner_gap = op.r[gapBand.iInner] − op.dr/2`."
-    - Pros: Covers the full physical extent of the gap-band cells; consistent with FV face-area accounting.
-    - Cons: Slightly more text; requires `op.dr` (already public).
-  - **Option C — Replace with cell-count × dr**: Add: "where `rOuter_gap − rInner_gap = (gapBand.iOuter − gapBand.iInner + 1) · op.dr`."
-    - Pros: Directly counts gap-band rows without ambiguity about which radius to anchor on.
-    - Cons: Does not give individual `rOuter_gap`/`rInner_gap` values; less physically transparent.
+  - **Option A — Fix size to 3×3**: Replace "4×4 (or 3×3)" with "3×3". The fixture section would then specify the exact matrix entries and `xExact` (or leave them to the implementer, but with a fixed size).
+    - Pros: Minimises hand-computation for the spec author; 3×3 is still sufficient to exercise all code paths.
+    - Cons: Slightly fewer off-diagonal entries to exercise the scatter map's duplicate-summation path.
+  - **Option B — Fix size to 4×4**: Replace "4×4 (or 3×3)" with "4×4".
+    - Pros: More representative of a real sparse system; more off-diagonal slots to test duplicate summation.
+    - Cons: Slightly more hand-computation.
+  - **Option C — Specify the full matrix entries and `xExact` in the spec**: Pin the exact `I`, `J`, `V`, `b`, `xExact` arrays in the fixture description (e.g., a Hilbert-like 3×3 or a diagonal-dominant 4×4 with known inverse).
+    - Pros: Leaves nothing for the implementer to decide; a verifier can reproduce by hand.
+    - Cons: Adds significant length to the spec; any typo in the matrix is a silent bug.
 
 ---
 
-#### D2 — `coenergy` parameter `Jz` is never consumed by the specified procedure (major)
+#### D2 — Node test environment setup for classic-script `fea-solver.js` is unspecified (major)
 
-- **Location**: phase-1 §Task 1.4.1 "Files to create" → `LIB.AirgapTorque.coenergy` signature and procedure
-- **Problem**: The signature is:
-
-  > `coenergy(op, solveFn, { thetaR, currents, coilMasks, Jz, magnetization, ironMask=null, dTheta=op.dtheta }) → { reluctance, pm, mutual, total }`
-
-  The procedure that follows describes two kinds of solves:
-  1. Unit-current inductance solves: `Jz_l = coilMasks[l]` (assembled internally — the caller-supplied `Jz` parameter is never mentioned).
-  2. PM flux-linkage solve: "zero-current magnetization-only solve (Jz = 0, magnetization supplied)" — again the caller's `Jz` is not referenced.
-
-  The caller-supplied `Jz` parameter appears in the signature and nowhere else in the procedure. An implementer cannot know whether to (a) ignore `Jz` entirely, (b) add it as a background source to every unit-current solve, (c) use it only in the PM solve alongside `magnetization`, or (d) treat it as a redundant alias for something else.
-
-- **Why decision-required**: Whether `Jz` is a background operating-point current density, dead weight, or something else changes the physics of what `coenergy` computes. Removing it vs incorporating it are both defensible designs; neither can be inferred from the existing text.
-
+- **Location**: Phase 1 §Wave 1.2 Task 1.2.1 "Files to create" → `tests/solver/solver.test.js` and `tests/solver/host-compat.test.js`; also §Wave 1.1 Task 1.1.1 "Files to create" → `lib/fea-solver.js`
+- **Problem**: `lib/fea-solver.js` is specified as a "classic script" (no top-level `import`/`export`) that exposes `LIB.FeaSolver` on `window.LIB`. The test files use `node --test`. For the test files to call `LIB.FeaSolver.init(...)`, three things must be true: (a) `window` must exist or be shimmed, (b) `fea-solver.js` must be loaded into the Node process, (c) the dynamic `await import("./solver.mjs")` inside `fea-solver.js` must resolve `./solver.mjs` correctly from within Node. In a Node environment without `window`, the IIFE `(function(){ const LIB = window.LIB || ... })()` throws immediately. The spec provides `readWasmBinary()` in `_fixtures.js` but says nothing about how `window.LIB` is shimmed, how `fea-solver.js` is loaded (e.g., `require`, dynamic `import`, or `eval`), or how `./solver.mjs`'s relative path is resolved when `fea-solver.js` lacks `__dirname` or `import.meta.url` (being neither a CJS module nor an ES module). An implementer must invent this test harness without guidance and could reasonably produce several incompatible designs.
+- **Why decision-required**: Multiple credible approaches exist. Each has tradeoffs for test isolation and future maintainability. None is "obviously correct" from the spec text.
 - **Options**:
-  - **Option A — Remove `Jz` from the signature**: Drop `Jz` from the parameter object. Add one sentence: "Unit-current solves use `Jz_l = coilMasks[l]` only; the PM solve uses `Jz = 0`. No background current-density parameter is accepted."
-    - Pros: Eliminates dead parameter; simplest and most transparent API.
-    - Cons: If later phases need a background `Jz` in the inductance extraction (e.g., for a linearized solve at an operating point), the API must be revised.
-  - **Option B — Define `Jz` as an additive background source on unit-current solves**: Add to the procedure: "The caller-supplied `Jz` (a `Float64Array` or `null`) is a background current density added to each unit-current source: the effective RHS for circuit `l` is `assembleRHS({ Jz: Jz_l_plus_background, magnetization })` where `Jz_l_plus_background[idx] = coilMasks[l][idx] + (Jz ? Jz[idx] : 0)`. `null` contributes zero (zero-not-skip)."
-    - Pros: Supports operating-point linearization; consistent with zero-not-skip principle.
-    - Cons: Adds conceptual complexity; the linearized inductance interpretation is not standard for pure coenergy decomposition.
-  - **Option C — Define `Jz` as background source for the PM solve only**: Add: "`Jz` (or `null`) is added to the RHS of the PM flux-linkage solve only, giving the PM linkage at an operating-point field rather than at zero current." The unit-current solves remain unaffected.
-    - Pros: Distinguishes PM linkage at operating point vs at no-load — a physically meaningful choice.
-    - Cons: Inconsistent with the stated "Jz = 0" for the PM solve; would require reconciling with the procedure text.
+  - **Option A — Add a test shim file `tests/solver/_shim.js`**: The spec declares a `tests/solver/_shim.js` (modelled on `tests/_shim.js`) that sets `global.window = { LIB: {} }`, then `require`s `lib/fea-solver.js`, then patches the dynamic `import` path. Add a line in the test description: "load via `tests/solver/_shim.js`; the shim sets `global.window`, `require`s `../../lib/fea-solver.js`, and resolves `./solver.mjs` to the absolute `lib/solver.mjs` path using `path.resolve(__dirname, '../../lib/solver.mjs')`."
+    - Pros: Consistent with the project's existing shim pattern (`tests/_shim.js`); isolated to one file.
+    - Cons: The shim must intercept the dynamic `import()` call inside a required CJS file — non-trivial and potentially fragile.
+  - **Option B — Make `fea-solver.js` loadable as ESM under Node**: Allow the file to use `globalThis.LIB` (which works in both browser and Node) and specify that `tests/solver/solver.test.js` uses `import "../../lib/fea-solver.js"` as a side-effecting ESM import, treating the file as an ESM module with a compatibility shim for the IIFE pattern.
+    - Pros: Avoids CJS/ESM friction; `import.meta.url` resolves paths correctly under ESM.
+    - Cons: Changes the "classic script" contract; downstream lessons that `<script src>` it would still work but the `window` reference must become `globalThis`.
+  - **Option C — Specify a dedicated Node entry-point wrapper `lib/fea-solver-node.js`**: The spec adds a thin Node-only CJS wrapper that handles `global.window`, `__dirname`-based path resolution for `solver.wasm`/`solver.mjs`, and re-exports `LIB.FeaSolver`. Test files `require` this wrapper instead of the browser classic script.
+    - Pros: Cleanly separates browser and Node load paths; the browser script stays purely classic.
+    - Cons: Adds a file not in "Files Owned"; the two files could diverge and break the MIME-independence guarantee.
 
 ---
 
-#### D3 — `setGapBand` described but not enumerated in the `GridOperator` method list (minor)
+#### D3 — `_solver_bench/` location relative to repo root is never stated (major)
 
-- **Location**: phase-1 §Task 1.2.1 "Files to create" → `op.gapBand` entry
-- **Problem**: The `op.gapBand` entry reads: "set via `op.setGapBand({ iInner, iOuter })` (supplied by config/fixture; not auto-detected)." However, `setGapBand` does not appear anywhere in the enumerated method list for the `GridOperator` returned by `LIB.AirgapGrid.create`. The acceptance criterion says "returns an object exposing every method above" — an implementer checking that criterion would not include `setGapBand` since it is not "above" in the list.
-
-- **Why decision-required**: The fix is either adding `setGapBand` as a named method entry or changing the description to say `gapBand` is a plain writable property set by direct assignment. Both are valid designs with different encapsulation implications.
-
+- **Location**: Phase 1 §Wave 1.1 Task 1.1.1 "Files to create" → `lib/solver-src/build.sh` and `lib/solver-src/README.md`; also §Wave 1.1 Task 1.1.1 description ("prototype `wrapper.cpp` … in `_solver_bench/`")
+- **Problem**: The spec says the build is "run from `_solver_bench/` after `source emsdk/emsdk_env.sh`" and references "the `_solver_bench/` emsdk + Eigen". The project's `CLAUDE.md` repo layout lists no `_solver_bench/` directory, and the git status shows no such entry. An implementer must know where `_solver_bench/` is to: (a) copy the prototype `wrapper.cpp` as the starting point, (b) write a `build.sh` with the correct relative path to `emsdk` and `eigen-3.4.0`, (c) author the README with accurate instructions. If `_solver_bench/` is at the repo root (a sibling of `ENMT211Apps/`), the paths are `../../_solver_bench/`; if it is inside `ENMT211Apps/`, they differ. Neither is stated.
+- **Why decision-required**: The answer depends on where the author placed the scratch directory. This is a factual question, not a design choice — but the spec author must state the answer, and it is not currently present.
 - **Options**:
-  - **Option A — Add `setGapBand` to the method enumeration**: Insert a bullet between the `fluxLinkage` and `op.gapBand` entries: "`op.setGapBand({ iInner, iOuter })` — writes the gap-band index range used by `op.gapBand` and consumed by `arkkio`."
-    - Pros: Consistent with the existing phrasing; makes the method discoverable in the API list.
-    - Cons: Adds a trivial setter that could simply be a writable property assignment.
-  - **Option B — Change `gapBand` to a plain writable property**: Replace "set via `op.setGapBand({ iInner, iOuter })`" with "assigned directly: `op.gapBand = { iInner, iOuter }`."
-    - Pros: Simpler; no extra method needed; consistent with `op.dA` and `op.r` being plain properties.
-    - Cons: Writable public property has no validation; a misconfigured index goes silently undetected.
+  - **Option A — State the path explicitly in the spec**: Add to the Task 1.1.1 description: "`_solver_bench/` is at `<absolute-or-relative-path-from-repo-root>`; `build.sh` assumes it is a sibling of the repo root." Update `build.sh` spec and README spec to reflect the actual path.
+    - Pros: Complete; no guessing.
+    - Cons: None — this is pure information that belongs in the spec.
+  - **Option B — Make `build.sh` accept the emsdk and Eigen paths as arguments**: Spec `build.sh` as taking `EMSDK_ROOT` and `EIGEN_ROOT` as environment variables or arguments, removing the dependency on `_solver_bench/` being in a specific location.
+    - Pros: The build script becomes location-independent; any developer with emsdk + Eigen can run it.
+    - Cons: Makes the build script slightly more complex; the README must document the variables.
+  - **Option C — Include a note in README.md spec that the prototype is available at `_solver_bench/` and an implementer who cannot locate it must reconstruct `wrapper.cpp` from the C ABI description**: This essentially says the ABI description in the spec is the authoritative source and `_solver_bench/` is optional context.
+    - Pros: Makes the spec self-contained without depending on the scratch directory.
+    - Cons: Forces the implementer to write `wrapper.cpp` from scratch, increasing risk of ABI divergence from the validated prototype.
 
 ---
 
-#### D4 — Task 1.1.1 acceptance criterion "All tests pass" contradicts the Note (minor)
+#### D4 — Timing assertion `factorize < 2000 ms` conflicts with plan's "not an absolute-ms gate" framing (minor)
 
-- **Location**: phase-1 §Task 1.1.1 "Acceptance criteria" (last bullet) and the "Note" paragraph immediately following
-- **Problem**: The acceptance criteria conclude with "All tests pass." The Note immediately below says: "`npm test` is only fully green after all Phase-1 waves complete. Intermediate runs (before `airgap-*.js` modules exist) will skip the guarded `require` calls for those modules without error — this is expected behaviour by design of the guarded-require shim."
-
-  An implementer reading the acceptance criteria literally will attempt to achieve full green `npm test` at Task 1.1.1 completion, which is structurally impossible: `airgap-grid.js`, `airgap-solve.js`, and `airgap-torque.js` do not yet exist. The criterion and the Note say opposite things about what "done" means.
-
-- **Why decision-required**: Two fixes are possible — narrow the criterion to match the Note, or collapse the Note into the criterion. Both require a content choice about scope.
-
+- **Location**: Phase 1 §Wave 1.2 Task 1.2.1 "Files to create" → `tests/solver/solver.test.js`, test `"analyze/factorize/solve timings logged; refactor within a generous bound"`
+- **Problem**: The spec text reads: "assert `factorize` wall-clock `< 2000 ms` and `solve < factorize` (loose, machine-independent regression guard — absolute targets are reported, not asserted, per §2.3 being a measured reference not a CI gate)". The parenthetical says "absolute targets are **reported**, not **asserted**", yet the same sentence contains an explicit `assert factorize < 2000 ms`. These two statements contradict each other. The plan (Phase 1 verification) says "timings logged with a generous regression guard (not an absolute-ms gate)". Whether the 2000 ms is an assert (hard fail) or a logged warning (soft) is unresolved.
+- **Why decision-required**: Whether to assert or log is a test design decision. A hard `assert` can cause flaky test failures on slow CI runners or constrained devices. A soft log never catches a regression that makes factorization genuinely pathological.
 - **Options**:
-  - **Option A — Narrow the criterion to the two smoke tests**: Replace the last bullet "All tests pass." with "Both smoke tests (`shim exposes LIB.Integrate` and `rk4 advances a trivial ODE`) pass and `npm test` exits 0."
-    - Pros: Precisely describes what is achievable at this task's completion; removes ambiguity without losing the Note.
-    - Cons: Minor wording change only.
-  - **Option B — Replace the last bullet + Note with a single combined statement**: Remove the Note paragraph; amend the last criterion bullet to: "`npm test` exits 0 with both smoke tests passing. The guarded-require shim silently skips modules not yet created; intermediate test runs during later waves are expected to pass only the tests whose modules exist."
-    - Pros: Single canonical statement; no separate Note to reconcile.
-    - Cons: Criterion becomes longer; the Note's explanatory function is absorbed into normative text.
+  - **Option A — Keep the hard assert but reconcile the wording**: Remove the contradictory parenthetical. The spec reads: "assert `factorize` wall-clock `< 2000 ms` and `solve < factorize`." This is a generous but hard regression guard.
+    - Pros: Clear; unambiguous; consistent with `node --test` passing.
+    - Cons: Could produce flaky failures on very slow runners.
+  - **Option B — Remove the assert and log only**: Replace "assert `factorize` wall-clock `< 2000 ms`" with "`console.log` the measured timings; no timing assert." This matches the plan's "not an absolute-ms gate" language exactly.
+    - Pros: No flaky CI failures; matches plan intent.
+    - Cons: A catastrophic performance regression (e.g., 60 s factorize) would not be caught by the test suite.
+  - **Option C — Use a soft assertion with a warning**: Log timings and emit a `console.warn` if `factorize > 2000 ms`, but do not fail the test. Document this as a "soft regression guard."
+    - Pros: Retains signal without hard failure.
+    - Cons: `node --test` does not distinguish warn from pass; the "regression guard" is purely advisory.
 
 ---
 
-#### D5 — `coenergy` warm-start strategy across the unit-current sweep is unspecified (info)
+### Info Items
 
-- **Location**: phase-1 §Task 1.4.1 "Files to create" → `coenergy` inductance-matrix assembly procedure
-- **Problem**: The procedure says unit-current solves are "warm-started from the previous angle's solution." There are `N_circuits` unit-current solves at each of two angles (`thetaR ± dTheta`). "Previous angle's solution" is ambiguous: it could mean (a) circuit `l`'s solve at `thetaR − dTheta` warm-starts circuit `l`'s solve at `thetaR + dTheta`; (b) the operating-point `Az` (full-current field) warm-starts each unit-current solve; or (c) circuit `l−1`'s solve at the same angle warm-starts circuit `l`'s solve. For a Phase-1 test-only function this is low-stakes, but the function is reused in Phase 5's live pipeline where convergence budget matters.
+#### I1 — `readWasmBinary()` working-directory assumption is implicit (info)
 
-- **Why decision-required**: All three strategies are valid; each produces correct results with different iteration counts. The "correct" warm-start depends on the anticipated access pattern in Phase 5.
+- **Location**: Phase 1 §Wave 1.2 Task 1.2.1 "Files to create" → `tests/solver/_fixtures.js`
+- **Problem**: The spec says `readWasmBinary()` "reads `lib/solver.wasm` from disk via `fs`". The path `lib/solver.wasm` is relative. Under `node --test tests/solver/` invoked from the project root, the working directory is the project root and `lib/solver.wasm` resolves correctly. The spec does not state this assumption. An implementer who runs tests from a different working directory or uses `path.resolve(__dirname, ...)` may produce a subtly different path.
+- **Observation**: In practice this is unlikely to cause problems given the project's `node --test` convention, but an explicit note (e.g., "path resolved relative to the project root, i.e., `path.resolve(__dirname, '../../lib/solver.wasm')`") would remove ambiguity.
+- **No action required** unless the implementer encounters a path-resolution error.
 
-- **Options**:
-  - **Option A — Warm-start each circuit's `θ+` solve from the same circuit's `θ−` solve**: Add: "For each circuit `l`, solve at `thetaR − dTheta` first (cold start or warm from the prior rotor position); warm-start the `thetaR + dTheta` solve from that result."
-    - Pros: Closest-field warm start; fewest iterations.
-    - Cons: Requires storing one Az per circuit.
-  - **Option B — Cold-start all unit-current solves**: Add: "Unit-current solves use `x0 = null` (cold start); warm-starting is not required for the test-only co-energy function."
-    - Pros: Simplest; no storage overhead; correct for Phase-1 scope.
-    - Cons: Higher iteration count; may matter if co-energy is promoted to live use.
-  - **Option C — Warm-start from the operating-point Az**: Add: "Warm-start each unit-current solve from the operating-point `Az` (full-current field at the same angle), which the caller has already computed."
-    - Pros: Operating-point field is typically available from the caller; reasonable first guess.
-    - Cons: May diverge more than Option A for high-current operating points.
+#### I2 — `build.sh` is described as run from `_solver_bench/` but lives in `lib/solver-src/` (info)
+
+- **Location**: Phase 1 §Wave 1.1 Task 1.1.1 "Files to create" → `lib/solver-src/build.sh`
+- **Problem**: The spec says `build.sh` is "run from `_solver_bench/`" but the file itself lives in `lib/solver-src/`. This cross-directory invocation (run `lib/solver-src/build.sh` from `_solver_bench/`) is unusual. It may mean the developer is expected to `cd _solver_bench && bash ../ENMT211Apps/lib/solver-src/build.sh`, or to copy `build.sh` to `_solver_bench/`. The spec doesn't clarify. The README.md is supposed to document this, but the spec doesn't specify the exact invocation form in the README section either.
+- **Observation**: This is logistical rather than a blocking issue — the README.md acceptance criterion says it must contain "how to rebuild ... the build command, Windows + bash variants." As long as the README is concrete, an implementer can follow it. Surface here for awareness.
+- **No action required** unless D3 is resolved and the invocation form changes.

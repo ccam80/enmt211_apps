@@ -81,6 +81,34 @@ Task_groups live in `spec/manifest.json`, not in the phase spec. Read this phase
 - Each task in the manifest carries a `complexity` of `S`, `M`, or `L`. Missing or invalid value → `major`.
 - The 10-file cap holds: for each group, take the union of every task's `Files to create` + `Files to modify` (from the phase spec) — it must be ≤ 10 files. Over cap → `major`.
 - File locality is honoured: if two tasks share any file in their Files-to-create/modify lists (per the phase spec), they MUST be in the same manifest group. Split-across-groups → `critical` (this is the lock-contention bug the cap is meant to prevent).
+- **Carve-out: sequential-wave file sharing.** The strict file-locality rule
+  above admits one project-specific exception when the in-conflict task
+  groups belong to **different waves within the same phase**. Waves are
+  strictly sequenced by the `implement-hybrid` runtime — wave `N+1`'s task
+  groups never start until every group in wave `N` has marked complete —
+  so two task groups in different waves of the same phase can never hold
+  concurrent locks on the same file at the same wall-clock instant. The
+  carve-out applies when **all three** of the following hold:
+  1. The shared file is owned by exactly one phase (no cross-phase
+     ownership conflict).
+  2. The conflicting task groups belong to different waves within that
+     phase (group IDs of the form `<phase>.<waveA>.x` and
+     `<phase>.<waveB>.y` with `waveA ≠ waveB`).
+  3. The phase spec contains an explicit blockquote note in or near its
+     Files Owned section that names the file and confirms the sequential
+     ordering of the waves that touch it.
+
+  When all three hold, the file-locality finding is **info**, not
+  **critical**. Phases that depend on this carve-out (currently Phase 2 on
+  `lib/motor-mesh.js` + `tests/mesh/_fixtures.js`; Phase 4 on
+  `lib/airgap-harmonic.js`; Phase 5 on `lib/motor-slice.js`) carry the
+  required blockquote note in their Files Owned section.
+
+  The carve-out does **not** extend to:
+  - Cross-phase file sharing (still critical — each `lib/` and UI file is
+    owned by exactly one phase per the plan's dependency graph).
+  - Same-wave intra-phase file sharing (still must collapse into one
+    task_group within that wave).
 - `user_required_tasks` for each group lists exactly the task IDs in that group whose phase-spec text explicitly requires a real-world user action. A user-required task missing from the list → `critical` (the coordinator's gate can never be acked for it). A task wrongly listed as user-required → `major`.
 
 ## Severity Ranking

@@ -8,18 +8,20 @@
       ],
       "tasks": [
         [
-          "T0.1.1"
+          "T0.1.1",
+          "T0.1.2",
+          "T0.1.3"
         ]
       ],
       "spawned": 1,
       "completed": 1,
-      "verifications_passed": 1,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "0.1.a": "passed"
+        "0.1.a": "pending"
       },
       "user_required_tasks": {
         "0.1.a": []
@@ -37,15 +39,15 @@
           "T1.1.1"
         ]
       ],
-      "spawned": 1,
-      "completed": 1,
-      "verifications_passed": 1,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "1.1.a": "passed"
+        "1.1.a": "pending"
       },
       "user_required_tasks": {
         "1.1.a": []
@@ -63,15 +65,15 @@
           "T1.2.1"
         ]
       ],
-      "spawned": 1,
-      "completed": 1,
-      "verifications_passed": 1,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "1.2.a": "passed"
+        "1.2.a": "pending"
       },
       "user_required_tasks": {
         "1.2.a": []
@@ -80,59 +82,6 @@
     },
     {
       "id": "batch-4",
-      "phase": 1,
-      "task_groups": [
-        "1.3.a"
-      ],
-      "tasks": [
-        [
-          "T1.3.1"
-        ]
-      ],
-      "spawned": 1,
-      "completed": 1,
-      "verifications_passed": 1,
-      "verifications_failed": 0,
-      "stops_for_clarification": 0,
-      "dead_implementers": 0,
-      "dead_verifiers": 0,
-      "group_status": {
-        "1.3.a": "passed"
-      },
-      "user_required_tasks": {
-        "1.3.a": []
-      },
-      "user_acks": {}
-    },
-    {
-      "id": "batch-5",
-      "phase": 1,
-      "task_groups": [
-        "1.4.a"
-      ],
-      "tasks": [
-        [
-          "T1.4.1",
-          "T1.4.2"
-        ]
-      ],
-      "spawned": 3,
-      "completed": 1,
-      "verifications_passed": 1,
-      "verifications_failed": 0,
-      "stops_for_clarification": 1,
-      "dead_implementers": 1,
-      "dead_verifiers": 0,
-      "group_status": {
-        "1.4.a": "passed"
-      },
-      "user_required_tasks": {
-        "1.4.a": []
-      },
-      "user_acks": {}
-    },
-    {
-      "id": "batch-6",
       "phase": 2,
       "task_groups": [
         "2.1.a"
@@ -142,15 +91,15 @@
           "T2.1.1"
         ]
       ],
-      "spawned": 2,
-      "completed": 2,
-      "verifications_passed": 1,
-      "verifications_failed": 1,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
+      "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "2.1.a": "passed"
+        "2.1.a": "pending"
       },
       "user_required_tasks": {
         "2.1.a": []
@@ -158,7 +107,7 @@
       "user_acks": {}
     },
     {
-      "id": "batch-7",
+      "id": "batch-5",
       "phase": 2,
       "task_groups": [
         "2.2.a"
@@ -168,15 +117,15 @@
           "T2.2.1"
         ]
       ],
-      "spawned": 1,
-      "completed": 1,
-      "verifications_passed": 1,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "2.2.a": "passed"
+        "2.2.a": "pending"
       },
       "user_required_tasks": {
         "2.2.a": []
@@ -184,142 +133,142 @@
       "user_acks": {}
     },
     {
-      "id": "batch-8",
+      "id": "batch-6",
       "phase": 2,
       "task_groups": [
         "2.3.a"
       ],
       "tasks": [
         [
-          "T2.3.1"
+          "T2.3.1",
+          "T2.3.2"
         ]
       ],
-      "spawned": 1,
-      "completed": 1,
-      "verifications_passed": 1,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "2.3.a": "passed"
+        "2.3.a": "pending"
       },
       "user_required_tasks": {
-        "2.3.a": []
+        "2.3.a": [
+          "T2.3.2"
+        ]
+      },
+      "user_acks": {}
+    },
+    {
+      "id": "batch-7",
+      "phase": 3,
+      "task_groups": [
+        "3.1.a"
+      ],
+      "tasks": [
+        [
+          "T3.1.1",
+          "T3.1.2",
+          "T3.1.3"
+        ]
+      ],
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
+      "verifications_failed": 0,
+      "stops_for_clarification": 0,
+      "dead_implementers": 0,
+      "dead_verifiers": 0,
+      "group_status": {
+        "3.1.a": "pending"
+      },
+      "user_required_tasks": {
+        "3.1.a": []
+      },
+      "user_acks": {}
+    },
+    {
+      "id": "batch-8",
+      "phase": 4,
+      "task_groups": [
+        "4.1.a"
+      ],
+      "tasks": [
+        [
+          "T4.1.1"
+        ]
+      ],
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
+      "verifications_failed": 0,
+      "stops_for_clarification": 0,
+      "dead_implementers": 0,
+      "dead_verifiers": 0,
+      "group_status": {
+        "4.1.a": "pending"
+      },
+      "user_required_tasks": {
+        "4.1.a": []
       },
       "user_acks": {}
     },
     {
       "id": "batch-9",
-      "phase": 3,
+      "phase": 4,
       "task_groups": [
-        "3.1.a",
-        "4.1.a"
-      ],
-      "tasks": [
-        [
-          "T3.1.1"
-        ],
-        [
-          "T4.1.1"
-        ]
-      ],
-      "spawned": 3,
-      "completed": 3,
-      "verifications_passed": 2,
-      "verifications_failed": 1,
-      "stops_for_clarification": 0,
-      "dead_implementers": 0,
-      "dead_verifiers": 0,
-      "group_status": {
-        "3.1.a": "passed",
-        "4.1.a": "passed"
-      },
-      "user_required_tasks": {
-        "3.1.a": [],
-        "4.1.a": []
-      },
-      "user_acks": {},
-      "recovery_log": [
-        {
-          "script": "i-fixed-it.sh",
-          "timestamp": "2026-05-24T01:25:47.776Z",
-          "description": "Removed dead-code 'fallback' comment + unreachable return { kind: open } at lib/excitation.js L174-175 (evalTerminal mode dispatch is exhaustive); npm test 38/38"
-        }
-      ]
-    },
-    {
-      "id": "batch-10",
-      "phase": 3,
-      "task_groups": [
-        "3.2.a",
         "4.2.a"
       ],
       "tasks": [
         [
-          "T3.1.2"
-        ],
-        [
           "T4.2.1"
         ]
       ],
-      "spawned": 2,
-      "completed": 2,
-      "verifications_passed": 2,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "3.2.a": "passed",
-        "4.2.a": "passed"
+        "4.2.a": "pending"
       },
       "user_required_tasks": {
-        "3.2.a": [],
         "4.2.a": []
       },
       "user_acks": {}
     },
     {
-      "id": "batch-11",
+      "id": "batch-10",
       "phase": 5,
       "task_groups": [
-        "5.1.a",
-        "5.1.b",
-        "5.1.c"
+        "5.1.a"
       ],
       "tasks": [
         [
           "T5.1.1"
-        ],
-        [
-          "T5.1.2"
-        ],
-        [
-          "T5.1.3"
         ]
       ],
-      "spawned": 3,
-      "completed": 3,
-      "verifications_passed": 3,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "5.1.a": "passed",
-        "5.1.b": "passed",
-        "5.1.c": "passed"
+        "5.1.a": "pending"
       },
       "user_required_tasks": {
-        "5.1.a": [],
-        "5.1.b": [],
-        "5.1.c": []
+        "5.1.a": []
       },
       "user_acks": {}
     },
     {
-      "id": "batch-12",
+      "id": "batch-11",
       "phase": 5,
       "task_groups": [
         "5.2.a"
@@ -329,15 +278,15 @@
           "T5.2.1"
         ]
       ],
-      "spawned": 1,
-      "completed": 1,
-      "verifications_passed": 1,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "5.2.a": "passed"
+        "5.2.a": "pending"
       },
       "user_required_tasks": {
         "5.2.a": []
@@ -345,7 +294,7 @@
       "user_acks": {}
     },
     {
-      "id": "batch-13",
+      "id": "batch-12",
       "phase": 5,
       "task_groups": [
         "5.3.a"
@@ -355,15 +304,15 @@
           "T5.3.1"
         ]
       ],
-      "spawned": 1,
-      "completed": 1,
-      "verifications_passed": 1,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "5.3.a": "passed"
+        "5.3.a": "pending"
       },
       "user_required_tasks": {
         "5.3.a": []
@@ -371,246 +320,152 @@
       "user_acks": {}
     },
     {
-      "id": "batch-14",
-      "phase": 5,
+      "id": "batch-13",
+      "phase": 6,
       "task_groups": [
-        "5.4.a"
+        "6.1.a"
       ],
       "tasks": [
         [
-          "T5.4.1"
+          "T6.1.1"
         ]
       ],
-      "spawned": 1,
-      "completed": 1,
-      "verifications_passed": 1,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "5.4.a": "passed"
+        "6.1.a": "pending"
       },
       "user_required_tasks": {
-        "5.4.a": [
-          "T5.4.1"
-        ]
+        "6.1.a": []
       },
-      "user_acks": {
-        "T5.4.1": {
-          "task_group": "5.4.a",
-          "timestamp": "2026-05-24T08:58:33.021Z",
-          "evidence": "browser checklist: lesson mounts, rotor turns at sane speed, both cross-sections populated, Reset/Pause work; semantic cross-section (T7.1.1) + 3D polish (Phase 9) deferred per plan"
-        }
-      },
-      "recovery_log": [
-        {
-          "script": "reopen-implementer-slot.sh",
-          "timestamp": "2026-05-24T02:26:15.906Z",
-          "task_group": "5.4.a",
-          "reason": "T5.4.1 mount() throws TDZ ReferenceError 'Cannot access orbitYaw before initialization' at mount.js:431 (buildCtx) invoked from mount.js:342 — lesson fully broken in-browser (blank zones, confirmed via Chrome over http://). Completion was not functional; reopening for a surgical fix."
-        },
-        {
-          "script": "reopen-implementer-slot.sh",
-          "timestamp": "2026-05-24T02:33:14.930Z",
-          "task_group": "5.4.a",
-          "reason": "TDZ fixed but lesson still non-functional: CSS height collapse — mount root (um-mount) does not fill tab-host (207px of 576px), upper 3-zone region (um-upper) collapses to 12px, viewport canvas is 870x0, so all 3-zone canvases render blank. Reopening for layout fix + headless finite-state sim check."
-        },
-        {
-          "script": "reopen-implementer-slot.sh",
-          "timestamp": "2026-05-24T06:55:10.258Z",
-          "task_group": "5.4.a",
-          "reason": "Browser checklist (user): runs but visuals incomplete vs spec. Built-in 3D rig OMITS the spec-required LIB.CoilRender winding polylines (no stator/rotor/coils visible, 'nothing 3D'); the two cross-section viewports render blank; bare gap-field heatmap is uninterpretable. Reopening to bring built-in rig to T5.4.1 spec + fix cross-sections."
-        },
-        {
-          "script": "reopen-implementer-slot.sh",
-          "timestamp": "2026-05-24T08:13:17.726Z",
-          "task_group": "5.4.a",
-          "reason": "Confirmed via render-driving measurement: FAIL crit2 (cross-section B blank, 363 non-bg px vs 12105 in A), FAIL crit3 (no recognizable rotor/stator geometry drawn — only gap-field heatmap + thin ring strokes), FAIL crit4 (runaway speed aliases rotor). Reopening to render machine geometry (rotor/stator iron + conductors) in both cross-sections + 3D, populate cross-section B, sane default speed."
-        }
-      ]
+      "user_acks": {}
     },
     {
-      "id": "batch-15",
-      "phase": 5,
+      "id": "batch-14",
+      "phase": 6,
       "task_groups": [
-        "5.5.a"
+        "6.2.a"
       ],
       "tasks": [
         [
-          "T5.5.1"
+          "T6.2.1"
         ]
       ],
-      "spawned": 3,
-      "completed": 1,
-      "verifications_passed": 1,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
-      "stops_for_clarification": 2,
+      "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "5.5.a": "passed"
+        "6.2.a": "pending"
       },
       "user_required_tasks": {
-        "5.5.a": []
+        "6.2.a": []
+      },
+      "user_acks": {}
+    },
+    {
+      "id": "batch-15",
+      "phase": 6,
+      "task_groups": [
+        "6.3.a"
+      ],
+      "tasks": [
+        [
+          "T6.3.1"
+        ]
+      ],
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
+      "verifications_failed": 0,
+      "stops_for_clarification": 0,
+      "dead_implementers": 0,
+      "dead_verifiers": 0,
+      "group_status": {
+        "6.3.a": "pending"
+      },
+      "user_required_tasks": {
+        "6.3.a": [
+          "T6.3.1"
+        ]
       },
       "user_acks": {}
     },
     {
       "id": "batch-16",
-      "phase": 6,
+      "phase": 7,
       "task_groups": [
-        "6.1.a",
-        "6.1.b",
-        "6.1.c",
         "7.1.a",
-        "7.3.a",
-        "7.4.a",
-        "8.1.a"
+        "7.1.b"
       ],
       "tasks": [
         [
-          "T6.1.1"
-        ],
-        [
-          "T6.1.2"
-        ],
-        [
-          "T6.1.3"
+          "T7.1.2"
         ],
         [
           "T7.1.1"
-        ],
-        [
-          "T7.3.1"
-        ],
-        [
-          "T7.4.1"
-        ],
-        [
-          "T8.1.1"
         ]
       ],
-      "spawned": 10,
-      "completed": 7,
-      "verifications_passed": 7,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
-      "stops_for_clarification": 1,
-      "dead_implementers": 2,
+      "stops_for_clarification": 0,
+      "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "6.1.a": "passed",
-        "6.1.b": "passed",
-        "6.1.c": "passed",
-        "7.1.a": "passed",
-        "7.3.a": "passed",
-        "7.4.a": "passed",
-        "8.1.a": "passed"
+        "7.1.a": "pending",
+        "7.1.b": "pending"
       },
       "user_required_tasks": {
-        "6.1.a": [],
-        "6.1.b": [],
-        "6.1.c": [],
         "7.1.a": [],
-        "7.3.a": [],
-        "7.4.a": [],
-        "8.1.a": []
+        "7.1.b": []
       },
       "user_acks": {}
     },
     {
       "id": "batch-17",
-      "phase": 6,
+      "phase": 7,
       "task_groups": [
-        "6.2.a",
-        "7.2.a",
-        "8.2.a",
-        "8.2.b"
+        "7.2.a"
       ],
       "tasks": [
         [
-          "T6.2.1"
-        ],
-        [
           "T7.2.1"
-        ],
-        [
-          "T8.2.1"
-        ],
-        [
-          "T8.2.2"
         ]
       ],
-      "spawned": 4,
-      "completed": 4,
-      "verifications_passed": 4,
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "6.2.a": "passed",
-        "7.2.a": "passed",
-        "8.2.a": "passed",
-        "8.2.b": "passed"
+        "7.2.a": "pending"
       },
       "user_required_tasks": {
-        "6.2.a": [],
-        "7.2.a": [],
-        "8.2.a": [],
-        "8.2.b": []
+        "7.2.a": []
       },
       "user_acks": {}
     },
     {
       "id": "batch-18",
-      "phase": 6,
+      "phase": 8,
       "task_groups": [
-        "6.3.a",
-        "6.3.b",
-        "8.3.a"
+        "8.1.a"
       ],
       "tasks": [
         [
-          "T6.3.1"
-        ],
-        [
-          "T6.3.2"
-        ],
-        [
-          "T8.3.1"
-        ]
-      ],
-      "spawned": 5,
-      "completed": 0,
-      "verifications_passed": 0,
-      "verifications_failed": 0,
-      "stops_for_clarification": 5,
-      "dead_implementers": 2,
-      "dead_verifiers": 0,
-      "group_status": {
-        "6.3.a": "pending",
-        "6.3.b": "pending",
-        "8.3.a": "pending"
-      },
-      "user_required_tasks": {
-        "6.3.a": [],
-        "6.3.b": [],
-        "8.3.a": [
-          "T8.3.1"
-        ]
-      },
-      "user_acks": {}
-    },
-    {
-      "id": "batch-19",
-      "phase": 6,
-      "task_groups": [
-        "7.5.a"
-      ],
-      "tasks": [
-        [
-          "T7.5.1"
+          "T8.1.1"
         ]
       ],
       "spawned": 0,
@@ -621,97 +476,13 @@
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "7.5.a": "pending"
+        "8.1.a": "pending"
       },
       "user_required_tasks": {
-        "7.5.a": [
-          "T7.5.1"
-        ]
-      },
-      "user_acks": {}
-    },
-    {
-      "id": "batch-20",
-      "phase": 9,
-      "task_groups": [
-        "9.1.a"
-      ],
-      "tasks": [
-        [
-          "T9.1.1",
-          "T9.1.2"
-        ]
-      ],
-      "spawned": 0,
-      "completed": 0,
-      "verifications_passed": 0,
-      "verifications_failed": 0,
-      "stops_for_clarification": 0,
-      "dead_implementers": 0,
-      "dead_verifiers": 0,
-      "group_status": {
-        "9.1.a": "pending"
-      },
-      "user_required_tasks": {
-        "9.1.a": []
-      },
-      "user_acks": {}
-    },
-    {
-      "id": "batch-21",
-      "phase": 9,
-      "task_groups": [
-        "9.2.a"
-      ],
-      "tasks": [
-        [
-          "T9.2.1",
-          "T9.2.2"
-        ]
-      ],
-      "spawned": 0,
-      "completed": 0,
-      "verifications_passed": 0,
-      "verifications_failed": 0,
-      "stops_for_clarification": 0,
-      "dead_implementers": 0,
-      "dead_verifiers": 0,
-      "group_status": {
-        "9.2.a": "pending"
-      },
-      "user_required_tasks": {
-        "9.2.a": [
-          "T9.2.2"
-        ]
-      },
-      "user_acks": {}
-    },
-    {
-      "id": "batch-22",
-      "phase": 10,
-      "task_groups": [
-        "10.1.a"
-      ],
-      "tasks": [
-        [
-          "T10.1.1"
-        ]
-      ],
-      "spawned": 0,
-      "completed": 0,
-      "verifications_passed": 0,
-      "verifications_failed": 0,
-      "stops_for_clarification": 0,
-      "dead_implementers": 0,
-      "dead_verifiers": 0,
-      "group_status": {
-        "10.1.a": "pending"
-      },
-      "user_required_tasks": {
-        "10.1.a": []
+        "8.1.a": []
       },
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-25T06:05:47.894Z"
+  "last_updated": "2026-05-26T23:10:27.935Z"
 }

@@ -36,10 +36,6 @@ describe("config-schema", function () {
       assert.ok(Array.isArray(f.thetaRange) && f.thetaRange.length === 2, "feature must have thetaRange [t0, t1]");
     }
 
-    // compile() must run without throwing
-    assert.doesNotThrow(function () {
-      LIB.MotorCompile.compile(section);
-    }, "MotorCompile.compile must succeed on the expanded section");
   });
 
   // -------------------------------------------------------------------------
@@ -61,19 +57,6 @@ describe("config-schema", function () {
 
     const magnetFeatures = section.features.filter(function (f) { return f.kind === "magnet"; });
     assert.strictEqual(magnetFeatures.length, 0, "magnet-free config must produce zero magnet features");
-
-    // After compile, magnetization must be all-zero (zero, not skip)
-    const compiled = LIB.MotorCompile.compile(section);
-    let allZeroMr = true;
-    let allZeroMtheta = true;
-    for (let i = 0; i < compiled.magnetization.Mr.length; i++) {
-      if (compiled.magnetization.Mr[i] !== 0) { allZeroMr = false; break; }
-    }
-    for (let i = 0; i < compiled.magnetization.Mtheta.length; i++) {
-      if (compiled.magnetization.Mtheta[i] !== 0) { allZeroMtheta = false; break; }
-    }
-    assert.ok(allZeroMr, "compiled.magnetization.Mr must be all-zero for magnet-free config");
-    assert.ok(allZeroMtheta, "compiled.magnetization.Mtheta must be all-zero for magnet-free config");
   });
 
   // -------------------------------------------------------------------------

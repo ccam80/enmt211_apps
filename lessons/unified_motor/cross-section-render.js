@@ -133,20 +133,6 @@
   }
 
   // ---------------------------------------------------------------------------
-  //  compileForOverlay(config, sliceIndex = 0) → { compiled, grid }
-  //
-  //  Pure. Expands config via ConfigSchema, selects the section for sliceIndex,
-  //  and rasterizes via MotorCompile. Returns the compiled object and its grid.
-  // ---------------------------------------------------------------------------
-  function compileForOverlay(config, sliceIndex) {
-    if (sliceIndex == null) sliceIndex = 0;
-    const exp = UM.ConfigSchema.expand(config);
-    const section = exp.slices[sliceIndex].section;
-    const compiled = LIB.MotorCompile.compile(section);
-    return { compiled, grid: compiled.grid };
-  }
-
-  // ---------------------------------------------------------------------------
   //  drawSemantic(ctx2d, layout, geom, opts = {})
   //
   //  Draws the annulus background, per-ring slot wedges / tooth sectors / magnet
@@ -433,7 +419,6 @@
   UM.CrossSectionRender = {
     buildGeometry,
     circuitColor,
-    compileForOverlay,
     drawSemantic,
     drawCompiledOverlay,
     register,

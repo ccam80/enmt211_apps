@@ -7,9 +7,6 @@ if (!globalThis.window) globalThis.window = globalThis;
 const LIB_FILES = [
   "util.js",
   "integrate.js",
-  "airgap-grid.js",
-  "airgap-solve.js",
-  "airgap-torque.js",
 ];
 
 for (const name of LIB_FILES) {

@@ -13,12 +13,9 @@ if (!globalThis.window) globalThis.window = globalThis;
 
 require("../../lib/util.js");
 require("../../lib/integrate.js");
-require("../../lib/airgap-grid.js");
-require("../../lib/airgap-solve.js");
 require("../../lib/motor-circuit.js");
 
-const { assertClose, buildSalient, fitCos2, SALIENT_DEFAULTS } =
-  require("../engine/_fixtures.js");
+const { assertClose } = require("../_assert.js");
 
 const LIB = globalThis.window.LIB;
 
@@ -50,4 +47,4 @@ function mutual2({ L0, L1, M }) {
   };
 }
 
-module.exports = { LIB, assertClose, buildSalient, fitCos2, SALIENT_DEFAULTS, rl1, mutual2 };
+module.exports = { LIB, assertClose, rl1, mutual2 };

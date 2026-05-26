@@ -1,83 +1,49 @@
-# Spec Review: Phase 0 — dead-code-removal
+# Spec Review: Phase 0 — Dead Code Removal
 
-## Verdict: needs-revision
+## Verdict: ready
 
 ## Tally
 | Severity | Mechanical | Decision-Required | Total |
 |----------|------------|-------------------|-------|
 | critical | 0 | 0 | 0 |
 | major    | 0 | 0 | 0 |
-| minor    | 1 | 2 | 3 |
-| info     | 0 | 0 | 3 |
+| minor    | 0 | 1 | 1 |
+| info     | 1 | 0 | 1 |
 
 ## Plan Coverage
 | Plan Task | In Spec? | Notes |
 |-----------|----------|-------|
-| 0.1.1 — Confirm `lessons/unified_motor/` holds only `DESIGN.md`; commit untracked EM-ecosystem baseline; tag `motor-baseline` | yes | Full scope covered. All plan verification measures (git-state confirmation, no `npm test`) are reflected in spec acceptance criteria. |
+| 0.1.1 — Delete seven grid lib/ modules; restore field-render.js to motor-baseline | yes | Full scope covered; exact files enumerated; byte-restore criterion stated |
+| 0.1.2 — Delete detailed-toggle.js; remove grid <script> tags from index.html; strip drawGapField call from mount.js; strip compileForOverlay from cross-section-render.js | yes | All four sub-actions present; exact script tag text given; exact function names given |
+| 0.1.3 — Relocate assertClose/fitCos2/fitCos2Cos4 to tests/_assert.js; delete grid-tier tests; rewire surviving fixtures | yes | Full scope covered; exact line numbers and require paths given for every fixture edit |
+| Verification — zero references in runtime code and surviving tests; field-render.js byte-identical to motor-baseline; preserved suites pass; deferred red tests unchanged | yes | Phase-exit verification section addresses all plan verification measures; exact grep patterns and test command given |
 
 ## Findings
 
 ### Mechanical Fixes
-
-| ID | Severity | Location | Problem | Proposed Fix |
-|----|----------|----------|---------|--------------|
-| M1 | minor | phase-0 §Files Owned, blockquote note | The blockquote reads: "> No file content is modified by this phase. `spec/plan.md` was corrected by the spec-authoring step (consumer list + Phase 10 guard) and is not part of this phase's implementation footprint." The second sentence is historical-provenance prose describing what happened during spec authoring — not a current-state contract statement. Per rules.md, specs must not contain historical notes or changelog prose ("No `# previously this was...` comments"; "specs are current-state contracts"). | Delete the entire second sentence, leaving only: "> No file content is modified by this phase." |
+None found.
 
 ### Decision-Required Items
 
-#### D1 — Files Owned labels not `created` or `modified` (minor)
-- **Location**: phase-0 §Files Owned
-- **Problem**: The review spec requires each Files Owned entry to be labelled `created` or `modified`. The spec instead labels all 15 entries as "committed (untracked → tracked)", e.g.:
-  > `index.html` — committed (untracked → tracked)
-
-  This phase neither creates file content nor modifies it — it stages existing untracked files into git. The standard labels do not cleanly apply to a git-tracking operation.
-- **Why decision-required**: Two reasonable approaches exist and neither is obviously superior; the choice affects how cross-phase file-ownership checks behave against this phase's entries.
+#### D1 — `tests/circuit/_fixtures.js` `fitCos2` removal leaves `fitCos2` still needed by surviving circuit tests (minor)
+- **Location**: phase-0 §Task 0.1.3 "Files to modify" → `tests/circuit/_fixtures.js`
+- **Problem**: The spec says to "remove `buildSalient`, `fitCos2`, `SALIENT_DEFAULTS` from `module.exports`" of `tests/circuit/_fixtures.js`, but it also says to keep `assertClose` in exports. The surviving circuit test files (`backemf.test.js`, `cache.test.js`, `induction.test.js`, `stepper.test.js`) may import `fitCos2` from `_fixtures.js`. If any surviving circuit test uses `fitCos2`, removing it from the exports would break that test. The spec's Task 0.1.3 acceptance criteria require "The four surviving `circuit` tests … pass under `node --test`" — so if a surviving test uses `fitCos2`, the spec is self-contradictory (remove `fitCos2` from exports AND pass all circuit tests). The spec does not state whether `fitCos2` is used only by `extract.test.js` (deleted) or also by surviving circuit tests.
+- **Why decision-required**: Whether `fitCos2` must remain accessible to surviving circuit tests — or can be removed from `_fixtures.js` exports entirely because only the deleted `extract.test.js` used it — depends on the actual import graph of surviving tests, which the spec author has knowledge of but the spec does not state. Two reasonable implementers could make different choices:
 - **Options**:
-  - **Option A — Keep "committed (untracked → tracked)"**: Retain the current label as a third, self-explanatory category. Add a preamble sentence to Files Owned noting that this phase uses a non-standard label because it neither creates nor modifies file content.
-    - Pros: Accurately describes the operation; avoids mislabelling files as `created` or `modified` when they are neither.
-    - Cons: Deviates from the standard label vocabulary; cross-phase checking tools that expect `created`/`modified` will not recognize this phase's entries.
-  - **Option B — Label all 15 as `created`**: Treat "this phase is the first to track the file in git" as equivalent to `created` from the perspective of the build graph.
-    - Pros: Conforms to the standard two-label vocabulary; downstream tooling can classify without special-casing Phase 0.
-    - Cons: Semantically inaccurate — the files exist and have content before this phase; an implementer could misinterpret `created` as meaning "write this file from scratch."
-  - **Option C — Omit the label column entirely for this phase**: Document Files Owned as a prose paragraph instead of a labelled list, explaining that this phase only changes tracked status.
-    - Pros: Prevents label misinterpretation; honest about the unusual nature of the phase.
-    - Cons: Most divergent from the standard format; makes automated cross-phase diffing harder.
-
-#### D2 — Multi-line commit message shell syntax unspecified (minor)
-- **Location**: phase-0 §Task 0.1.1, Implementation step 5
-- **Problem**: Step 5 presents the commit command as a single `-m "..."` argument spanning multiple lines in the spec:
-  ```
-  git commit -m "Phase 0: commit EM-ecosystem baseline (motor-baseline)
-
-  Track the existing LIB.EM ecosystem so the unified-motor build's
-  byte-unchanged guard (Phase 10) is a git diff against this tag.
-  Frozen set: index.html, em-physics.js, coil-render.js, three-phase.js,
-  layout3d.js, ac_motor/. field-render.js is committed here too but is
-  extended by Phase 5.
-
-  Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
-  ```
-  The spec does not state how an implementer should handle multi-line string quoting in Git Bash on Windows. A literal copy-paste of this block is not a valid shell command without additional quoting syntax. Different implementers could plausibly use `$'...'`, a here-string, `printf | git commit -F -`, or collapse to a single-line message — each producing a different commit message body.
-- **Why decision-required**: The rules.md (Shell Compatibility) requires shell commands to be Windows/Git Bash safe, and the spec's convention for multi-line commit messages (used in at least one other phase: Phase 8 task 8.3.1) is not established here. A mechanical fix would be choosing one specific quoting form, but which form is correct is a judgement call about the project's shell conventions.
-- **Options**:
-  - **Option A — Use Git Bash `$'...\n...'` ANSI-C quoting**: Replace the multi-line `-m "..."` block with `git commit -m $'Phase 0: commit EM-ecosystem baseline (motor-baseline)\n\nTrack the existing LIB.EM ecosystem...\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>'`
-    - Pros: Single unambiguous shell command; literal newlines embedded via `\n`; valid in Git Bash on Windows.
-    - Cons: Less readable in the spec document; the `$'...'` syntax is Bash-specific and may not work in all shells.
-  - **Option B — Use a Git `-F` pipe**: Replace the code block with `git commit -F - <<'EOF'` followed by the message body and `EOF`, instructing the implementer to use a here-document.
-    - Pros: Preserves full multi-line readability; unambiguous quoting; robust on Windows Git Bash.
-    - Cons: More verbose; implementers unfamiliar with here-docs may make errors.
-  - **Option C — Add a prose note**: Keep the current display form (for readability) and add a sentence: "Execute this as a here-string or via `printf '%s' '...' | git commit -F -` — do not attempt to copy the multi-line `-m` block literally."
-    - Pros: Minimal change; retains the readable display of the intended message.
-    - Cons: Leaves the actual shell command unspecified; could still lead to divergent implementations.
+  - **Option A — Remove fitCos2 from _fixtures.js exports entirely**: Trust that `fitCos2` is used only by the deleted `extract.test.js`; remove it as specified. If a surviving test imports it, the test will fail at runtime — contradicting the "four surviving circuit tests pass" acceptance criterion.
+    - Pros: Follows the spec text exactly; removes dead export.
+    - Cons: Risks breaking surviving tests if the assumption is wrong; no confirmation stated in spec.
+  - **Option B — Add explicit statement that fitCos2 is not used by surviving circuit tests**: Augment the spec to say "Note: `fitCos2` is used only by the deleted `extract.test.js`; no surviving circuit test imports it." This makes the removal unambiguous.
+    - Pros: Eliminates the implementer's need to guess; prevents silent test failure.
+    - Cons: Requires a spec edit before implementation.
+  - **Option C — Move fitCos2 to tests/_assert.js alongside assertClose**: Export `fitCos2` from `tests/_assert.js` (it is already a generic helper) and import it from there in any surviving test that uses it.
+    - Pros: Consistent with the established pattern of moving helpers to `_assert.js`; survives any surviving-test dependency.
+    - Cons: Adds a line to `tests/_assert.js` that may be unnecessary; spec explicitly lists only `assertClose`/`fitCos2`/`fitCos2Cos4` as the three helpers to move, so adding `fitCos2` to `_assert.js` exports is already in scope.
 
 ---
 
-## Info Observations
+### Info
 
-These do not require action but are surfaced for completeness.
-
-**I1 — Discovery-provenance phrasing in Overview (info)**: The Overview's "EM-ecosystem consumer set" subsection states the list was "confirmed by search." This is rationale prose in the overview (not in task steps), and the search results are fully enumerated — no implementer action is implied. No fix required.
-
-**I2 — Informational parenthetical in Frozen set table (info)**: The Files Owned table entry for `lib/layout3d.js` reads `lib/layout3d.js (reused, never modified, by Phases 5 & 9)`. This is non-standard column content (a forward-reference note) but is only in the overview context table, not in the task body. No implementer action is implied.
-
-**I3 — Phase 10 absent from manifest.json (info)**: `spec/manifest.json` contains entries for phases 0–9 but no entry for Phase 10. Phase 10 is defined in `spec/plan.md`. This is outside Phase 0's scope to fix, but it means the implement-hybrid coordinator will have no wave/task_group data for Phase 10 when it runs. Worth flagging to the plan owner for resolution before Phase 10 implementation begins.
+#### I1 — Task ID naming convention: spec headings use `0.1.1` / `0.1.2` / `0.1.3`, manifest uses `T0.1.1` / `T0.1.2` / `T0.1.3`
+- **Location**: phase-0 §Wave 0.1 task headings vs `spec/manifest.json` phases[0].waves[0].task_groups[0].tasks
+- **Observation**: The phase spec labels tasks as `Task 0.1.1`, `Task 0.1.2`, `Task 0.1.3` (no `T` prefix in the heading), while the manifest stores them as `T0.1.1`, `T0.1.2`, `T0.1.3`. This is consistent across all phases in the manifest (all use the `T` prefix), so it is the project-wide convention. If the implement-hybrid coordinator resolves manifest IDs by stripping the `T` prefix before matching to spec headings, there is no issue. This is noted as info so the coordinator author can confirm the matching logic handles this correctly.
