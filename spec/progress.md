@@ -73,3 +73,21 @@ Progress is recorded here by implementation agents. Each completed task appends 
 - **Files modified**: none
 - **Tests**: 11/11 passing (node --test tests/solver/solver.test.js tests/solver/host-compat.test.js)
 - **Notes**: All required test files were already present and correct from the T1.1.1 implementer. All 11 node:test assertions pass including proxy residual < 1e-9 at N=12100 and N=50176, symbolic reuse, two-instance isolation, setValues without re-analyze, scatter-map duplicate summation, factorNnz fill sanity, timing relative-order assertion, non-SPD error detection, host-compat ArrayBuffer path with fetch/instantiateStreaming stubbed to throw and no Worker invoked, and init idempotency.
+
+---
+## Phase 1 Complete
+- **Batches**: 2
+- **All verified**: yes
+
+## Task T2.1.1: BodyMesh struct + canvas visualizer + single annulus + ring stack
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: lib/motor-mesh.js, lib/motor-mesh-view.js, tests/mesh/_fixtures.js, tests/mesh/mesh-core.test.js, tests/mesh/mesh-view.test.js
+- **Files modified**: none
+- **Tests**: 13/13 passing (node --test tests/mesh/mesh-core.test.js tests/mesh/mesh-view.test.js)
+- **Implementation notes**:
+  - lib/motor-mesh.js: IIFE attaching LIB.MotorMesh with build, buildCached, signature, quality, cacheStats, clearCache. BodyMesh typed-array spine (nodes, elems, matId, srcId, turns, magDir) + materials[] with Bknee per D1. Full-circle bodies get minimum 32 angular divisions to keep areaError < 1%. Quad CCW winding (n00→n10→n11→n01). Geometric radial grading toward gap (quadratic). LRU cache (capacity 8 per body sig). Gap geometry: rotorGapR = r_rotor_surface + 0.25·g, statorGapR = r_stator_bore - 0.25·g.
+  - lib/motor-mesh-view.js: IIFE attaching LIB.MotorMeshView with colorFor (kind-distinct palette) and draw (polygon-per-element + gapLoop overlay).
+  - tests/mesh/_fixtures.js: singleAnnulusSection, ringStackSection, meshFromConfig, signedAreaOf, annulusArea, interiorEdgeSharing, recordingCtx, assertClose.
+  - All M0/M1/M2 acceptance criteria met: zero inverted/degenerate, areaError < 1e-2, minAngle > 20°, rotor/stator disjoint nodes, conforming interfaces, radial grading toward gap.
+  - Pre-existing motor-stack failures (TypeError: compile undefined) are pre-existing from Phase 0 deletions, not caused by this task.
