@@ -240,6 +240,30 @@
               "user_required_tasks": ["T6.3.1"]
             }
           ]
+        },
+        {
+          "wave": "6.4",
+          "task_groups": [
+            {
+              "group_id": "6.4.a",
+              "tasks": [
+                { "id": "T6.4.1", "complexity": "L" }
+              ],
+              "user_required_tasks": ["T6.4.1"]
+            }
+          ]
+        },
+        {
+          "wave": "6.5",
+          "task_groups": [
+            {
+              "group_id": "6.5.a",
+              "tasks": [
+                { "id": "T6.5.1", "complexity": "L" }
+              ],
+              "user_required_tasks": ["T6.5.1"]
+            }
+          ]
         }
       ]
     },

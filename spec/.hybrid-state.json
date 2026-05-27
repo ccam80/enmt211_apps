@@ -440,6 +440,62 @@
     },
     {
       "id": "batch-16",
+      "phase": 6,
+      "task_groups": [
+        "6.4.a"
+      ],
+      "tasks": [
+        [
+          "T6.4.1"
+        ]
+      ],
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
+      "verifications_failed": 0,
+      "stops_for_clarification": 0,
+      "dead_implementers": 0,
+      "dead_verifiers": 0,
+      "group_status": {
+        "6.4.a": "pending"
+      },
+      "user_required_tasks": {
+        "6.4.a": [
+          "T6.4.1"
+        ]
+      },
+      "user_acks": {}
+    },
+    {
+      "id": "batch-17",
+      "phase": 6,
+      "task_groups": [
+        "6.5.a"
+      ],
+      "tasks": [
+        [
+          "T6.5.1"
+        ]
+      ],
+      "spawned": 0,
+      "completed": 0,
+      "verifications_passed": 0,
+      "verifications_failed": 0,
+      "stops_for_clarification": 0,
+      "dead_implementers": 0,
+      "dead_verifiers": 0,
+      "group_status": {
+        "6.5.a": "pending"
+      },
+      "user_required_tasks": {
+        "6.5.a": [
+          "T6.5.1"
+        ]
+      },
+      "user_acks": {}
+    },
+    {
+      "id": "batch-18",
       "phase": 7,
       "task_groups": [
         "7.1.a",
@@ -471,7 +527,7 @@
       "user_acks": {}
     },
     {
-      "id": "batch-17",
+      "id": "batch-19",
       "phase": 7,
       "task_groups": [
         "7.2.a"
@@ -497,7 +553,7 @@
       "user_acks": {}
     },
     {
-      "id": "batch-18",
+      "id": "batch-20",
       "phase": 8,
       "task_groups": [
         "8.1.a"
@@ -523,5 +579,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T08:19:40.627Z"
+  "last_updated": "2026-05-27T09:03:49.268Z"
 }

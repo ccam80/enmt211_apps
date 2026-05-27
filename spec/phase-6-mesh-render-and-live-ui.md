@@ -996,6 +996,197 @@ What each render layer reads — quoted from Phase 5 D2/D3 + Phase 2's
        Pause halts the sim.
   - All listed headless tests pass.
 
+## Wave 6.4: Click-to-place feature editor
+
+> Restored to scope 2026-05-27 — it was a non-negotiable in the original
+> spec session that got dropped when Phase 6 was first written. Without it
+> the schema's per-feature flexibility (the ability to express asymmetric
+> configurations by listing individual rings with `teeth: 1, theta0: <angle>`)
+> is not usable without hand-editing fixture `.js` files.
+
+### Task T6.4.1: Per-feature add/move/delete via the cross-section canvas
+
+- **Description**: Extend the 2-D cross-section render seam with a
+  click-to-place feature-editor mode. When the user toggles "Edit features"
+  in the matrix panel, the cross-section canvas accepts pointer events:
+  - **Click on an empty angular region of a ring** → add a feature of the
+    ring's current `element` kind at that angle (a new I tooth, M magnet,
+    W slot, etc.) with the default `spanFraction` for that element. The
+    new feature is written into `config.rings` as its own entry
+    (`teeth: 1` or `magnets: 1`, with `theta0: clickedAngle`).
+  - **Click on an existing feature** → select it; show a small floating
+    properties card with `theta0`, `spanFraction`, and (for magnets) magDir
+    sign; `rRange` is inherited from the parent ring and is not edited
+    per-feature.
+  - **Drag a selected feature's angular handle** → updates `theta0`;
+    pointer-move events debounce mesh rebuild to pointer-up so the live
+    UI stays responsive.
+  - **Right-click a feature OR `Delete` key on selected feature** →
+    removes the corresponding `config.rings` entry; rebuilds the mesh.
+  - **Element-kind dispatch only** — the editor reads `element` and
+    `member` from the parent ring; never machine identity (binding
+    constraint §11.1#1).
+
+- **Files to create**:
+  - `lessons/unified_motor/feature-editor.js` — IIFE.
+    - `enterEditMode(ctx) → exitFn` — installs pointer-event handlers
+      on the 2-D canvas via the registered cross-section seam; returns
+      a function that uninstalls.
+    - `hitTestFeature(layout, body, mx, my) → {ringIdx, featureIdx}|null`
+      — given a click in canvas coordinates, returns the parent-ring
+      index in `config.rings` and the in-ring feature index that was
+      hit (using `BodyMesh.elems[matId/srcId]` for material/circuit
+      identity, plus angular bin from `gapTheta`).
+    - `addFeatureAt(ctx, ringIdx, theta) → void` — appends a new
+      single-feature entry to `config.rings` mirroring the parent
+      ring's element/material/rRange/muR/etc., with
+      `theta0: theta, teeth: 1` (or `magnets: 1` per the element kind).
+      Calls `ctx.requestRebuild()`.
+    - `moveFeature(ctx, ringIdx, featureIdx, newTheta) → void`,
+      `deleteFeature(ctx, ringIdx, featureIdx) → void` — analogous.
+    - `register(UM)` — `UM.registerToolMode({id:"feature-editor",
+      enter: enterEditMode})`. The matrix-panel UI surfaces an "Edit
+      features" toggle that calls `UM.enterToolMode("feature-editor")`.
+    - Exports: `UM.FeatureEditor = { enterEditMode, hitTestFeature,
+      addFeatureAt, moveFeature, deleteFeature, register }`.
+
+  - `tests/ui/feature-editor.test.js` — headless tests using the
+    `installDomShim()` from `tests/ui/_fixtures.js`:
+    - `addFeatureAt` on a 4-magnet PMSM fixture at θ=π/2 produces a 5th
+      magnet entry in `config.rings`; the rebuilt mesh has one more
+      magnet feature in `section.features`.
+    - `moveFeature` updates `theta0` and `ctx.requestRebuild` fires
+      exactly once.
+    - `deleteFeature` removes the entry and rebuilds with one fewer
+      feature.
+    - `hitTestFeature` against a known mesh + click coordinates returns
+      the expected ring/feature indices.
+
+- **Files to modify**:
+  - `lessons/unified_motor/matrix-panel.js` — add the "Edit features"
+    toggle button to each ring's Geometry card; the toggle enters/exits
+    the editor mode via `UM.enterToolMode`.
+  - `lessons/unified_motor/mount.js` — add `UM.registerToolMode` /
+    `UM.enterToolMode` / `UM.exitToolMode` to the seam surface (tiny
+    additive change matching the pattern of the existing
+    `UM.registerPanel` / `UM.PANELS` machinery; no behavior change for
+    callers that don't register a tool).
+
+- **Acceptance criteria**:
+  - Pointing at the 2-D cross-section in edit mode and clicking adds a
+    feature; clicking it again selects it; dragging moves it; right-
+    click / Delete removes it. The change round-trips through
+    `config.rings` so a fixture exported via `JSON.stringify(config)`
+    after edits captures every user change.
+  - The new feature is mesh-conforming (the column edges produced by
+    `buildAngularColumns` snap to the new feature's `theta0` boundary)
+    — verified by the existing `findStraddlingElements` check from
+    `tests/mesh/feature-templates.test.js` applied to the post-edit
+    section.
+  - Edit-mode pointer events do NOT interfere with the simulation
+    when edit mode is off (default).
+  - All listed headless tests pass.
+
+## Wave 6.5: Concentrated windings + winding-editor revival
+
+> Also restored to scope 2026-05-27. Concentrated windings were a
+> non-negotiable in the original spec session: they're the standard for
+> high-pole-count BLDC, fractional-slot servo, and many traction motors.
+> The current `winding-model.js` only knows `winding.standard`
+> (distributed integer-slot windings). `winding-editor.js` was preserved
+> but never re-loaded.
+
+### Task T6.5.1: `concentrated` winding mode + winding-editor.js wiring
+
+- **Description**: Extend `lib/winding-model.js` with a new
+  `concentrated({m, p, Q, slotsPerPhase, coilSpan, turns, …})` mode
+  that produces a fractional-slot concentrated-winding routing (one or
+  two coils per tooth, phase-belt layout per the Cros-Carrick rule).
+  Revive `lessons/unified_motor/winding-editor.js` as a panel that
+  visualises the per-slot per-coil layout and lets the user edit
+  individual coil assignments (phase, direction, turns) when the
+  fixture's winding uses the new `winding.custom: { coils: [...] }`
+  mode.
+
+- **Files to modify**:
+  - `lib/winding-model.js` — add:
+    - `concentrated({m, p, Q, slotsPerPhase, coilSpan, turns, member,
+      rRange, slotTheta}) → routing` — produces the same routing shape
+      as `standardWinding` so downstream consumers don't branch. The
+      phase-belt rule is the Cros-Carrick double-layer concentrated
+      pattern; q = Q/(2pm) need not be integer (Phase 2.5 already
+      removed that constraint). Throws on q < 1/(2m) (sub-physical)
+      and on coilSpan > Q/p (would alias).
+    - `customRouting({coils, member, rRange, slotTheta}) → routing` —
+      direct per-coil specification; each coil entry is `{slotGo,
+      slotReturn, phase, turns}`. Validation: `slotGo, slotReturn ∈
+      [0, Q)`, `phase ∈ [0, m)`, `turns > 0`.
+    - `LIB.WindingModel = {..., concentrated, customRouting}` (joins
+      `cageRouting` from Phase 2.5).
+  - `lessons/unified_motor/config-schema.js` — `resolveWinding(ring)`
+    recognises `winding.concentrated` and `winding.custom` in
+    addition to `winding.standard` and `cage`. The validator routes
+    each correctly.
+  - `lessons/unified_motor/winding-editor.js` — REVIVED. Re-architect
+    as a panel that:
+    - Renders the per-slot coil layout (rectangular grid: slot index ×
+      coil layer) using the same color palette as the cross-section.
+    - When the active ring uses `winding.standard` or
+      `winding.concentrated`, the editor is read-only (shows the
+      algorithm output).
+    - When the active ring uses `winding.custom`, individual coil
+      cells are clickable: click cycles phase; right-click flips
+      direction; numeric input edits turns.
+    - Edits round-trip through `config.rings[i].winding.custom.coils`.
+    - Registered via `UM.registerPanel({id:"winding-editor", build:
+      buildEditor})`.
+  - `lessons/unified_motor/index.html` — add the
+    `<script src="./winding-editor.js"></script>` tag.
+
+- **Files to create**:
+  - `tests/winding/winding-model.concentrated.test.js` — at least 6
+    tests:
+    - 12-slot/14-pole BLDC concentrated (m=3, p=14, Q=12, slotsPerPhase=4):
+      produces 12 coils distributed across 3 phases × 4 coils each,
+      with alternating polarity matching the published Cros-Carrick
+      reference.
+    - 9-slot/8-pole servo (m=3, p=8, Q=9, slotsPerPhase=3): 9 coils,
+      no phase imbalance.
+    - q = 0.25 case (super-fractional): produces a determinate
+      routing; per-phase coil count differs by at most 1.
+    - Throws on q < 1/(2m).
+    - Throws on coilSpan > Q/p.
+    - `nCircuits` reported matches the expected per-phase count.
+
+  - `tests/winding/winding-model.custom.test.js` — at least 4 tests:
+    - 6 custom coils in a 12-slot stator round-trip through the
+      validator with `nCircuits = 6 / coils-per-circuit` (depends on
+      phase grouping).
+    - Validator catches out-of-range `slotGo`/`slotReturn`.
+    - Validator catches negative `turns`.
+    - Validator catches `phase ≥ m`.
+
+  - `tests/ui/winding-editor.test.js` — headless:
+    - Read-only mode renders the standard-winding layout from a PMSM
+      fixture and refuses click edits.
+    - Edit mode (custom winding fixture) accepts a phase-cycle click
+      and writes through to `config.rings[i].winding.custom.coils[j].phase`.
+    - Direction-flip and turns-edit round-trip the same way.
+    - `ctx.requestRebuild` fires after each edit.
+
+- **Acceptance criteria**:
+  - `LIB.WindingModel.concentrated` is the canonical fractional-slot
+    concentrated routing function; downstream consumers (the existing
+    circuit / motor-stack / motor-run / config-schema / cross-section
+    layers) do not branch on which winding mode produced the routing.
+  - The 12 and 9-slot examples above match published Cros-Carrick
+    reference output to within phase-polarity-sign equivalence (the
+    overall winding can be inverted as a whole).
+  - The revived `winding-editor.js` registers as a panel and shows up
+    in the live UI; editing a `winding.custom` fixture's coils
+    rebuilds the mesh and circuit correctly.
+  - All listed headless tests pass.
+
 ## Out of Scope (Phase 6)
 
 - The Phase 7 physics validation (`tests/fea-engine/*`, `tests/machines/*`
@@ -1004,13 +1195,19 @@ What each render layer reads — quoted from Phase 5 D2/D3 + Phase 2's
 - The §9-G5 Schur condensation and the off-thread worker — both
   measurement-gated (§11.4), surfaced by Phase 5's perf diagnostic and
   authorized by the user as scope additions if triggered.
-- Reviving `winding-editor.js` and `schematic-panel.js`: they are
-  preserved in the repo per the plan's "preserved unchanged" list but
-  are not loaded by `index.html` today and Phase 6 does not load them.
-  Their integration is left to a future phase.
-- Any rebuild of the four editors' physics-facing contracts (preserved
-  unchanged per `spec/plan.md`).
-- New machine fixtures or any change to the existing 15 — the picker
-  consumes `UM.MACHINES` as a registry whose contents are owned by their
-  own `machines/*.js` files (Phase 0's frozen-set + Phase 3's WFS
-  CURRENT-terminal flip).
+- `schematic-panel.js` revival: preserved in the repo per the plan's
+  "preserved unchanged" list but not loaded by `index.html` today and
+  Phase 6 does not load it. Future phase.
+- Any rebuild of `cross-section-render.js` / `matrix-panel.js` /
+  `schematic-panel.js` physics-facing contracts (preserved unchanged
+  per `spec/plan.md`). Note: `winding-editor.js` IS in scope this
+  phase (see Wave 6.5).
+- New machine fixtures beyond what's already in the 15 — the picker
+  consumes `UM.MACHINES` as a registry whose contents are owned by
+  their own `machines/*.js` files (Phase 0's frozen-set + Phase 2.5's
+  `p`-normalization + Phase 3's WFS CURRENT-terminal flip).
+- **Continuous skew, interior-magnet pockets, arc-shaped flux barriers**:
+  the schema is ring-stack-only by design (see `spec/plan.md`
+  "ring-stack scope" note). Syncrel's multi-barrier rotor is a
+  stylised approximation, not a real syncrel — documented limitation,
+  not a Phase 6 deliverable.
