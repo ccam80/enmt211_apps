@@ -683,3 +683,42 @@ Phase 7 has two waves:
 - New analytic references beyond the four enumerated (no-load back-EMF,
   slotless gap, round-rotor inductance, cross-method). Adding more
   references is a future scope decision, not Phase 7.
+
+## Amendments (2026-05-27)
+
+- **Back-EMF analytic test (missing from spec body, present in overview).**
+  Add `tests/fea-engine/back-emf.test.js`: at a slotless surface-magnet
+  PMSM, the no-load phase back-EMF amplitude is
+  `Ê = N·kw·B_g·R·ℓ·ω_e` where `B_g` is the analytic peak gap flux
+  density and `ω_e` is electrical angular frequency. Compare the
+  FEA-derived `dλ_pm/dθ · ω` at ω = 314 rad/s (50 Hz electrical for a
+  4-pole at 1500 rpm) against the analytic `Ê` to within 1%. This closes
+  the deferred-from-Phase-5 back-EMF criterion that the project's
+  overall verification list calls for but the existing spec body omits.
+
+- **`kw ≈ 0.933` derivation.** The full-pitch distributed-winding factor
+  for a 3-phase integer-slot machine with `q = 2` slots per pole per
+  phase is `kw = kp · kd` where: pitch factor `kp = sin(π·coilPitch/(Q/p))
+  = sin(π/2) = 1.0` for full pitch; distribution factor
+  `kd = sin(q·α/2) / (q·sin(α/2))` with `α = π/(q·m) = π/6` for q=2, m=3
+  giving `kd = sin(π/6)/(2·sin(π/12)) = 0.5/(2·0.2588) ≈ 0.9659`. For the
+  PMSM fixture (8p/48s/m=3, q = 48/(8·3) = 2), `kw = 1.0 · 0.9659 ≈ 0.966`,
+  not 0.933 as the test currently asserts. **Action:** correct the test's
+  hardcoded `kw` to `0.9659` (or compute it from the fixture's winding
+  spec via `LIB.WindingModel.windingFactor(routing)`, exposed in Phase 7
+  as a small helper). The 0.933 in the current spec body is a magic
+  number traceable to a different (q=1) winding choice and must be
+  derived from the actual fixture rather than copied.
+
+- **`3%` analytic-tolerance bar — discretization-error basis.** Linear
+  triangular/quad elements have `O(h^2)` field-error convergence. For the
+  PMSM fixture at default `refine=1`, the mesh has roughly N=5000-10000
+  nodes per body; `h ≈ √(annulus_area / N) ≈ 1 mm` on the 60 mm radius.
+  Theoretical `O(h^2)` error at 1 mm ≈ `(1mm/60mm)² ≈ 3e-4`, well below
+  3%. The 3% bar therefore allows for: (a) practical constant-multiplier
+  loss vs. theoretical (typical 10–100× over `O(h^2)` ideal at default
+  mesh), and (b) cross-method comparison error since the "analytic"
+  reference itself uses a magnetic-circuit approximation that ignores
+  fringing and back-iron leakage (≈1–2% intrinsic error). 3% is the
+  order-of-magnitude floor for cross-method agreement at production mesh
+  density and is justified — not asserted.

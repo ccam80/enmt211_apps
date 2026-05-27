@@ -836,6 +836,18 @@ What each render layer reads — quoted from Phase 5 D2/D3 + Phase 2's
          by `(r_stator_bore_new − r_stator_bore)`.
        - Update `config.grid.rInner` to the smallest rotor `rRange[0]`,
          `config.grid.rOuter` to the largest stator `rRange[1]`.
+       - **Re-verify harmonic-gap adequacy (added 2026-05-27).** After
+         the gap-shift, compute `K = LIB.AirgapHarmonic.defaultK(slots,
+         poles)` and `N_gap = 4·K + nBandsPerSector·P_body` (the Phase 4
+         `N_gap ≥ 4K` Nyquist-plus-margin floor). If the post-shift
+         geometry would mesh with `N_gap < 4·K`, throw with a message
+         naming the resulting gap, the required `N_gap` floor, and the
+         user-facing remedy ("increase gap length, reduce harmonic
+         truncation, or accept aliasing"). The user's slider drag from a
+         comfortable 4 mm gap to a tight 0.1 mm gap can otherwise
+         silently invalidate the harmonic truncation that was adequate
+         at 4 mm; the throw forces the slider's drag handler to clamp
+         or warn rather than producing a wrong field.
        - Throws if any ring lacks a `member` field, if any `member` value
          is neither `"rotor"` nor `"stator"`, or if the resulting radii
          are non-positive or non-increasing.
@@ -885,6 +897,14 @@ What each render layer reads — quoted from Phase 5 D2/D3 + Phase 2's
     - `"applyGapLength throws on non-positive g"` — assert
       `() => applyGapLength(cfg, 0)` and `() => applyGapLength(cfg,
       -0.001)` both throw.
+    - `"applyGapLength throws when N_gap < 4K after shift"` (added
+      2026-05-27) — load `pmsm` (slots=48, poles=8 → K=144,
+      4K=576); call `applyGapLength(cfg, 1e-5)` (10 µm — far too
+      tight to mesh with adequate gap nodes); assert it throws
+      with a message that names the K value and the inadequate
+      N_gap. Then call `applyGapLength(cfg, 0.003)` (3 mm — the
+      original baseline gap); assert no throw and the gap is
+      `~0.003`.
     - `"deriveTogglesFromConfig reads gapLength"` — load `pmsm`;
       `t = deriveTogglesFromConfig(cfg);` assert
       `Math.abs(t.gapLength − (r_stator_bore − r_rotor_surface)) <

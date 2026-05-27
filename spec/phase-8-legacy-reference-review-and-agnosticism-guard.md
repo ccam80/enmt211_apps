@@ -329,3 +329,42 @@ the previous build).
   phase the hit-bearing file belongs to so the user can decide whether
   to reopen that phase or carve out the reference in the audit's
   allow-list.
+
+## Amendments (2026-05-27)
+
+- **Frozen-set scope extension.** Check E currently freezes
+  `em-physics.js`, `field-render.js`, `coil-render.js`, `layout3d.js`.
+  After Phases 2.5/2.6/5 unfroze `winding-model.js`,
+  `config-schema.js`, and (in Phase 5) `motor-circuit.js` and
+  `excitation.js` for documented changes, those files should be added
+  to the Check E frozen set **once their respective phases are
+  complete and verified** — establishing a new `motor-baseline-post-rebuild`
+  git tag against which Check E compares. The intent: Phase 8 closes
+  the door on further drift in physics-encoding files once the rebuild
+  is done. Spec for Phase 8 must:
+  1. Define the `motor-baseline-post-rebuild` tag set (which commit,
+     which files).
+  2. Update Check E to diff against that tag for the extended file
+     list.
+  3. Document the procedure for an explicit "this file needs to change
+     again" amendment (which requires a new tag bump, surfaced to the
+     user, not silently).
+
+- **Check B — positive-coverage complement (added 2026-05-27).** Check B
+  currently scans for machine-name tokens in the agnosticism scope and
+  passes if zero are found. This is a necessary but not sufficient
+  condition: a machine fixture that triggers a silent fall-through to a
+  default code path would pass Check B without ever exercising the
+  generic dispatch. Add **Check F — positive-dispatch coverage**:
+  - For each machine in `UM.MACHINES`, run a minimal slice solve
+    (`MotorSlice.build(config).solve(0, [0,...,0])`) and assert that
+    every dispatch site listed in `spec/.context/dispatch-sites.md` is
+    exercised at least once by the suite as a whole. The dispatch sites
+    are the explicit per-kind branches in element-handling and
+    material-handling code (built by walking the AST for `kind === "I"`,
+    `kind === "M"`, etc. switches).
+  - Coverage data is collected via Node's built-in coverage support
+    (`node --experimental-test-coverage`) and asserted in a small
+    runner script.
+  - Check F FAILs if any documented dispatch site has zero hits across
+    the 15-fixture sweep.

@@ -148,6 +148,28 @@ per §11.4). `opts`:
   poles)` (D8).
 - `newton = { maxIter=8, tol=1e-6, residualTol=1e-9 }` — Newton stopping
   criteria (§11.3 guards).
+  - `tol=1e-6` is the relative change in nodal vector potential `A` between
+    successive Newton iterations. For the silicon-steel fixtures in the
+    suite, `‖ΔA‖∞/(‖A‖∞ + ε) < 1e-6` corresponds to a worst-case torque
+    error of roughly 0.01% (derived from the sensitivity `dT/dA ~ B·L·I`
+    near saturation, where a 1e-6 change in A produces a 1e-6 change in
+    co-energy and thus a comparable fractional change in torque). The
+    1% torque-convergence acceptance criterion in Wave 5.2 has 10000×
+    headroom over this Newton residual.
+  - `residualTol=1e-9` is the absolute equation residual
+    `‖K·A − f‖∞/(‖f‖∞ + ε)`. The chosen value is one decimal place above
+    the solver's own residual floor (`< 1e-9` per Phase 1 acceptance),
+    so the residual-tol check is solver-floor-limited and not a meaningful
+    additional constraint — it is included as a defensive guard against
+    Newton iterating past the solver's accuracy.
+  - `maxIter=8` is empirical: for B-H Brauer curves in the suite at the
+    operating points of the AC-excited fixtures, Newton converges in
+    3-6 iterations from the warm-start initial guess. The 8-iteration
+    cap traps non-convergence (e.g. an under-damped step that oscillates)
+    and forces an explicit error rather than silent timeout. If a future
+    fixture's nonlinearity exceeds this, the slice throws; the right
+    response is a line-search modification in the solver, not raising
+    the iteration cap.
 
 **Returned slice object** (every field a stable contract):
 
@@ -914,6 +936,109 @@ respective phases' already-defined Files Owned (no new file ownership added).
   - `lib/motor-slice.js` contains no machine name, machine-type enum, or
     machine-identity branch end-to-end across all three waves.
   - No DOM/canvas access at module load in `lib/motor-slice.js`.
+
+## Eddy-current regime — validity statement (added 2026-05-27)
+
+Phase 5 solves the **2-D magnetostatic** problem `∇×ν∇A = J`. This is the
+quasi-static approximation: induced eddy currents in iron and conductors are
+neglected on the assumption that the AC field penetrates fully into the
+relevant region. The static approximation is valid when the **iron-region
+skin depth at the operating frequency is large compared to the iron region's
+characteristic transverse dimension** (tooth width, back-iron radial depth).
+
+**Quantitative bound.** Skin depth in iron at frequency `f` is
+`δ = √(2/(2π·f·μ₀·μ_r·σ))`. For silicon steel (`μ_r ≈ 1000`, `σ ≈ 2e6 S/m`):
+- `f = 50 Hz`  → `δ ≈ 1.6 mm`
+- `f = 60 Hz`  → `δ ≈ 1.5 mm`
+- `f = 400 Hz` → `δ ≈ 0.56 mm`
+- `f = 1 kHz`  → `δ ≈ 0.36 mm`
+
+For copper conductors (`μ_r=1, σ=5.96e7 S/m`):
+- `f = 50 Hz`  → `δ ≈ 9.2 mm`
+- `f = 1 kHz`  → `δ ≈ 2.06 mm`
+- `f = 10 kHz` → `δ ≈ 0.65 mm`
+
+**Per-fixture validity (with the current 15-fixture industrial-scale suite):**
+- All AC and PWM fixtures driven at `f ≤ 60 Hz` with iron tooth widths
+  `≥ 4 mm` (roughly all fixtures): static approximation valid to within ~5%
+  of fundamental-frequency torque/EMF.
+- Hybrid-stepper, VR-stepper, SR motor: their dominant excitation is step/DC
+  with PWM chopping. The DC component dominates; PWM ripple is not modeled
+  but does not contribute to mean torque.
+- Brushed-DC fixtures: DC excitation, no eddy-current regime concern.
+- Induction-1ph and induction-3ph: cage-bar eddy currents are **the whole
+  physics** of the machine. The static slice CANNOT model induction motor
+  steady-state behaviour. The slice can still produce a valid mesh, field,
+  and circuit-coupled solve at zero slip (synchronous rotation, no induced
+  cage current), but real induction-motor torque-speed curves require
+  Phase 5+ extension OR a complex-A AC-magnetic solve at slip frequency,
+  which is NOT in this phase.
+
+**Acceptance implication.** The torque/back-EMF acceptance tests in Wave 5.2
+and Phase 7 must skip the two induction fixtures OR explicitly test only
+zero-slip operation. Any future fixture with operating frequency above 1 kHz
+or iron tooth width below 1 mm must be flagged with a documented
+`eddyConcern: true` field, and Phase 5 must either reject it or treat it
+as zero-slip-only. The slice does NOT silently compute a wrong answer for
+out-of-regime configurations: `motor-slice.js` MUST throw on construction
+if the per-circuit frequency × iron region's smallest dimension violates
+`δ_iron > 2 × dim_min` (i.e. skin depth must exceed twice the smallest
+iron dimension for static to apply to within ~5%).
+
+**Direct test.** Add `tests/slice/eddy-regime.test.js`:
+- A fixture with iron tooth width 0.5 mm and AC frequency 1 kHz throws
+  with a message naming the offending region.
+- A standard 50 Hz PMSM passes the construction check.
+
+## `extractCoeffs` `derivStep` — derivation (added 2026-05-27)
+
+The default `derivStep` for the central-difference derivative
+`dL/dθ ≈ [L(θ+h) − L(θ−h)] / (2h)` is now derived rather than picked.
+
+For double-precision floating point, the optimal step minimizes the sum of
+truncation error (`~ h²·max|d³L/dθ³|/6`) and round-off error
+(`~ ε·|L|/h`, where `ε ≈ 2.2e-16`). Setting `d/dh` of that sum to zero:
+`h_opt = (3·ε·|L| / max|d³L/dθ³|)^(1/3)`.
+
+For motor inductance L(θ) varying smoothly over a pole period (≈2π/poles),
+`max|d³L/dθ³|` is roughly `|L| · (poles/π)³`. Substituting:
+`h_opt ≈ (3·ε·(π/poles)³)^(1/3) ≈ 1.8e-5 · (π/poles)` rad.
+
+For a 4-pole machine: `h_opt ≈ 1.4e-5 rad`.
+For an 8-pole machine: `h_opt ≈ 7e-6 rad`.
+
+**Spec change.** The default `derivStep` is now `Math.PI / (poles · 1e5)`
+(machine-aware, derived). The old `Math.PI/180` default is removed.
+Callers that override `derivStep` keep that ability, but the override
+itself is now validated to lie within `[1e-7, π/(10·poles)]`, throwing
+on values outside that range (too-small steps amplify round-off;
+too-large steps lose smoothness assumption). The override-validation
+test in `tests/slice/extract.test.js` is updated to cover both bounds.
+
+**Acceptance:** `dL/dθ` computed at `derivStep = π/(poles·1e5)` agrees
+with the analytic round-rotor `dL/dθ = 0` (identically zero for a round
+rotor) to within `1e-12` (machine-epsilon * |L|), demonstrating that
+the chosen step does not lose precision to round-off.
+
+## Phase 5 acceptance now includes ONE non-self-referential physical test (added 2026-05-27)
+
+To close the "solver converges on itself" loophole, Wave 5.2 adds:
+
+`tests/slice/analytic-reference.test.js`:
+- Build a slotless ring-magnet fixture (PMSM stripped of stator slots — a
+  smooth-bore stator with surface magnets only). The analytic in-gap
+  radial field is `|B_r(r,θ)| = Br · g_m / (g_m + g) · cos(p·θ)` per
+  Hague's formula for a surface-magnet machine.
+- Solve at θ=0 with zero stator current.
+- Sample the mesh-native `field` at 24 points around the gap circle
+  `r = gapR`.
+- Assert `‖B_FEA(θ_k) − B_analytic(θ_k)‖∞ / max|B_analytic| < 3%`.
+
+This test is independent of any refinement sweep and pins the slice to
+a physical reference at refine=1. If Phase 5's default mesh isn't fine
+enough to hit 3% on this test, the right response is to increase the
+auto-derived cells-per-pole (Phase 2.6 tangential follow-up), not to
+loosen the tolerance.
 
 ## Out of Scope (Phase 5)
 

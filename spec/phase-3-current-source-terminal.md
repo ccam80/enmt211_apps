@@ -426,3 +426,14 @@ re-point, the first phase after the FEA slice is rebuilt). Phase 3 owns the WFS
     `Bknee` field.
   - No machine name, machine-type enum, or machine-identity branch is introduced.
   - All listed tests pass.
+
+## Amendments (2026-05-27)
+
+- **`BkneeDefault = 1.6` physical basis.** The default knee field used when
+  `material.Bknee` is null is `1.6 T`. This is the midpoint of the
+  silicon-steel saturation knee range (≈1.5–1.8 T, depending on the specific
+  alloy — M-19 ≈ 1.6, M-15 ≈ 1.5, M-50 ≈ 1.8). The production path uses the
+  per-iron override via `ring.Bknee` set in each fixture, so the default is
+  a safety net for fixtures that omit Bknee, not the operational value.
+  Documented here so a future implementer of the saturation solver in
+  Phase 5 can verify the choice against the actual fixture materials.

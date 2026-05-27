@@ -453,3 +453,20 @@ LIB.AirgapHarmonic.build(rotorGap, statorGap, opts) → HarmonicGap
   `opts.gapMinNodes = 4·(3·max(slots,poles))` to `LIB.MotorMesh.build` (the knob
   added in Phase 2 Task 2.3.1). Phase 4 throws if the guard is violated rather
   than absorbing it (see the D5 cross-phase note).
+
+## Amendments (2026-05-27)
+
+- **`2%` cross-method bar — discretization-error basis.** The harmonic-gap
+  vs. dense-FEM-annulus oracle test at `nTheta=32` cross-checks two
+  numerically-distinct methods. The 2% tolerance accounts for: (a) the
+  harmonic gap's truncation at `K = 3·max(slots, poles)` which carries a
+  trailing error of `O(1/(N_gap·K^q))` for q-smooth fields (typically
+  q≈2 for slot-induced fields), and (b) the dense annulus's
+  `O(h^2) = O((2π/32)^2) ≈ 4%` worst-case discretization error in a
+  linear element. The 2% bar is therefore the order-of-magnitude minimum
+  of the two methods' independent errors; tighter would be optimistic
+  about either method's accuracy at the test mesh size, looser would
+  let real bugs through. If the test starts failing, the response is to
+  either tighten the test mesh (raise nTheta to 64+) or to accept the
+  failure as evidence of a real method-vs-method disagreement, never to
+  widen the bar.
