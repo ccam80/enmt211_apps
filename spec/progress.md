@@ -367,3 +367,26 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - Non-iron features (magnets, conductors) are unchanged
   - No machine identity introduced
 - **Full suite**: 204/270 passing, 65 failing (all pre-existing Phase 5 stub errors, unchanged count), 1 skipped (pre-existing WFS self-start skip)
+
+---
+## Recovery events (continued)
+
+- **2026-05-28** — batch-8 SECOND implementer `a3e019b68e31abb6e` (T4.1.1, opus replacement): TaskOutput returned `status: completed` but the final output was a truncated mid-thought ("Let me get the full counts with grep:") — agent ran out of context before invoking `complete-implementer.sh` or recording the task in progress.md. Coordinator verified the actual work was complete and clean: all 19 new harmonic tests pass (projection 11 + admittance 6 + handoff 2), full suite 289/289 with 223 pass / 65 pre-existing Phase 5 stub failures (unchanged) / 1 pre-existing skip (unchanged), no regressions. Both the M_ptwise⁻¹ resolution (admittance) and the pmsm gap inversion (handoff) are fixed in the working tree. Invoked `mark-dead-implementer.sh` (dead_implementers=2) and `clear-locks.sh`. A third implementer (haiku) is being spawned for bookkeeping only: write the T4.1.1 entry in progress.md and invoke complete-implementer.sh.
+
+- **2026-05-28** — batch-8 implementer `a08c83d277a7f55e4` (T4.1.1): coordinator killed the agent after ~30 min when it had compacted and was losing the thread of its own conceptual debugging. The agent had written ~88KB of working code across `lib/airgap-harmonic.js`, `tests/harmonic/_fixtures.js`, `tests/harmonic/projection.test.js`, `tests/harmonic/admittance.test.js`, and `tests/harmonic/handoff.test.js`. `projection.test.js` was 11/11 GREEN at kill time; `admittance.test.js` was failing on the M_ptwise/M_weak DtN-matrix symmetry/consistency contradiction; `handoff.test.js` was failing on an unrelated pmsm-fixture mesher issue (`rotorGap.gapR > statorGap.gapR`). The agent's conceptual debugging trail (in `tmp_analysis.js` and `tmp_test2.js`) converged on the right resolution (stamp harmonic block = −M_ptwise⁻¹; harmonic DOFs store flux Fourier coefficients; the stamp-consistency test reconstructs x_harm as Fourier coefficients rather than computing B·x_harm) but the agent ran out of context before applying it. Invoked `mark-dead-implementer.sh` (dead_implementers=1) and `clear-locks.sh` to release the T4.1.1 + 5 file locks. Deleted the `tmp_*.js` scratch files from the working tree. Captured the full conceptual debugging trail in `spec/.context/T4.1.1-recovery-notes.md` for the replacement implementer.
+
+- **2026-05-28** — batch-8 third implementer `a3e019b68e31abb6e` (T4.1.1, opus replacement): TaskOutput returned `status: completed` but output was truncated mid-thought. Coordinator verified all work complete and correct: 19/19 harmonic tests pass; full suite 289/289 with 223 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged); no regressions. M_ptwise⁻¹ resolution (admittance) and pmsm gap-inversion fix (handoff) both applied. Invoked `mark-dead-implementer.sh` (dead_implementers=2) and `clear-locks.sh`. Spawned fourth implementer (haiku) for bookkeeping only: append progress entry and invoke complete-implementer.sh.
+
+## Task T4.1.1: Airgap-harmonic — projection, admittance, static-φ stamp
+- **Status**: complete
+- **Agent**: implementer (bookkeeping; prior implementers [batch-8 #2 and #3] died at context exhaustion after completing all technical work)
+- **Files created**: lib/airgap-harmonic.js, tests/harmonic/_fixtures.js, tests/harmonic/projection.test.js, tests/harmonic/admittance.test.js, tests/harmonic/handoff.test.js
+- **Files modified**: none
+- **Tests**: 19/19 passing (projection 11 + admittance 6 + handoff 2; node --test tests/harmonic/*.test.js)
+- **Implementation summary**:
+  - lib/airgap-harmonic.js: DtN-to-bordered-FEA harmonics engine. Public API: build (mesh + gapLoops) → M_ptwise⁻¹ stiffness block + projection/reconstruction; stamp(ω) returns bordered matrix with −M_ptwise⁻¹ harmonic compliance block and analytic flux boundary forcing. Harmonic DOFs store flux Fourier coefficients (resolved via M_ptwise⁻¹ solve). Accepts K∈[4, ∞); enforces r_mr < r_ms guard; dofMap indexes rotor(2K+1) + stator(2K+1) harmonic DOFs.
+  - tests/harmonic/_fixtures.js: uniformCircle, manufactured sections + gapLoopsFromConfig (loads mesh bodies' gap loops); annulusOracle dense-LDLT oracle and denseSolveSPD for verification; assertClose, relErrInf, patternKeys utilities.
+  - projection.test.js (11): defaultK derivation (3·max(slots,poles)), build guards, dof-layout integrity, project/reconstruct round-trip < 1e-8, known cos/sin amplitudes.
+  - admittance.test.js (6): M_ptwise⁻¹ symmetry and PD; surfaceFlux matches analytic (1/μ₀)·∂A/∂r within 1e-6; stamp consistency via reconstruct on harmonic-DOF flux coefficients.
+  - handoff.test.js (2): static-φ stamp (ω=0) reproduces steady-state flux on pmsm fixture; gap inversion fixed (rotor/stator gap bodies identified by radius, not name).
+- **Full suite**: 289/289 with 223 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged); zero regressions
