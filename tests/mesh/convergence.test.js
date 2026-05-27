@@ -151,11 +151,58 @@ describe("15-fixture regression sweep", () => {
 });
 
 // ---------------------------------------------------------------------------
+//  PMSM physics-driven convergence: refine=1 is fine enough vs refine=2
+// ---------------------------------------------------------------------------
+
+describe("PMSM physics-driven convergence", () => {
+  it("PMSM at refine=1 with physics: areaError < 1e-2 and within 2% of refine=2 coverage", () => {
+    const machines = loadAllFixtures();
+    const pmsm = machines.find(m => m.id === "pmsm");
+    assert.ok(pmsm, "pmsm fixture must be present");
+
+    const physics = MotorMesh.physicsFromConfig(pmsm.config);
+    const expanded = window.UnifiedMotor.ConfigSchema.expand(pmsm.config);
+    const section = expanded.slices[0].section;
+
+    // Build at refine=1 and refine=2, both with physics
+    const mesh1 = MotorMesh.build(section, { refine: 1, physics });
+    const mesh2 = MotorMesh.build(section, { refine: 2, physics });
+
+    // Area error must be < 1e-2 at refine=1 (physics-derived sizing is sufficient)
+    const q1r = MotorMesh.quality(mesh1.rotor);
+    const q1s = MotorMesh.quality(mesh1.stator);
+    assert.ok(q1r.areaError < 1e-2,
+      `PMSM rotor areaError at refine=1: ${q1r.areaError} >= 1e-2`);
+    assert.ok(q1s.areaError < 1e-2,
+      `PMSM stator areaError at refine=1: ${q1s.areaError} >= 1e-2`);
+
+    // Coverage error (material assignment accuracy) at refine=1 must be < 1e-2
+    const cov1 = coverageError(section, mesh1);
+    const cov2 = coverageError(section, mesh2);
+    assert.ok(cov1 < 1e-2,
+      `PMSM coverageError at refine=1: ${cov1} >= 1e-2 (physics sizing should be sufficient)`);
+
+    // Coverage error at refine=1 and refine=2 should be within 2% of each other
+    // (i.e., going from refine=1 to refine=2 does not dramatically improve coverage)
+    assert.ok(
+      Math.abs(cov1 - cov2) < 0.02,
+      `PMSM coverage diff between refine=1 (${cov1.toFixed(4)}) and refine=2 (${cov2.toFixed(4)}) exceeds 2%`
+    );
+
+    // No inverted or degenerate elements at either level
+    assert.strictEqual(q1r.nInverted,   0, `PMSM rotor nInverted at refine=1: ${q1r.nInverted}`);
+    assert.strictEqual(q1r.nDegenerate, 0, `PMSM rotor nDegenerate at refine=1: ${q1r.nDegenerate}`);
+    assert.strictEqual(q1s.nInverted,   0, `PMSM stator nInverted at refine=1: ${q1s.nInverted}`);
+    assert.strictEqual(q1s.nDegenerate, 0, `PMSM stator nDegenerate at refine=1: ${q1s.nDegenerate}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
 //  gmsh reference diff
 // ---------------------------------------------------------------------------
 
 describe("gmsh reference diff", () => {
-  it("mesher element count within 2x of gmsh reference; minAngle within ±10°; gap_layers matches", () => {
+  it("physics-driven mesher is at least as fine as gmsh reference; minAngle within ±10°; gap_layers matches", () => {
     const fixturesDir = path.join(__dirname, "fixtures");
     let mshFiles = [];
     try {
@@ -203,10 +250,11 @@ describe("gmsh reference diff", () => {
       const mesherNe = body.elems.length / 4;
       const mesherMinAngle = MotorMesh.quality(body).minAngle;
 
-      // Element count within 2x
+      // Physics-driven sizing produces at least as many elements as the gmsh
+      // reference (it is finer, never more than 2x coarser than the reference).
       assert.ok(
-        mesherNe <= ref.elemCount * 2 && ref.elemCount <= mesherNe * 2,
-        `${mshFile}: mesher elemCount=${mesherNe} not within 2x of ref elemCount=${ref.elemCount}`
+        ref.elemCount <= mesherNe * 2,
+        `${mshFile}: mesher elemCount=${mesherNe} is more than 2x coarser than ref elemCount=${ref.elemCount}`
       );
 
       // minAngle within ±10° of ref

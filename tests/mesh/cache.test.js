@@ -110,6 +110,67 @@ describe("buildCached hits the cache", () => {
 });
 
 // ---------------------------------------------------------------------------
+//  Physics change invalidates cache
+// ---------------------------------------------------------------------------
+
+describe("physics change invalidates cache", () => {
+  it("changing circuits[0].freq from 60 Hz to 1000 Hz produces a cache miss and finer mesh", () => {
+    MotorMesh.clearCache();
+
+    // Build a section with one conductor band
+    const TWO_PI = 2 * Math.PI;
+    const r0 = 0.044, r1 = 0.050;
+    const section = {
+      features: [
+        { kind: "iron", member: "rotor", rRange: [0.020, 0.040],
+          thetaRange: [0, TWO_PI], muR: 1000 },
+        { kind: "conductor", member: "stator", rRange: [r0, r1],
+          thetaRange: [0, TWO_PI / 4], circuit: 0, turns: 40 },
+        { kind: "conductor", member: "stator", rRange: [r0, r1],
+          thetaRange: [TWO_PI / 4, TWO_PI / 2], circuit: 0, turns: -40 },
+        { kind: "conductor", member: "stator", rRange: [r0, r1],
+          thetaRange: [TWO_PI / 2, 3 * TWO_PI / 4], circuit: 0, turns: 40 },
+        { kind: "conductor", member: "stator", rRange: [r0, r1],
+          thetaRange: [3 * TWO_PI / 4, TWO_PI], circuit: 0, turns: -40 },
+        { kind: "iron", member: "stator", rRange: [r1, r1 + 0.010],
+          thetaRange: [0, TWO_PI], muR: 1000 },
+      ],
+    };
+
+    const opts60   = { physics: { circuits: [{ freq:   60, amp: 100, conductorMaterial: "copper" }] } };
+    const opts1000 = { physics: { circuits: [{ freq: 1000, amp: 100, conductorMaterial: "copper" }] } };
+
+    // First build at 60 Hz — miss
+    const res60 = MotorMesh.buildCached(section, opts60);
+    const misses60 = MotorMesh.cacheStats().misses;
+
+    // Second build at 60 Hz — hit (same physics)
+    MotorMesh.buildCached(section, opts60);
+    const hits60 = MotorMesh.cacheStats().hits;
+    assert.ok(hits60 >= 1, "second 60 Hz build should be a cache hit");
+
+    // Build at 1000 Hz — must be a miss (different physics)
+    const missesBefore = MotorMesh.cacheStats().misses;
+    const res1000 = MotorMesh.buildCached(section, opts1000);
+    const missesAfter = MotorMesh.cacheStats().misses;
+
+    assert.ok(
+      missesAfter > missesBefore,
+      `changing freq from 60 Hz to 1000 Hz should cause a cache miss (misses was ${missesBefore}, now ${missesAfter})`
+    );
+
+    // The 1000 Hz mesh should be strictly finer than the 60 Hz mesh
+    // (higher frequency → smaller skin depth → more radial layers in conductor band)
+    const nn60   = res60.stator.nodes.length / 2;
+    const nn1000 = res1000.stator.nodes.length / 2;
+    assert.ok(
+      nn1000 >= nn60,
+      `1000 Hz stator (${nn1000} nodes) should be at least as fine as 60 Hz stator (${nn60} nodes)`
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 //  LRU evicts oldest
 // ---------------------------------------------------------------------------
 

@@ -105,10 +105,10 @@
 (function () {
   "use strict";
 
-  var MotorMesh     = LIB.MotorMesh;
-  var MotorMeshView = LIB.MotorMeshView;
-  var ConfigSchema  = window.UnifiedMotor.ConfigSchema;
-  var MACHINES      = window.UnifiedMotor.MACHINES || [];
+  var MotorMesh      = LIB.MotorMesh;
+  var MotorMeshView  = LIB.MotorMeshView;
+  var ConfigSchema   = window.UnifiedMotor.ConfigSchema;
+  var MACHINES       = window.UnifiedMotor.MACHINES || [];
 
   // ---------------------------------------------------------------------------
   //  DOM refs
@@ -249,6 +249,11 @@
 
     var opts = { gapLayers: gapLayers, refine: refine };
     if (dofBudget !== null && dofBudget > 0) opts.dofBudget = dofBudget;
+
+    // Extract physics inputs (terminal frequency, amplitude, conductor material)
+    // from the fixture config and fold them into opts so the mesher uses
+    // physics-driven radial sizing and the cache key includes operating point.
+    opts.physics = MotorMesh.physicsFromConfig(m.config);
 
     var section;
     try {

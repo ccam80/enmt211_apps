@@ -42,8 +42,14 @@ task tables are removed.** What that work produced splits cleanly into two sets
   defects hidden by trivial geometries: `lib/winding-model.js` (over-strict
   `Q % (m·p)` validator, no cage routing), `lessons/unified_motor/config-schema.js`
   (`K` element wrongly bucketed with `W`), and the 15 `lessons/unified_motor/machines/*.js`
-  fixtures (mixed `p` semantics, cage forced through standardWinding). Phase 8's
-  `git diff motor-baseline` invariant now allows these three sets to differ.
+  fixtures (mixed `p` semantics, cage forced through standardWinding).
+  **Phase 2.6 then added physics-driven mesh sizing**
+  (`spec/phase-2.6-physics-driven-mesh-sizing.md`) — `lib/motor-mesh.js` now
+  derives per-band layer counts from skin depth (conductors), saturation
+  gradient (irons), and curvature (tooth tips), replacing the prior
+  "1 layer × refine" default that gave wound conductors zero internal radial
+  resolution. Phase 8's `git diff motor-baseline` invariant now allows these
+  three sets to differ.
   **Two near-preserved files** carry small, byte-localized edits and are noted
   in their owning phases: `lessons/unified_motor/config-schema.js` (Phase 3 —
   adds the `"CURRENT"` terminal type to `validTerminalTypes` and the optional

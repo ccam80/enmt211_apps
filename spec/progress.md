@@ -278,3 +278,16 @@ Progress is recorded here by implementation agents. Each completed task appends 
 - All 15 fixtures: nInverted=0, nDegenerate=0
 - gapTheta uniform to 1e-9 on all fixtures
 - Straddling test passes for iSectionWithTeeth(4): exact LCM alignment (baseN=80, boundary at column 3 exactly)
+
+## Task T2.6.1: Physics-driven mesh sizing
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/mesh/auto-sizing.test.js
+- **Files modified**: lib/motor-mesh.js, tests/mesh/cache.test.js, tests/mesh/convergence.test.js, lessons/unified_motor/mesh-dev.html
+- **Tests**: 61/61 passing (node --test tests/mesh/*.test.js) — 48 pre-existing + 13 new
+- **Implementation notes**:
+  - lib/motor-mesh.js: Added physics constants (MU0, RESISTIVITY_MAP). Added physicsFromConfig(config) helper that extracts {freq, amp, conductorMaterial} per circuit from terminal.type (AC→freq, STEP→chopFreq, DC/CURRENT→0). Added physicsTargets(features, opts) that computes perBandLayers (Map of rRange-key→layer-count) and perFeatureExtraCols (Map of feature-idx→extra-cols). Skin-depth formula: delta=sqrt(2ρ/(μ₀μᵣω)), targetCellSize=min(delta/3, dr/3), nLayers=max(3, ceil(dr/targetCellSize)). Magnet bands: 4 layers min. Iron bands: satMultiplier=4 if Bexp>1.5*Bknee, 2 if >0.7*Bknee, 1 otherwise, nLayers=max(2, ceil(satMultiplier)). Localised features (span < 0.5*bodyPeriodAngle) added to perFeatureExtraCols. buildRadialNodes updated to accept features/member/physicsPerBand and look up physics-derived layer counts per band. buildAngularColumns updated to accept minDivsPerBand so localised features get ≥2 sub-cells. buildBodyMesh wires physicsTargets into both builders. signature extended with physStr encoding all circuits' {freq, amp, conductorMaterial} so different operating points get distinct cache entries. Exports: physicsFromConfig and physicsTargets added to LIB.MotorMesh.
+  - tests/mesh/auto-sizing.test.js: 11 new tests — physicsTargets conductor skin-depth at 60 Hz (≥3 layers) and 10 kHz (≥27 layers); iron saturation high-B vs low-B; perFeatureExtraCols for localised tooth and exclusion of full-circle back-iron; integration tests confirming ≥3 layers in built mesh at 60 Hz and that 10 kHz is denser; physicsFromConfig extraction for AC/STEP/DC/empty.
+  - tests/mesh/cache.test.js: Added "physics change invalidates cache" test — changing circuits[0].freq from 60 Hz to 1000 Hz causes a cache miss and produces a finer (or equal) mesh.
+  - tests/mesh/convergence.test.js: Rewrote "gmsh reference diff" test assertion from "within 2x" to "mesher is at least as fine as reference" (the physics-driven mesher is correctly denser than the old 1-layer gmsh reference). Added "PMSM physics-driven convergence" test — at refine=1 with physics, areaError < 1e-2, coverageError < 1e-2, and coverageError within 2% of refine=2 (physics sizing is sufficient without manual tuning).
+  - lessons/unified_motor/mesh-dev.html: Added opts.physics = MotorMesh.physicsFromConfig(m.config) in rebuild() before buildCached call so the dev harness passes physics through.

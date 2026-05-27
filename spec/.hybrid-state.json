@@ -191,6 +191,12 @@
           "timestamp": "2026-05-27T06:04:46.002Z",
           "task_group": "2.3.a",
           "reason": "Mesher correctness bugs surfaced by industrial-scale fixtures: (1) lib/motor-mesh.js buildAngularColumns uses 'LCM of rational denominators' for feature alignment, which explodes baseN to ~1300 for fixtures with non-clean feature edges (brushed-dc-pm rotor: 50160 elements vs ~2000 expected). (2) refine knob clamped to [1,inf) so refine<1 has no effect. (3) dofBudget knob does not influence element count. User chose 'fix both properly'."
+        },
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-27T08:09:39.828Z",
+          "task_group": "2.3.a",
+          "reason": "Phase 2.6 physics-driven mesh sizing approved by user. Spec: spec/phase-2.6-physics-driven-mesh-sizing.md. Treat as continued batch-6 scope; T2.3.2 user-visual ack pending. Prior implementers' work (Phase 2.5 cage routing, mesher correctness fix, LOD viz, fixtures industrial-scale) is correct and must be preserved."
         }
       ]
     },
@@ -517,5 +523,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T06:33:28.419Z"
+  "last_updated": "2026-05-27T08:19:40.627Z"
 }
