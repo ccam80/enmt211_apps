@@ -126,13 +126,13 @@
       ],
       "spawned": 1,
       "completed": 1,
-      "verifications_passed": 0,
+      "verifications_passed": 1,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 0,
       "dead_verifiers": 0,
       "group_status": {
-        "2.2.a": "pending"
+        "2.2.a": "passed"
       },
       "user_required_tasks": {
         "2.2.a": []
@@ -151,8 +151,8 @@
           "T2.3.2"
         ]
       ],
-      "spawned": 0,
-      "completed": 0,
+      "spawned": 1,
+      "completed": 1,
       "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
@@ -491,5 +491,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T00:12:21.512Z"
+  "last_updated": "2026-05-27T00:45:24.647Z"
 }

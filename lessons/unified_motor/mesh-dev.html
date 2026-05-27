@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Motor Mesh Dev Harness</title>
+<link rel="stylesheet" href="../../lib/shell.css">
+<style>
+  body { margin: 0; background: #111; color: #ccc; font-family: monospace; }
+  #header { padding: 10px 16px; background: #1a1a1a; border-bottom: 1px solid #333;
+            display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  #header h1 { margin: 0; font-size: 1rem; color: #eee; }
+  #controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  #controls label { font-size: 0.8rem; color: #aaa; }
+  #controls select, #controls input { background: #222; color: #ccc;
+    border: 1px solid #444; border-radius: 3px; padding: 3px 6px; font-size: 0.8rem; }
+  #stats { font-size: 0.75rem; color: #888; padding: 0 16px; background: #161616;
+           border-bottom: 1px solid #2a2a2a; min-height: 22px; line-height: 22px; }
+  #canvases { display: flex; gap: 0; width: 100%; }
+  .pane { flex: 1; display: flex; flex-direction: column; }
+  .pane-title { background: #1e1e1e; padding: 4px 10px; font-size: 0.75rem;
+                color: #888; border-bottom: 1px solid #2a2a2a; }
+  canvas { display: block; background: #0a0a0a; width: 100%; }
+  #gap-check { font-size: 0.75rem; color: #5a8; margin-top: 4px; padding: 0 10px; }
+  .divider { width: 1px; background: #2a2a2a; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Motor Mesh Dev Harness</h1>
+  <div id="controls">
+    <label>Fixture:
+      <select id="fixture-picker"></select>
+    </label>
+    <label>gapLayers:
+      <input id="gap-layers" type="number" min="1" max="10" value="3" style="width:50px">
+    </label>
+    <label>refine:
+      <input id="refine" type="number" min="1" max="4" step="0.5" value="1" style="width:50px">
+    </label>
+    <label>dofBudget:
+      <input id="dof-budget" type="number" min="0" max="10000" value="" placeholder="none" style="width:70px">
+    </label>
+    <label><input id="show-gap-loop" type="checkbox" checked> gapLoop overlay</label>
+  </div>
+</div>
+<div id="stats">Loading…</div>
+<div id="canvases">
+  <div class="pane">
+    <div class="pane-title">Rotor</div>
+    <canvas id="rotor-canvas"></canvas>
+    <div id="rotor-info" style="font-size:0.72rem;color:#666;padding:3px 10px;"></div>
+  </div>
+  <div class="divider"></div>
+  <div class="pane">
+    <div class="pane-title">Stator</div>
+    <canvas id="stator-canvas"></canvas>
+    <div id="stator-info" style="font-size:0.72rem;color:#666;padding:3px 10px;"></div>
+  </div>
+</div>
+
+<!-- Core libs -->
+<script src="../../lib/util.js"></script>
+<script src="../../lib/winding-model.js"></script>
+<script src="./config-schema.js"></script>
+<script src="../../lib/motor-mesh.js"></script>
+<script src="../../lib/motor-mesh-view.js"></script>
+
+<!-- All 15 machine fixtures -->
+<script src="./machines/pmsm.js"></script>
+<script src="./machines/brushed-dc-pm.js"></script>
+<script src="./machines/brushed-dc-wound.js"></script>
+<script src="./machines/universal.js"></script>
+<script src="./machines/bldc.js"></script>
+<script src="./machines/induction-3ph.js"></script>
+<script src="./machines/induction-1ph.js"></script>
+<script src="./machines/vr-stepper.js"></script>
+<script src="./machines/switched-reluctance.js"></script>
+<script src="./machines/pm-stepper.js"></script>
+<script src="./machines/hybrid-stepper.js"></script>
+<script src="./machines/synchronous-reluctance.js"></script>
+<script src="./machines/wound-field-synchronous.js"></script>
+<script src="./machines/skew-demo.js"></script>
+<script src="./machines/pole-mismatch-demo.js"></script>
+
+<script>
+(function () {
+  "use strict";
+
+  var MotorMesh     = LIB.MotorMesh;
+  var MotorMeshView = LIB.MotorMeshView;
+  var ConfigSchema  = window.UnifiedMotor.ConfigSchema;
+  var MACHINES      = window.UnifiedMotor.MACHINES || [];
+
+  // ---------------------------------------------------------------------------
+  //  DOM refs
+  // ---------------------------------------------------------------------------
+  var picker      = document.getElementById("fixture-picker");
+  var gapLayersEl = document.getElementById("gap-layers");
+  var refineEl    = document.getElementById("refine");
+  var dofBudgetEl = document.getElementById("dof-budget");
+  var showGapEl   = document.getElementById("show-gap-loop");
+  var statsEl     = document.getElementById("stats");
+  var rotorCanvas = document.getElementById("rotor-canvas");
+  var statorCanvas= document.getElementById("stator-canvas");
+  var rotorInfo   = document.getElementById("rotor-info");
+  var statorInfo  = document.getElementById("stator-info");
+
+  // ---------------------------------------------------------------------------
+  //  Populate picker
+  // ---------------------------------------------------------------------------
+  MACHINES.forEach(function (m, i) {
+    var opt = document.createElement("option");
+    opt.value = String(i);
+    opt.textContent = m.id;
+    picker.appendChild(opt);
+  });
+
+  // ---------------------------------------------------------------------------
+  //  Canvas sizing: fill half the viewport width, square
+  // ---------------------------------------------------------------------------
+  function sizeCanvases() {
+    var W = Math.floor((window.innerWidth - 1) / 2);
+    var H = window.innerHeight - 80; // leave room for header + stats
+    var dpr = window.devicePixelRatio || 1;
+    [rotorCanvas, statorCanvas].forEach(function (c) {
+      c.width  = W * dpr;
+      c.height = H * dpr;
+      c.style.width  = W + "px";
+      c.style.height = H + "px";
+    });
+  }
+  sizeCanvases();
+  window.addEventListener("resize", function () { sizeCanvases(); rebuild(); });
+
+  // ---------------------------------------------------------------------------
+  //  Render one body onto a canvas
+  // ---------------------------------------------------------------------------
+  function renderBody(canvas, body, showGap) {
+    var dpr = window.devicePixelRatio || 1;
+    var W   = canvas.width  / dpr;
+    var H   = canvas.height / dpr;
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Background
+    ctx.fillStyle = "#0a0a0a";
+    ctx.fillRect(0, 0, W, H);
+
+    if (!body || body.elems.length === 0) {
+      ctx.fillStyle = "#444";
+      ctx.font = "14px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("(no elements)", W / 2, H / 2);
+      return;
+    }
+
+    MotorMeshView.draw(ctx, body, {
+      x: W / 2,
+      y: H / 2,
+      scale: (Math.min(W, H) * 0.44) / body.gapR,
+      showGapLoop: showGap,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  //  Info panel: quality metrics
+  // ---------------------------------------------------------------------------
+  function qualityText(body) {
+    if (!body || body.elems.length === 0) return "(empty)";
+    var q  = MotorMesh.quality(body);
+    var Ne = body.elems.length / 4;
+    var Nn = body.nodes.length / 2;
+    return (
+      "Ne=" + Ne + "  Nn=" + Nn +
+      "  minAngle=" + q.minAngle.toFixed(1) + "°" +
+      "  nInv=" + q.nInverted +
+      "  nDeg=" + q.nDegenerate +
+      "  areaErr=" + q.areaError.toFixed(4) +
+      "  gapLoop=" + body.gapLoop.length
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  //  Main rebuild
+  // ---------------------------------------------------------------------------
+  function rebuild() {
+    var idx = parseInt(picker.value, 10);
+    var m   = MACHINES[idx];
+    if (!m) { statsEl.textContent = "No fixture selected."; return; }
+
+    var gapLayers = parseInt(gapLayersEl.value, 10) || 3;
+    var refine    = parseFloat(refineEl.value)       || 1;
+    var dofRaw    = dofBudgetEl.value.trim();
+    var dofBudget = dofRaw === "" ? null : parseInt(dofRaw, 10);
+
+    var opts = { gapLayers: gapLayers, refine: refine };
+    if (dofBudget !== null && dofBudget > 0) opts.dofBudget = dofBudget;
+
+    var section;
+    try {
+      var expanded = ConfigSchema.expand(m.config);
+      section = expanded.slices[0].section;
+    } catch (e) {
+      statsEl.textContent = "Config expand error: " + e.message;
+      return;
+    }
+
+    var mesh;
+    try {
+      var t0 = performance.now();
+      mesh = MotorMesh.buildCached(section, opts);
+      var dt = (performance.now() - t0).toFixed(1);
+      var stats = MotorMesh.cacheStats();
+      statsEl.textContent =
+        m.id + "  •  build=" + dt + "ms" +
+        "  cache: hits=" + stats.hits + " misses=" + stats.misses + " size=" + stats.size;
+    } catch (e) {
+      statsEl.textContent = "Build error: " + e.message;
+      console.error(e);
+      return;
+    }
+
+    var showGap = showGapEl.checked;
+    renderBody(rotorCanvas,  mesh.rotor,  showGap);
+    renderBody(statorCanvas, mesh.stator, showGap);
+
+    rotorInfo.textContent  = "Rotor:  " + qualityText(mesh.rotor);
+    statorInfo.textContent = "Stator: " + qualityText(mesh.stator);
+  }
+
+  // ---------------------------------------------------------------------------
+  //  Wire controls
+  // ---------------------------------------------------------------------------
+  picker.addEventListener("change", rebuild);
+  gapLayersEl.addEventListener("change", rebuild);
+  refineEl.addEventListener("change", rebuild);
+  dofBudgetEl.addEventListener("change", rebuild);
+  showGapEl.addEventListener("change", rebuild);
+
+  // Initial render
+  rebuild();
+})();
+</script>
+</body>
+</html>

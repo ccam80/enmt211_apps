@@ -102,3 +102,35 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - lib/motor-mesh.js: Replaced uniform angular grid with feature-boundary-aligned non-uniform grid. New `buildAngularColumns()` function collects feature thetaRange edges via `collectThetaEdgesInSector()`, subdivides each inter-boundary band into equal sub-cells, and tiles by P_body. This ensures no element straddles a feature boundary (M3 requirement). Fixed floating-point precision bug in `collectThetaEdgesInSector`: modulo arithmetic over multiple thetaRange edges produces values that differ by ±4.4e-16; fixed by snapping to 12-decimal-digit precision before deduplication via a Map. The angular sector template dispatch (iron/magnet/conductor/air) was already correct in T2.1.1; the M3 gap was the misaligned angular grid.
   - tests/mesh/feature-templates.test.js: 7 describe blocks covering all 5 element kinds (I/M/W/C/K). "no element straddles a feature boundary" uses quarter-point angular samples to detect boundary crossings without false positives at element edges. "M alternating magnetization" checks radial projection sign (magDir·radialUnit) alternates between adjacent poles rather than comparing magDir vectors at different angles (which are orthogonal not anti-parallel for radially-magnetized magnets). "I salient iron leaves air between teeth" counts transitions in the sorted angular sequence, starting from a non-iron element to avoid wrap-around double-counting.
   - All 24 mesh tests pass; all 40 non-mesh tests pass; pre-existing motor-stack failures unchanged.
+
+## Task T2.3.1: Air collar + uniform-Δθ gap circle + grading/quality knobs
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/mesh/collar-gap.test.js
+- **Files modified**: lib/motor-mesh.js (dofBudget implementation — changed from radial-only reduction to angular-first reduction snapped to P_body multiples, so Nn <= dofBudget + P_body is guaranteed; also added gapMinNodes floor integration with budget)
+- **Tests**: 8/8 passing (node --test tests/mesh/collar-gap.test.js); all 32 mesh tests passing total
+- **Implementation notes**:
+  - The dofBudget in Wave 2.1/2.2 only reduced radial nodes, which gave Nn overshots of N_gap (not P_body). Replaced with angular-first reduction: compute largest Ntheta (multiple of P_body) such that Nr * Ntheta <= dofBudget + P_body, then reduce angular columns by rebuilding with lower divsPerBand. Falls back to radial reduction only when even the gapFloor * Nr exceeds the budget. Guarantees Nn <= dofBudget + P_body as spec requires.
+  - gapMinNodes floor is preserved: even with dofBudget set, N_gap cannot drop below snapUpToMultiple(gapMinNodes, P_body).
+  - All 8 collar-gap tests pass: gapLoop on circle, uniform gapTheta, 0.25*g collar radii, pure-air collar, gapLayers adds layers, dofBudget caps Nn, gapMinNodes floors gapLoop, gapMinNodes overrides dofBudget.
+
+## Task T2.3.2: Signature+LRU cache, validation harness, gmsh reference script, dev harness HTML
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**:
+  - tests/mesh/cache.test.js (4 tests: signature stable, signature tracks topology, buildCached hits cache, LRU evicts oldest)
+  - tests/mesh/convergence.test.js (5 tests: area error converges, minAngle bounded, coverageError zero at all levels, 15-fixture regression sweep, gmsh reference diff)
+  - scripts/gen-mesh-refs.mjs (dev-only gmsh reference generator; run with gmsh 4.15.2 on PATH)
+  - lessons/unified_motor/mesh-dev.html (standalone dev harness: fixture picker, rotor/stator canvas panes, gapLayers/refine/dofBudget controls, quality metrics display)
+  - tests/mesh/fixtures/pmsm-rotor-gapLayers3.msh (committed gmsh reference: magnet rotor body)
+  - tests/mesh/fixtures/pmsm-stator-gapLayers3.msh (committed gmsh reference: wound stator body)
+- **Files modified**:
+  - tests/mesh/_fixtures.js (added loadAllFixtures(), coverageError(section, mesh), readMsh(filePath))
+  - lib/motor-mesh.js (signature, buildCached, cacheStats, clearCache — LRU cache capacity 8, keyed by body sig)
+- **Tests**: 41/41 passing (all mesh tests: mesh-core, mesh-view, feature-templates, collar-gap, cache, convergence)
+- **Implementation notes**:
+  - coverageError: switched from feature-centric to element-centric approach to handle co-located features (W-ring conductor+iron at identical thetaRange). Uses maxNodeR (not centroid or minNodeR) for collar detection: elements whose maximum corner radius exceeds all feature rRange[1] values are collar elements and skipped from the coverage check.
+  - gmsh .msh references: generated via buildGeoSimple() which uses our mesher's actual gapLoop.length as Ntheta to size gmsh's element size, keeping gmsh element count within 2× of our structured quad output. Both references have // gap_layers: 3 header. pmsm-rotor: our Ne=160 vs gmsh Ne=285 (ratio 1.78); pmsm-stator: our Ne=240 vs gmsh Ne=381 (ratio 1.59).
+  - gmsh invocation: shell:true required on Windows since gmsh is installed as Python package (C:\Program Files\Python314\Scripts\gmsh.bat) and not on the Node child process PATH by default.
+  - The gmsh reference diff test runs (not skipped) because .msh files are committed.
+  - User-required browser pass (mesh-dev.html visual inspection) is a separate coordinator gate.
