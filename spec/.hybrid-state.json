@@ -166,7 +166,15 @@
           "T2.3.2"
         ]
       },
-      "user_acks": {}
+      "user_acks": {},
+      "recovery_log": [
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-27T02:15:26.758Z",
+          "task_group": "2.3.a",
+          "reason": "Prior implementer claimed T2.3.2 complete but mesh-dev.html does not satisfy the user-visual acceptance criterion: element strokes invisible, magnet poles share one color (4 PMSM poles render as a uniform red ring), no zoom/pan to inspect dense gap layers (~1mm band invisible at default zoom). User-reported on attempting visual ack. Coordinator made two in-place fixes (caller-installed ctx transform + removal of hardcoded lineWidth in MotorMeshView.draw) which got the mesh rendering visible — but the page still cannot support a meaningful visual check."
+        }
+      ]
     },
     {
       "id": "batch-7",
@@ -491,5 +499,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T00:45:24.647Z"
+  "last_updated": "2026-05-27T02:21:15.060Z"
 }

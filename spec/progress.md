@@ -145,3 +145,25 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - **Tests**: all 41 mesh tests still pass.
   - **Browser check**: pmsm, brushed-dc-pm, bldc, induction-3ph, switched-reluctance, hybrid-stepper, skew-demo, pole-mismatch-demo all render distinct per-material colors with visible gapLoop overlay.
   - The user-required visual walkthrough of all 15 fixtures is still required before T2.3.2 can be acked.
+
+## Task T2.3.1: Air collar + uniform-Δθ gap circle + grading/quality knobs — RETRY visual fix
+- **Status**: complete
+- **Agent**: implementer (retry — prior implementer passed 41/41 tests; visual-ack gate failed)
+- **Files created**: none (all mesh tests already passing)
+- **Files modified**:
+  - lib/motor-mesh-view.js: changed strokeStyle from "rgba(0,0,0,0.15)" to "rgba(255,255,255,0.35)" so element edges are visible against any fill color; removed bounding-box dead code (xMin/xMax/yMin/yMax loop was computed but never used)
+- **Tests**: 41/41 passing (all mesh tests unchanged)
+- **Visual**: element boundaries clearly visible as white grid lines on both rotor and stator panes
+
+## Task T2.3.2: Signature+LRU cache, validation harness, gmsh reference script, dev harness HTML — RETRY visual fix
+- **Status**: complete
+- **Agent**: implementer (retry — prior implementer passed 41/41 tests; visual-ack gate failed on A/B/C criteria)
+- **Files created**: none (all prior artifacts correct)
+- **Files modified**:
+  - lib/motor-mesh-view.js: added magnetPoleColor() helper that reads magDir[e] per element, computes centroid, projects magDir onto radial unit vector, returns "#e05050" (red, outward/N pole) or "#5080e0" (blue, inward/S pole); draw() now calls magnetPoleColor for all magnet-kind elements in both "material" and "circuit" colorBy modes
+  - lessons/unified_motor/mesh-dev.html: added per-pane viewport state {panX, panY, zoom}; mouse-wheel zoom centered on cursor; pointer drag-to-pan; +/fit/− zoom buttons per pane; showGapLoop toggle now calls redraw() not rebuild() so viewport is preserved; rebuild() resets viewports on fixture/opts change
+- **Tests**: 41/41 passing (node --test tests/mesh/*.test.js)
+- **Visual confirmed**:
+  - A: element edges visible (white ~1px edges at all zoom levels)
+  - B: 4 PMSM magnet poles clearly 2-red/2-blue alternating
+  - C: mouse-wheel zoom + drag pan working; graded gap layers fully inspectable at high zoom; fit-reset button works

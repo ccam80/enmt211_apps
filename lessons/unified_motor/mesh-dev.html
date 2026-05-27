@@ -17,10 +17,17 @@
   #stats { font-size: 0.75rem; color: #888; padding: 0 16px; background: #161616;
            border-bottom: 1px solid #2a2a2a; min-height: 22px; line-height: 22px; }
   #canvases { display: flex; gap: 0; width: 100%; }
-  .pane { flex: 1; display: flex; flex-direction: column; }
+  .pane { flex: 1; display: flex; flex-direction: column; position: relative; }
   .pane-title { background: #1e1e1e; padding: 4px 10px; font-size: 0.75rem;
                 color: #888; border-bottom: 1px solid #2a2a2a; }
-  canvas { display: block; background: #0a0a0a; width: 100%; }
+  canvas { display: block; background: #0a0a0a; width: 100%; cursor: grab; }
+  canvas.grabbing { cursor: grabbing; }
+  .zoom-controls { position: absolute; bottom: 28px; right: 8px;
+                   display: flex; flex-direction: column; gap: 3px; z-index: 10; }
+  .zoom-controls button { background: #222; color: #ccc; border: 1px solid #444;
+    border-radius: 3px; width: 26px; height: 26px; font-size: 0.85rem;
+    cursor: pointer; padding: 0; line-height: 1; }
+  .zoom-controls button:hover { background: #333; }
   #gap-check { font-size: 0.75rem; color: #5a8; margin-top: 4px; padding: 0 10px; }
   .divider { width: 1px; background: #2a2a2a; }
 </style>
@@ -47,15 +54,25 @@
 </div>
 <div id="stats">Loading…</div>
 <div id="canvases">
-  <div class="pane">
+  <div class="pane" id="rotor-pane">
     <div class="pane-title">Rotor</div>
     <canvas id="rotor-canvas"></canvas>
+    <div class="zoom-controls">
+      <button id="rotor-zoom-in"  title="Zoom in">+</button>
+      <button id="rotor-zoom-reset" title="Reset zoom" style="font-size:0.65rem">fit</button>
+      <button id="rotor-zoom-out" title="Zoom out">−</button>
+    </div>
     <div id="rotor-info" style="font-size:0.72rem;color:#666;padding:3px 10px;"></div>
   </div>
   <div class="divider"></div>
-  <div class="pane">
+  <div class="pane" id="stator-pane">
     <div class="pane-title">Stator</div>
     <canvas id="stator-canvas"></canvas>
+    <div class="zoom-controls">
+      <button id="stator-zoom-in"  title="Zoom in">+</button>
+      <button id="stator-zoom-reset" title="Reset zoom" style="font-size:0.65rem">fit</button>
+      <button id="stator-zoom-out" title="Zoom out">−</button>
+    </div>
     <div id="stator-info" style="font-size:0.72rem;color:#666;padding:3px 10px;"></div>
   </div>
 </div>
@@ -108,6 +125,19 @@
   var statorInfo  = document.getElementById("stator-info");
 
   // ---------------------------------------------------------------------------
+  //  Per-pane viewport state: { panX, panY, zoom }
+  //  panX/panY are offsets in CSS pixels from canvas centre.
+  //  zoom multiplies the base fit-scale.
+  // ---------------------------------------------------------------------------
+  var viewports = {
+    rotor:  { panX: 0, panY: 0, zoom: 1 },
+    stator: { panX: 0, panY: 0, zoom: 1 },
+  };
+
+  // Current mesh bodies (kept for re-render on zoom/pan without rebuild)
+  var currentBodies = { rotor: null, stator: null };
+
+  // ---------------------------------------------------------------------------
   //  Populate picker
   // ---------------------------------------------------------------------------
   MACHINES.forEach(function (m, i) {
@@ -118,11 +148,11 @@
   });
 
   // ---------------------------------------------------------------------------
-  //  Canvas sizing: fill half the viewport width, square
+  //  Canvas sizing: fill half the viewport width
   // ---------------------------------------------------------------------------
   function sizeCanvases() {
     var W = Math.floor((window.innerWidth - 1) / 2);
-    var H = window.innerHeight - 80; // leave room for header + stats
+    var H = window.innerHeight - 90;
     var dpr = window.devicePixelRatio || 1;
     [rotorCanvas, statorCanvas].forEach(function (c) {
       c.width  = W * dpr;
@@ -132,19 +162,28 @@
     });
   }
   sizeCanvases();
-  window.addEventListener("resize", function () { sizeCanvases(); rebuild(); });
+  window.addEventListener("resize", function () { sizeCanvases(); redraw(); });
 
   // ---------------------------------------------------------------------------
-  //  Render one body onto a canvas
+  //  Compute base fit-scale for a body
   // ---------------------------------------------------------------------------
-  function renderBody(canvas, body, showGap) {
+  function fitScale(canvas, body) {
+    var dpr = window.devicePixelRatio || 1;
+    var W   = canvas.width  / dpr;
+    var H   = canvas.height / dpr;
+    return (Math.min(W, H) * 0.44) / body.gapR;
+  }
+
+  // ---------------------------------------------------------------------------
+  //  Render one body using its viewport state
+  // ---------------------------------------------------------------------------
+  function renderBody(canvas, body, vp, showGap) {
     var dpr = window.devicePixelRatio || 1;
     var W   = canvas.width  / dpr;
     var H   = canvas.height / dpr;
     var ctx = canvas.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // Background
     ctx.fillStyle = "#0a0a0a";
     ctx.fillRect(0, 0, W, H);
 
@@ -156,20 +195,20 @@
       return;
     }
 
-    // MotorMeshView.draw plots node coordinates directly (in metres) using
-    // whatever transform the caller has installed. Centre on the canvas,
-    // scale so the body fits, and flip Y so math-convention (CCW from +x)
-    // renders right-side-up on screen.
-    var scale = (Math.min(W, H) * 0.44) / body.gapR;
-    ctx.translate(W / 2, H / 2);
+    var base  = fitScale(canvas, body);
+    var scale = base * vp.zoom;
+
+    // Centre + pan + Y-flip
+    ctx.translate(W / 2 + vp.panX, H / 2 + vp.panY);
     ctx.scale(scale, -scale);
+    // Keep edge strokes at ~1 screen pixel regardless of zoom
     ctx.lineWidth = 1 / scale;
 
     MotorMeshView.draw(ctx, body, { showGapLoop: showGap });
   }
 
   // ---------------------------------------------------------------------------
-  //  Info panel: quality metrics
+  //  Info panel
   // ---------------------------------------------------------------------------
   function qualityText(body) {
     if (!body || body.elems.length === 0) return "(empty)";
@@ -187,7 +226,16 @@
   }
 
   // ---------------------------------------------------------------------------
-  //  Main rebuild
+  //  Redraw both panes with current bodies + viewport (no mesh rebuild)
+  // ---------------------------------------------------------------------------
+  function redraw() {
+    var showGap = showGapEl.checked;
+    renderBody(rotorCanvas,  currentBodies.rotor,  viewports.rotor,  showGap);
+    renderBody(statorCanvas, currentBodies.stator, viewports.stator, showGap);
+  }
+
+  // ---------------------------------------------------------------------------
+  //  Main rebuild: expand config, build mesh, reset viewports, redraw
   // ---------------------------------------------------------------------------
   function rebuild() {
     var idx = parseInt(picker.value, 10);
@@ -226,22 +274,108 @@
       return;
     }
 
-    var showGap = showGapEl.checked;
-    renderBody(rotorCanvas,  mesh.rotor,  showGap);
-    renderBody(statorCanvas, mesh.stator, showGap);
+    currentBodies.rotor  = mesh.rotor;
+    currentBodies.stator = mesh.stator;
+
+    // Reset viewports on fixture/opts change
+    viewports.rotor  = { panX: 0, panY: 0, zoom: 1 };
+    viewports.stator = { panX: 0, panY: 0, zoom: 1 };
+
+    redraw();
 
     rotorInfo.textContent  = "Rotor:  " + qualityText(mesh.rotor);
     statorInfo.textContent = "Stator: " + qualityText(mesh.stator);
   }
 
   // ---------------------------------------------------------------------------
-  //  Wire controls
+  //  Zoom/pan interaction per canvas
+  // ---------------------------------------------------------------------------
+  function attachInteraction(canvas, vpKey) {
+    var MIN_ZOOM = 0.5, MAX_ZOOM = 200;
+
+    // Mouse wheel zoom centred on cursor position
+    canvas.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      var vp  = viewports[vpKey];
+      var dpr = window.devicePixelRatio || 1;
+      var W   = canvas.width  / dpr;
+      var H   = canvas.height / dpr;
+      var rect = canvas.getBoundingClientRect();
+
+      // Cursor position relative to canvas centre (CSS pixels)
+      var cx = (e.clientX - rect.left) - W / 2;
+      var cy = (e.clientY - rect.top)  - H / 2;
+
+      var factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      var newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, vp.zoom * factor));
+      var zoomRatio = newZoom / vp.zoom;
+
+      // Keep the point under the cursor stationary:
+      // newPan = cursor + zoomRatio * (oldPan - cursor)
+      vp.panX = cx + zoomRatio * (vp.panX - cx);
+      vp.panY = cy + zoomRatio * (vp.panY - cy);
+      vp.zoom = newZoom;
+
+      redraw();
+    }, { passive: false });
+
+    // Drag to pan
+    var dragging = false, lastX = 0, lastY = 0;
+    canvas.addEventListener("pointerdown", function (e) {
+      dragging = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      canvas.setPointerCapture(e.pointerId);
+      canvas.classList.add("grabbing");
+    });
+    canvas.addEventListener("pointermove", function (e) {
+      if (!dragging) return;
+      var vp = viewports[vpKey];
+      vp.panX += e.clientX - lastX;
+      vp.panY += e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      redraw();
+    });
+    function endDrag() { dragging = false; canvas.classList.remove("grabbing"); }
+    canvas.addEventListener("pointerup",     endDrag);
+    canvas.addEventListener("pointercancel", endDrag);
+    canvas.addEventListener("pointerleave",  endDrag);
+  }
+
+  attachInteraction(rotorCanvas,  "rotor");
+  attachInteraction(statorCanvas, "stator");
+
+  // ---------------------------------------------------------------------------
+  //  Zoom button wiring
+  // ---------------------------------------------------------------------------
+  function attachZoomButtons(vpKey, inId, outId, resetId) {
+    var MIN_ZOOM = 0.5, MAX_ZOOM = 200;
+    document.getElementById(inId).addEventListener("click", function () {
+      viewports[vpKey].zoom = Math.min(MAX_ZOOM, viewports[vpKey].zoom * 1.5);
+      redraw();
+    });
+    document.getElementById(outId).addEventListener("click", function () {
+      viewports[vpKey].zoom = Math.max(MIN_ZOOM, viewports[vpKey].zoom / 1.5);
+      redraw();
+    });
+    document.getElementById(resetId).addEventListener("click", function () {
+      viewports[vpKey] = { panX: 0, panY: 0, zoom: 1 };
+      redraw();
+    });
+  }
+
+  attachZoomButtons("rotor",  "rotor-zoom-in",  "rotor-zoom-out",  "rotor-zoom-reset");
+  attachZoomButtons("stator", "stator-zoom-in", "stator-zoom-out", "stator-zoom-reset");
+
+  // ---------------------------------------------------------------------------
+  //  Wire mesh controls
   // ---------------------------------------------------------------------------
   picker.addEventListener("change", rebuild);
   gapLayersEl.addEventListener("change", rebuild);
   refineEl.addEventListener("change", rebuild);
   dofBudgetEl.addEventListener("change", rebuild);
-  showGapEl.addEventListener("change", rebuild);
+  showGapEl.addEventListener("change", redraw);
 
   // Initial render
   rebuild();
