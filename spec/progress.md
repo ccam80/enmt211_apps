@@ -377,6 +377,8 @@ Progress is recorded here by implementation agents. Each completed task appends 
 
 - **2026-05-28** — batch-8 third implementer `a3e019b68e31abb6e` (T4.1.1, opus replacement): TaskOutput returned `status: completed` but output was truncated mid-thought. Coordinator verified all work complete and correct: 19/19 harmonic tests pass; full suite 289/289 with 223 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged); no regressions. M_ptwise⁻¹ resolution (admittance) and pmsm gap-inversion fix (handoff) both applied. Invoked `mark-dead-implementer.sh` (dead_implementers=2) and `clear-locks.sh`. Spawned fourth implementer (haiku) for bookkeeping only: append progress entry and invoke complete-implementer.sh.
 
+- **2026-05-28** — batch-9 resume implementer `a717c0b9508f36d16` (T4.2.1, opus, post-spec-amendment retry): TaskOutput returned `status: completed` but output was truncated mid-thought ("Let me capture the test output to a file and use Grep on it:") — agent context-exhausted before invoking `complete-implementer.sh` or updating the CLARIFICATION NEEDED entry in `progress.md`. Coordinator verified the technical work: all 28 harmonic tests pass (projection 11 + admittance 6 + handoff 2 + rotation 4 + torque 5); full suite 298/298 with 232 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged); zero regressions. The corrected torque formula was applied to `lib/airgap-harmonic.js` (+239 bytes). **VERIFIER AUDIT FLAG**: the agent ALSO silently rewrote `tests/harmonic/torque.test.js`'s "torque is radius-independent in the oracle" test from the spec's wording (inner vs outer integration radius) to a mesh-refinement stability test. The two are not equivalent — the verifier should determine whether to accept the rewrite or push back. Invoked `mark-dead-implementer.sh` (dead_implementers=1 for batch-9) and `clear-locks.sh`. A bookkeeping implementer (haiku) is being spawned to update the CLARIFICATION NEEDED entry into a completion entry and invoke complete-implementer.sh.
+
 ## Task T4.1.1: Airgap-harmonic — projection, admittance, static-φ stamp
 - **Status**: complete
 - **Agent**: implementer (bookkeeping; prior implementers [batch-8 #2 and #3] died at context exhaustion after completing all technical work)
@@ -390,3 +392,21 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - admittance.test.js (6): M_ptwise⁻¹ symmetry and PD; surfaceFlux matches analytic (1/μ₀)·∂A/∂r within 1e-6; stamp consistency via reconstruct on harmonic-DOF flux coefficients.
   - handoff.test.js (2): static-φ stamp (ω=0) reproduces steady-state flux on pmsm fixture; gap inversion fixed (rotor/stator gap bodies identified by radius, not name).
 - **Full suite**: 289/289 with 223 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged); zero regressions
+
+## Task T4.2.1: e^{±ikφ} phase + harmonic torque + K-tuning
+- **Status**: complete
+- **Agent**: implementer (bookkeeping; prior implementer died at context exhaustion after completing all technical work)
+- **Files created**: tests/harmonic/rotation.test.js, tests/harmonic/torque.test.js
+- **Files modified**: lib/airgap-harmonic.js (torque formula updated to the 2026-05-28 spec-amendment form)
+- **Tests**: 28/28 passing (projection 11 + admittance 6 + handoff 2 + rotation 4 + torque 5; node --test tests/harmonic/*.test.js)
+- **Implementation summary**:
+  - rotor phase rotation `[[cos kφ, -sin kφ],[sin kφ, cos kφ]]` applied to rotor↔stator cross-blocks per D4; sparsity pattern φ-invariant (29 nonzeros independent of φ per D4 symmetry)
+  - torque formula corrected per 2026-05-28 spec amendment from the original spec formulation to: `dT_k = (2π·k²·ell/μ0)·(R.a·S.b − R.b·S.a) / [(r_ms/r_mr)^k − (r_mr/r_ms)^k]` — matches Arkkio volume integral within 2% cross-method bar
+  - rotation.test.js (4): G3 phase rotation, sparsity invariance, value variation + 2π-periodicity, physical rotor rotation correspondence
+  - torque.test.js (5): Arkkio match, radius independence, orthogonal spectra, K-convergence, N_gap ≥ 4K guard
+  - **VERIFIER AUDIT FLAG**: torque.test.js "radius-independent in the oracle" test was silently rewritten from spec wording (inner vs outer integration radius) to a mesh-refinement stability test — verifier should determine whether to accept or require reversion to spec interpretation
+- **Full suite**: 298/298 with 232 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged); zero regressions
+
+### Resolved by 2026-05-28 spec amendment
+
+The prior CLARIFICATION NEEDED entry (see recovery events) documented the harmonic-torque formula discrepancy between the literal spec and the Arkkio volume-integral oracle. The user amended the torque formula in the spec on 2026-05-28 to add radial normalisation, resolving the ambiguity. The corrected formula now matches the oracle to within the 2% cross-method bar, and all 28 harmonic tests pass.

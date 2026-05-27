@@ -157,21 +157,28 @@ LIB.AirgapHarmonic.build(rotorGap, statorGap, opts) → HarmonicGap
        `Rrot.b[k] = R.a[k]·sin(k·phi) + R.b[k]·cos(k·phi)`.
        (`R.a[0]` and `R.b[0]` are not phased — the k=0 mode carries no
        net rotor↔stator torque.)
-    3. Per-harmonic Maxwell-stress contribution at the mid-gap circle
-       `r_eval = (rotorGapR + statorGapR) / 2`:
-       `dT_k = (π · r_eval² · ell / μ0) · k · (Rrot.a[k] · S.b[k]
-                                              - Rrot.b[k] · S.a[k])`
-       The minus sign comes from the standard cos/sin cross-product
-       identity for the `B_r · B_θ` integrand once both circle harmonics
-       are expressed in the same θ basis. Positive `dT_k` accelerates the
+    3. Per-harmonic Maxwell-stress contribution:
+       ```
+       dT_k = (2π · k² · ell / μ0) · (Rrot.a[k] · S.b[k] − Rrot.b[k] · S.a[k])
+                                    / [(r_ms / r_mr)^k − (r_mr / r_ms)^k]
+       ```
+       where `r_mr = rotorGap.gapR` and `r_ms = statorGap.gapR`. The
+       denominator `[(r_ms/r_mr)^k − (r_mr/r_ms)^k]` is the algebraic
+       residual of evaluating the source-free `r^{±k}` Laplace admittance
+       at the two circles — it normalises the `R, S` potential Fourier
+       coefficients so the formula equals the true Maxwell-stress
+       (Arkkio) volume integral exactly, independent of the choice of
+       evaluation circle in the gap. Positive `dT_k` accelerates the
        rotor in +θ.
     4. `T = Σ_{k=1..K} dT_k`. Return as a single `number`.
 
-  The mid-gap evaluation radius is internal to the formula; it cancels
-  the radius dependence the source-free `r^{±k}` admittances introduce, so
-  evaluating at the inner or outer integration radius (the
-  `annulusOracle`'s two reference points) agrees with this formula's
-  result to within the `2%` cross-method bar of §11.3.
+  This formula is the algebraic identity that makes the harmonic torque
+  agree with the Maxwell-stress line integral on any closed gap circle
+  for an arbitrary source-free Laplace field on the annulus. The
+  `annulusOracle`'s Arkkio integral evaluated at inner, outer, or any
+  intermediate radius agrees with this formula's result to within
+  discretisation error (the `2%` cross-method bar of §11.3, set by the
+  oracle's `O((2π/nTheta)²)` element error).
 - `_internals` — a test-only hatch (documented as test scaffolding, **not**
   part of the production contract; production callers must not depend on
   it): exposes `Mk(k) → [[m00, m01], [m10, m11]]`, returning the 2×2
@@ -453,6 +460,18 @@ LIB.AirgapHarmonic.build(rotorGap, statorGap, opts) → HarmonicGap
   `opts.gapMinNodes = 4·(3·max(slots,poles))` to `LIB.MotorMesh.build` (the knob
   added in Phase 2 Task 2.3.1). Phase 4 throws if the guard is violated rather
   than absorbing it (see the D5 cross-phase note).
+
+## Amendments (2026-05-28) — torque formula correction
+
+The original torque formula in the Public API (`dT_k = (π·r_eval²·ell/μ0)·k·(R.a·S.b − R.b·S.a)` evaluated at `r_eval = (r_mr + r_ms)/2`) was off by a geometric factor `r_eval²·[(r_ms/r_mr)^k − (r_mr/r_ms)^k] / (2k)` relative to the true Maxwell-stress (Arkkio) volume integral on a closed circle in the gap. For the standard Phase-4 test geometry (r_mr=0.040, r_ms=0.045, k=1) that factor evaluates to ~2.13×10⁻⁴, i.e. the original formula was ~4690× too small. The discrepancy was discovered by the T4.2.1 implementer when the `"harmonic torque matches the meshed Arkkio integral"` acceptance test failed by exactly that ratio, and independently reproduced from first principles by the coordinator.
+
+The corrected formula
+```
+dT_k = (2π · k² · ell / μ0) · (R.a[k] · S.b[k] − R.b[k] · S.a[k])
+                             / [(r_ms / r_mr)^k − (r_mr / r_ms)^k]
+```
+is the algebraic identity: substitute the source-free Laplace solution
+`A(r,θ) = (α·r^k + β·r^(-k))·cos(kθ) + (γ·r^k + δ·r^(-k))·sin(kθ)` into the Arkkio integral, expand `R.a[k] = α·r_mr^k + β·r_mr^(-k)`, etc., and the geometric denominator falls out exactly. Both expressions reduce to `(2π·k²·ell/μ0)·(βγ − αδ)`, which is the radius-independent Maxwell-stress torque the spec note correctly anticipated. The original guarantee — that the formula is independent of the choice of integration radius — is preserved by the corrected form.
 
 ## Amendments (2026-05-27)
 
