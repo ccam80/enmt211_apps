@@ -4,9 +4,13 @@
   // Hybrid stepper motor: NEMA 23/34 style, 200 steps/rev
   // 50 rotor teeth, 8 stator pole pairs (Q=16), 2 axial magnets
   // OD ≈ 80 mm, air gap 2.0 mm at 20 mm radius
+  // Rotor radial: axial magnet (10-14mm), iron pole-piece body (14-19mm),
+  //               shallow 1mm surface teeth (19-20mm). Tooth depth ≈ 5% of
+  //               rotor radius matches real NEMA 23/34 geometry.
   // Nr=34 ensures at least 2 grid cells across the 2 mm air gap
   const MAGNET_R        = [0.010, 0.014];
-  const ROTOR_TEETH_R   = [0.014, 0.020];
+  const ROTOR_BODY_R    = [0.014, 0.019];
+  const ROTOR_TEETH_R   = [0.019, 0.020];
   const STATOR_BORE_R   = [0.022, 0.034];
   const STATOR_YOKE_R   = [0.034, 0.040];
 
@@ -22,6 +26,15 @@
         magnets: 2,
         Mr: 8e5,
         backIron: false,
+        muR: 1000,
+      },
+      {
+        member: "rotor",
+        element: "I",
+        rRange: ROTOR_BODY_R,
+        teeth: 1,
+        theta0: 0,
+        spanFraction: 1.0,
         muR: 1000,
       },
       {
