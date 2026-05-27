@@ -260,6 +260,53 @@ assembly; Phase 5 doesn't know about mesh generation. Clean boundary.
    ν_max changes (e.g., flipping a fixture from m=3 to m=2 stator
    triggers a new mesh build).
 
+## Single API path — physics opts required (added 2026-05-28)
+
+`MotorMesh.build(section, opts)` has ONE code path: physics-derived.
+`opts.physics` (with `windings` Map and `poles`) is REQUIRED. If
+absent, the mesher throws with a message naming the missing field.
+There is no synthetic-Ntheta backdoor, no feature-density heuristic
+fallback, no "geometric-only mode". The architecture is uniform
+across every caller — production fixtures and unit tests alike.
+
+**Test migration consequence**: every existing mesh test must pass a
+valid `opts.physics`. For tests using real fixture configs (via
+`ConfigSchema.expand(machineCfg)`), use `physicsFromConfig(config)`.
+For tests using synthetic sections (e.g., `singleAnnulusSection()` in
+`tests/mesh/_fixtures.js`), the test fixture helper provides minimal
+synthetic physics opts:
+
+```js
+// in tests/mesh/_fixtures.js
+function syntheticPhysics(opts = {}) {
+  return {
+    windings: new Map([[0, {
+      kind: 'wound', m: opts.m ?? 3, p: opts.p ?? 2,
+      Q: opts.Q ?? 6, member: opts.member ?? 'rotor',
+    }]]),
+    poles: opts.poles ?? 2,
+  };
+}
+```
+
+Synthetic tests that DON'T care about specific cell densities pass
+`syntheticPhysics()` and assert only what they're testing (e.g.,
+coverage error, area conservation, gapLoop uniformity). Synthetic
+tests that DO care about cell density assert against the derived
+value: `expected_cells_per_pole = round(2.4 × nuMaxForWinding(spec))`.
+
+Tests that were asserting heuristic geometric behavior under the old
+`numFeatures × 12` cap either:
+- Get rewritten to assert physics-derived behavior (if the property
+  they were testing has a principled analog), or
+- Get deleted (if they were testing a heuristic that no longer exists).
+
+The implementer makes these test-migration calls during the
+re-classification pass; the rule is "what property is this test
+trying to verify, and what is the principled assertion for that
+property under the new architecture?" — never "loosen until it
+passes".
+
 ## Strict rules for the implementer
 
 - **NO threshold or tolerance softening** to make assertions pass. If
