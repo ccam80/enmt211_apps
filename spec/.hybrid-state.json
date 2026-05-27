@@ -157,14 +157,14 @@
       ],
       "spawned": 5,
       "completed": 2,
-      "verifications_passed": 0,
+      "verifications_passed": 2,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
       "dead_implementers": 3,
       "dead_verifiers": 0,
       "group_status": {
-        "2.3.a": "pending",
-        "2.3.b": "pending"
+        "2.3.a": "passed",
+        "2.3.b": "passed"
       },
       "user_required_tasks": {
         "2.3.a": [
@@ -172,7 +172,13 @@
         ],
         "2.3.b": []
       },
-      "user_acks": {},
+      "user_acks": {
+        "T2.3.2": {
+          "task_group": "2.3.a",
+          "timestamp": "2026-05-27T21:30:56.582Z",
+          "evidence": "industrial-scale geometry, per-feature columns no straddling, uniform gap band at slice-wide nu_max, constraints exported, gap-row uniform to 1e-15 rad on all 15 fixtures, hybrid stepper shallow teeth, induction 28-bar cage, brushed-DC rotor element count rationalized"
+        }
+      },
       "recovery_log": [
         {
           "script": "reopen-implementer-slot.sh",
@@ -597,5 +603,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T13:46:31.175Z"
+  "last_updated": "2026-05-27T21:35:06.849Z"
 }
