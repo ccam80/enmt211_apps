@@ -143,15 +143,19 @@
       "id": "batch-6",
       "phase": 2,
       "task_groups": [
-        "2.3.a"
+        "2.3.a",
+        "2.3.b"
       ],
       "tasks": [
         [
           "T2.3.1",
           "T2.3.2"
+        ],
+        [
+          "T2.7.1"
         ]
       ],
-      "spawned": 3,
+      "spawned": 4,
       "completed": 1,
       "verifications_passed": 0,
       "verifications_failed": 0,
@@ -159,12 +163,14 @@
       "dead_implementers": 2,
       "dead_verifiers": 0,
       "group_status": {
-        "2.3.a": "pending"
+        "2.3.a": "pending",
+        "2.3.b": "pending"
       },
       "user_required_tasks": {
         "2.3.a": [
           "T2.3.2"
-        ]
+        ],
+        "2.3.b": []
       },
       "user_acks": {},
       "recovery_log": [
@@ -585,5 +591,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T09:47:02.872Z"
+  "last_updated": "2026-05-27T10:57:08.627Z"
 }
