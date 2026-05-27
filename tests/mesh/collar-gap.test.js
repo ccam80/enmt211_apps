@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 
 const {
   LIB,
+  syntheticPhysics,
   singleAnnulusSection,
   ringStackSection,
   assertClose,
@@ -74,7 +75,7 @@ function gapSection() {
 describe("gapLoop nodes lie on a circle", () => {
   it("every gapLoop node radius equals gapR within 1e-9 for both bodies", () => {
     const section = gapSection();
-    const { rotor, stator } = MotorMesh.build(section, {});
+    const { rotor, stator } = MotorMesh.build(section, { physics: syntheticPhysics() });
 
     for (const [label, body] of [["rotor", rotor], ["stator", stator]]) {
       const { nodes, gapLoop, gapR } = body;
@@ -100,7 +101,7 @@ describe("gapLoop nodes lie on a circle", () => {
 describe("gapTheta is uniform and ordered", () => {
   it("gapTheta is monotonically increasing, spans [0,2π), uniform diffs within 1e-9", () => {
     const section = gapSection();
-    const { rotor, stator } = MotorMesh.build(section, {});
+    const { rotor, stator } = MotorMesh.build(section, { physics: syntheticPhysics() });
 
     for (const [label, body] of [["rotor", rotor], ["stator", stator]]) {
       const { gapTheta } = body;
@@ -148,7 +149,7 @@ describe("collar radii match the 0.25·g rule", () => {
   it("rotor gapR === r_rotor_surface + 0.25·g and stator gapR === r_stator_bore − 0.25·g within 1e-9", () => {
     const section = gapSection();
     const geo = gapGeom(section);
-    const { rotor, stator } = MotorMesh.build(section, {});
+    const { rotor, stator } = MotorMesh.build(section, { physics: syntheticPhysics() });
 
     assert.ok(
       Math.abs(rotor.gapR - geo.rotorGapR) < 1e-9,
@@ -173,7 +174,7 @@ describe("collar is pure air", () => {
   it("every element radially between body surface and gapR has air material", () => {
     const section = gapSection();
     const geo = gapGeom(section);
-    const { rotor, stator } = MotorMesh.build(section, {});
+    const { rotor, stator } = MotorMesh.build(section, { physics: syntheticPhysics() });
 
     // Rotor: collar is from r_rotor_surface to rotorGapR
     // Elements with centroid r > r_rotor_surface and r <= rotorGapR must be air
@@ -239,8 +240,8 @@ describe("collar is pure air", () => {
 describe("gapLayers knob adds radial layers", () => {
   it("gapLayers:4 yields more collar elements than gapLayers:2; minAngle > 20 at both", () => {
     const section = gapSection();
-    const build2 = MotorMesh.build(section, { gapLayers: 2 });
-    const build4 = MotorMesh.build(section, { gapLayers: 4 });
+    const build2 = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
+    const build4 = MotorMesh.build(section, { gapLayers: 4, physics: syntheticPhysics() });
 
     // Count collar elements (radially between feature surface and gapR) for rotor
     const geo = gapGeom(section);
@@ -314,8 +315,9 @@ describe("dofBudget caps node count", () => {
     const section  = eightMagnetSection();
     const P_body   = computeBodyPeriod(section, "rotor"); // expect 8
 
-    const unbudgeted = MotorMesh.build(section, {});
-    const budgeted   = MotorMesh.build(section, { dofBudget: 200 });
+    const magPhysics = syntheticPhysics({ poles: 8 });
+    const unbudgeted = MotorMesh.build(section, { physics: magPhysics });
+    const budgeted   = MotorMesh.build(section, { dofBudget: 200, physics: magPhysics });
 
     const Nn_unbudgeted = unbudgeted.rotor.nodes.length / 2;
     const Nn_budgeted   = budgeted.rotor.nodes.length / 2;
@@ -348,8 +350,8 @@ describe("gapMinNodes floors the gap-circle node count", () => {
     const section = ringStackSection();
     const P_body = computeBodyPeriod(section, "rotor");
 
-    const withFloor    = MotorMesh.build(section, { gapMinNodes: 200 });
-    const withoutFloor = MotorMesh.build(section, {});
+    const withFloor    = MotorMesh.build(section, { gapMinNodes: 200, physics: syntheticPhysics() });
+    const withoutFloor = MotorMesh.build(section, { physics: syntheticPhysics() });
 
     const N_with    = withFloor.rotor.gapLoop.length;
     const N_without = withoutFloor.rotor.gapLoop.length;
@@ -394,8 +396,8 @@ describe("gapMinNodes overrides dofBudget on the gap circle", () => {
   it("gapLoop.length >= 200 with small dofBudget; total Nn reduced vs unbudgeted", () => {
     const section = ringStackSection();
 
-    const unbudgeted = MotorMesh.build(section, { gapMinNodes: 200 });
-    const both       = MotorMesh.build(section, { gapMinNodes: 200, dofBudget: 100 });
+    const unbudgeted = MotorMesh.build(section, { gapMinNodes: 200, physics: syntheticPhysics() });
+    const both       = MotorMesh.build(section, { gapMinNodes: 200, dofBudget: 100, physics: syntheticPhysics() });
 
     const N_gap_both   = both.rotor.gapLoop.length;
     const Nn_unbudgeted = unbudgeted.rotor.nodes.length / 2;

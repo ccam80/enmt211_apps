@@ -298,3 +298,36 @@ Progress is recorded here by implementation agents. Each completed task appends 
 - **Files created**: none
 - **Files modified**: lib/motor-mesh.js
 - **Tests**: 61/61 passing
+
+## Task T2.7.1: MMF-harmonic-derived tangential mesh sizing
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/mesh/tangential-physics.test.js, tests/mesh/tangential-localized.test.js
+- **Files modified**: lib/motor-mesh.js, tests/mesh/refine-and-dofbudget.test.js
+- **Tests**: 96/96 passing
+- **Summary**:
+  - Added `nuMaxForWinding(windingSpec)` — derives ν_max per winding type (distributed m=3→17, m=2→13, m=1→11; concentrated→max(p,13); cage→max(17, 1+bars/p_pp))
+  - Added `tangentialPhysicsTargets(features, member, opts)` — returns cellsPerPole=round(2.4×ν_max), nuMax, and perFeatureLocalizedExtras (magnet pole-edges 5×2=10 per magnet, tooth-tips 3 per gap-adjacent localized tooth)
+  - Extended `physicsTargets` return to include `tangential: { rotor, stator }` structure
+  - Extended `physicsFromConfig` to extract `windings` Map (per-ring winding spec) and `poles` from config
+  - Reworked `buildAngularColumns` to use physics-derived target (poles×cellsPerPole) when `tangentialTarget` provided; removed numFeatures×12 cap; added LCM-path physics floor when tangentialTarget is active
+  - Updated `signature` to include windings hash and poles so cache invalidates on winding spec or poles changes
+  - Exported `tangentialPhysicsTargets` and `nuMaxForWinding` from LIB.MotorMesh
+  - Fixed: LCM secondary/tertiary path was ignoring physics floor (synchronous-reluctance rotor was getting cpp=20 instead of ≥34)
+  - Fixed: tangentialTarget guard (only apply physics path when opts.windings is non-empty Map with poles — preserves old feature-density heuristic for synthetic test sections without winding info)
+
+## Task T2.7.1: Per-feature tangential mesh + uniform gap band + constraints
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**:
+  - tests/mesh/tangential-physics.test.js
+  - tests/mesh/tangential-localized.test.js
+  - tests/mesh/per-feature-columns.test.js
+  - tests/mesh/uniform-gap-band.test.js
+  - tests/mesh/constraints.test.js
+  - tests/mesh/spd-preserved.test.js
+- **Files modified**:
+  - lib/motor-mesh.js (two-band mesh: per-feature inner + uniform gap band; dofBudget proportional scaling; buildColumnConstraints; physicsFromConfig; tangentialPhysicsTargets; syntheticPhysics in fixtures)
+  - tests/mesh/_fixtures.js (added syntheticPhysics, singleAnnulusSection, ringStackSection helpers)
+- **Tests**: 89/89 passing (62 pre-existing + 27 new)
+- **Pre-existing failures noted**: motor-stack.test.js (10 failures, TypeError: ConfigSchema.compile undefined) — not caused by Phase 2.7 changes; motor-stack test file predates FEA rebuild and depends on ConfigSchema.compile which is not yet wired in the unified motor pipeline.

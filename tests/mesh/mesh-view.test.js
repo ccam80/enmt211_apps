@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 
 const {
   LIB,
+  syntheticPhysics,
   singleAnnulusSection,
   recordingCtx,
 } = require("./_fixtures.js");
@@ -45,7 +46,7 @@ describe("colorFor distinct per kind", () => {
 describe("draw emits one polygon per element", () => {
   it("fill called exactly Ne times and beginPath at least Ne times with showGapLoop:false", () => {
     const section = singleAnnulusSection();
-    const { rotor } = MotorMesh.build(section, {});
+    const { rotor } = MotorMesh.build(section, { physics: syntheticPhysics() });
 
     const Ne = rotor.elems.length / 4;
     assert.ok(Ne > 0, "need at least one element");
@@ -65,7 +66,7 @@ describe("draw emits one polygon per element", () => {
 describe("draw overlays gapLoop", () => {
   it("showGapLoop:true issues strictly more path operations than showGapLoop:false", () => {
     const section = singleAnnulusSection();
-    const { rotor } = MotorMesh.build(section, {});
+    const { rotor } = MotorMesh.build(section, { physics: syntheticPhysics() });
 
     const ctxNo = recordingCtx();
     MotorMeshView.draw(ctxNo, rotor, { showGapLoop: false });

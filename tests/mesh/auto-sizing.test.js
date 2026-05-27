@@ -16,7 +16,7 @@
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
-const { LIB, singleAnnulusSection, ringStackSection } = require("./_fixtures.js");
+const { LIB, syntheticPhysics, singleAnnulusSection, ringStackSection } = require("./_fixtures.js");
 
 const { MotorMesh } = LIB;
 const TWO_PI = 2 * Math.PI;
@@ -298,7 +298,8 @@ describe("physicsTargets — angular curvature refinement", () => {
 describe("integration — conductor band has >= 3 radial layers with physics opts", () => {
   it("stator conductor band gets >= 3 radial layers at 60 Hz copper", () => {
     const r0 = 0.044, r1 = 0.050;
-    const { section, physics } = conductorSection({ r0, r1, freq: 60, amp: 100 });
+    const { section, physics: circPhysics } = conductorSection({ r0, r1, freq: 60, amp: 100 });
+    const physics = Object.assign({}, syntheticPhysics(), circPhysics);
     const mesh = MotorMesh.build(section, { physics });
     const layers = countRadialLayersInBand(mesh.stator, r0, r1);
     assert.ok(layers >= 3,
@@ -307,9 +308,11 @@ describe("integration — conductor band has >= 3 radial layers with physics opt
 
   it("stator conductor band gets more layers at 10 kHz than at 60 Hz", () => {
     const r0 = 0.044, r1 = 0.050;
-    const { section: s60,    physics: p60    } = conductorSection({ r0, r1, freq: 60,    amp: 100 });
-    const { section: s10k,   physics: p10k   } = conductorSection({ r0, r1, freq: 10000, amp: 100 });
+    const { section: s60,  physics: circP60  } = conductorSection({ r0, r1, freq: 60,    amp: 100 });
+    const { section: s10k, physics: circP10k } = conductorSection({ r0, r1, freq: 10000, amp: 100 });
 
+    const p60  = Object.assign({}, syntheticPhysics(), circP60);
+    const p10k = Object.assign({}, syntheticPhysics(), circP10k);
     const mesh60  = MotorMesh.build(s60,  { physics: p60  });
     const mesh10k = MotorMesh.build(s10k, { physics: p10k });
 

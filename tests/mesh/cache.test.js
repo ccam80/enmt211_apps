@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 
 const {
   LIB,
+  syntheticPhysics,
   singleAnnulusSection,
   ringStackSection,
 } = require("./_fixtures.js");
@@ -84,7 +85,7 @@ describe("buildCached hits the cache", () => {
   it("first call is a miss; second identical call is a hit; body deep-equals first", () => {
     MotorMesh.clearCache();
     const section = singleAnnulusSection();
-    const opts = { gapLayers: 3 };
+    const opts = { gapLayers: 3, physics: syntheticPhysics() };
 
     const stats0 = MotorMesh.cacheStats();
     assert.strictEqual(stats0.hits, 0);
@@ -137,8 +138,9 @@ describe("physics change invalidates cache", () => {
       ],
     };
 
-    const opts60   = { physics: { circuits: [{ freq:   60, amp: 100, conductorMaterial: "copper" }] } };
-    const opts1000 = { physics: { circuits: [{ freq: 1000, amp: 100, conductorMaterial: "copper" }] } };
+    const baseWind = syntheticPhysics();
+    const opts60   = { physics: Object.assign({}, baseWind, { circuits: [{ freq:   60, amp: 100, conductorMaterial: "copper" }] }) };
+    const opts1000 = { physics: Object.assign({}, baseWind, { circuits: [{ freq: 1000, amp: 100, conductorMaterial: "copper" }] }) };
 
     // First build at 60 Hz — miss
     const res60 = MotorMesh.buildCached(section, opts60);
@@ -191,7 +193,7 @@ describe("LRU evicts oldest", () => {
       sections.push(s);
     }
 
-    const opts = {};
+    const opts = { physics: syntheticPhysics() };
     // Build all 10 — each unique rotor sig is a separate entry
     for (const s of sections) {
       MotorMesh.buildCached(s, opts);

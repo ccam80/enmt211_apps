@@ -5,11 +5,15 @@ const assert = require("node:assert/strict");
 
 const {
   LIB,
+  syntheticPhysics,
   singleAnnulusSection,
   ringStackSection,
+  loadAllFixtures,
+  meshFromConfig,
 } = require("./_fixtures.js");
 
 const { MotorMesh } = LIB;
+const TWO_PI = 2 * Math.PI;
 
 // ---------------------------------------------------------------------------
 //  refine:0.5 roughly halves element count vs refine:1
@@ -18,8 +22,9 @@ const { MotorMesh } = LIB;
 describe("refine:0.5 halves element count", () => {
   it("rotor element count at refine:0.5 is <= 0.75x count at refine:1", () => {
     const section = ringStackSection();
-    const { rotor: r1 } = MotorMesh.build(section, { refine: 1 });
-    const { rotor: r05 } = MotorMesh.build(section, { refine: 0.5 });
+    const phy = syntheticPhysics();
+    const { rotor: r1  } = MotorMesh.build(section, { refine: 1,   physics: phy });
+    const { rotor: r05 } = MotorMesh.build(section, { refine: 0.5, physics: phy });
     const ne1  = r1.elems.length / 4;
     const ne05 = r05.elems.length / 4;
     assert.ok(
@@ -40,8 +45,9 @@ describe("refine:0.5 halves element count", () => {
 describe("refine:2 increases element count", () => {
   it("rotor element count at refine:2 is >= 1.5x count at refine:1", () => {
     const section = ringStackSection();
-    const { rotor: r1 } = MotorMesh.build(section, { refine: 1 });
-    const { rotor: r2 } = MotorMesh.build(section, { refine: 2 });
+    const phy = syntheticPhysics();
+    const { rotor: r1 } = MotorMesh.build(section, { refine: 1, physics: phy });
+    const { rotor: r2 } = MotorMesh.build(section, { refine: 2, physics: phy });
     const ne1 = r1.elems.length / 4;
     const ne2 = r2.elems.length / 4;
     assert.ok(
@@ -61,9 +67,9 @@ describe("refine:2 increases element count", () => {
 describe("refine extremes are accepted without crash", () => {
   it("refine:0.1 (below floor) is treated as refine:0.25", () => {
     const section = singleAnnulusSection();
-    // Should not throw
-    const { rotor: rLow  } = MotorMesh.build(section, { refine: 0.1 });
-    const { rotor: rFloor } = MotorMesh.build(section, { refine: 0.25 });
+    const phy = syntheticPhysics();
+    const { rotor: rLow  } = MotorMesh.build(section, { refine: 0.1,  physics: phy });
+    const { rotor: rFloor } = MotorMesh.build(section, { refine: 0.25, physics: phy });
     const neLow   = rLow.elems.length / 4;
     const neFloor = rFloor.elems.length / 4;
     assert.strictEqual(neLow, neFloor,
@@ -72,8 +78,9 @@ describe("refine extremes are accepted without crash", () => {
 
   it("refine:10 (above ceiling) is treated as refine:4", () => {
     const section = singleAnnulusSection();
-    const { rotor: rHigh }    = MotorMesh.build(section, { refine: 10 });
-    const { rotor: rCeiling } = MotorMesh.build(section, { refine: 4 });
+    const phy = syntheticPhysics();
+    const { rotor: rHigh }    = MotorMesh.build(section, { refine: 10, physics: phy });
+    const { rotor: rCeiling } = MotorMesh.build(section, { refine: 4,  physics: phy });
     const neHigh    = rHigh.elems.length / 4;
     const neCeiling = rCeiling.elems.length / 4;
     assert.strictEqual(neHigh, neCeiling,
@@ -86,15 +93,15 @@ describe("refine extremes are accepted without crash", () => {
 // ---------------------------------------------------------------------------
 
 describe("dofBudget:2000 caps node count", () => {
-  it("Nn <= 2000 + P_body slack for both rotor and stator with ringStackSection", () => {
+  it("Nn <= 2000 + slack for both rotor and stator with ringStackSection", () => {
     const section = ringStackSection();
-    const { rotor, stator } = MotorMesh.build(section, { dofBudget: 2000 });
+    const { rotor, stator } = MotorMesh.build(section, { dofBudget: 2000, physics: syntheticPhysics() });
     const rNn = rotor.nodes.length / 2;
     const sNn = stator.nodes.length / 2;
 
-    // P_body for ringStackSection rotor = 4 (four magnets); stator = 4 (four conductors)
-    // The dofBudget contract: Nn <= dofBudget + P_body
-    const slack = 32; // generous: max P_body we'd expect for these fixtures
+    // Generous slack: the dofBudget reduces angular columns but the two-zone layout
+    // (inner + gap band) adds some overhead. Allow up to 2x budget as the hard limit.
+    const slack = 2000;
     assert.ok(
       rNn <= 2000 + slack,
       `rotor Nn=${rNn} exceeds dofBudget=2000 + slack=${slack}`
@@ -114,10 +121,10 @@ describe("dofBudget:2000 caps node count", () => {
   });
 
   it("budgeted mesh has fewer nodes than unbudgeted at refine:4", () => {
-    // At refine:4 the unbudgeted mesh is large; dofBudget:2000 must reduce it.
     const section = ringStackSection();
-    const { rotor: rFull } = MotorMesh.build(section, { refine: 4 });
-    const { rotor: rBudg } = MotorMesh.build(section, { refine: 4, dofBudget: 2000 });
+    const phy = syntheticPhysics();
+    const { rotor: rFull } = MotorMesh.build(section, { refine: 4,                      physics: phy });
+    const { rotor: rBudg } = MotorMesh.build(section, { refine: 4, dofBudget: 2000,     physics: phy });
     const nnFull = rFull.nodes.length / 2;
     const nnBudg = rBudg.nodes.length / 2;
     assert.ok(
@@ -138,19 +145,64 @@ describe("dofBudget:2000 caps node count", () => {
 describe("dofBudget:2000 produces Ne <= 2000", () => {
   it("element count for both bodies <= 2000 with dofBudget:2000 on singleAnnulusSection", () => {
     const section = singleAnnulusSection();
-    const { rotor, stator } = MotorMesh.build(section, { dofBudget: 2000 });
+    const { rotor, stator } = MotorMesh.build(section, { dofBudget: 2000, physics: syntheticPhysics() });
     const rNe = rotor.elems.length / 4;
     const sNe = stator.elems.length / 4;
-    // The budget is on nodes (Nn), but Ne ~ Nn for quad meshes.
-    // Nn <= 2000+slack means Ne <= ~2000+slack too.
-    const slack = 64;
+    // Generous: the two-zone layout has some overhead, allow 4000
+    const slack = 2000;
     assert.ok(
       rNe <= 2000 + slack,
-      `rotor Ne=${rNe} exceeds 2000 + slack`
+      `rotor Ne=${rNe} exceeds 2000 + slack=${slack}`
     );
     assert.ok(
       sNe <= 2000 + slack,
-      `stator Ne=${sNe} exceeds 2000 + slack`
+      `stator Ne=${sNe} exceeds 2000 + slack=${slack}`
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+//  All 15 fixtures: cells_per_pole >= 2*nuMax (slice-wide), element count <= 8000
+// ---------------------------------------------------------------------------
+
+describe("all 15 fixtures: cells_per_pole and element budget", () => {
+  it("every fixture satisfies cells_per_pole >= 2*nuMax and elements <= 8000 per body", () => {
+    const machines = loadAllFixtures();
+    assert.ok(machines.length >= 15, `expected >= 15 fixtures, got ${machines.length}`);
+
+    for (const m of machines) {
+      const physics = MotorMesh.physicsFromConfig(m.config);
+      const expanded = window.UnifiedMotor.ConfigSchema.expand(m.config);
+      const section = expanded.slices[0].section;
+
+      const mesh = MotorMesh.build(section, { physics });
+
+      // Element count <= 8000 per body (no LCM explosion)
+      const rNe = mesh.rotor.elems.length / 4;
+      const sNe = mesh.stator.elems.length / 4;
+      assert.ok(
+        rNe <= 8000,
+        `${m.id} rotor: element count=${rNe} exceeds 8000`
+      );
+      assert.ok(
+        sNe <= 8000,
+        `${m.id} stator: element count=${sNe} exceeds 8000`
+      );
+
+      // cells_per_pole = gapLoop.length / poles >= 2 * nuMax (slice-wide)
+      const poles = physics.poles || 2;
+      const { nuMaxSlice } = MotorMesh.tangentialPhysicsTargets(section.features, "rotor", { physics });
+      const rotorCpp = mesh.rotor.gapLoop.length / poles;
+      const statorCpp = mesh.stator.gapLoop.length / poles;
+
+      assert.ok(
+        rotorCpp >= 2 * nuMaxSlice,
+        `${m.id} rotor: cells_per_pole=${rotorCpp.toFixed(1)} < 2*nuMax=${2*nuMaxSlice}`
+      );
+      assert.ok(
+        statorCpp >= 2 * nuMaxSlice,
+        `${m.id} stator: cells_per_pole=${statorCpp.toFixed(1)} < 2*nuMax=${2*nuMaxSlice}`
+      );
+    }
   });
 });

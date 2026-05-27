@@ -155,12 +155,12 @@
           "T2.7.1"
         ]
       ],
-      "spawned": 4,
-      "completed": 1,
+      "spawned": 5,
+      "completed": 2,
       "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
-      "dead_implementers": 2,
+      "dead_implementers": 3,
       "dead_verifiers": 0,
       "group_status": {
         "2.3.a": "pending",
@@ -209,6 +209,12 @@
           "timestamp": "2026-05-27T09:07:45.642Z",
           "task_group": "2.3.a",
           "reason": "Distributed-winding over-meshing surfaced by user. Specific bug: brushed-dc-pm rotor, brushed-dc-wound rotor, universal rotor all get ~147 cells per slot (1920 angular cells / ~13 features). bldc stator gets 26 cells/slot (1440 / 55). Mesher densities are 18-50x inconsistent across fixtures (7.8 on PMSM stator vs 147 on brushed-DC-PM rotor). Root cause: LCM-cap fallback in buildAngularColumns produces unbounded nBandsPerSector*P_body cell count, ignoring any per-feature target. Need explicit cap at ~8 cells per feature (visualization-grade default), scalable via refine."
+        },
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-27T12:25:52.409Z",
+          "task_group": "2.3.b",
+          "reason": "Architecture change: prior Phase 2.7 implementation used uniform-Delta-theta + LCM which produced under-mesh on magnet rotors (PMSM 9 cpp) and over-mesh on irrational-angle fixtures (universal 204 cpp). Revised spec (per-feature columns + uniform gap band + constraint matrix) requires from-scratch implementation. Implementation reverted by user."
         }
       ]
     },
@@ -591,5 +597,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T10:57:08.627Z"
+  "last_updated": "2026-05-27T13:46:31.175Z"
 }

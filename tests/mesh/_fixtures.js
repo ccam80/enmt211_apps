@@ -106,14 +106,46 @@ function ringStackSection() {
 }
 
 // ---------------------------------------------------------------------------
+//  syntheticPhysics(opts) → { windings: Map, poles: int }
+//
+//  Minimal physics opts for tests using synthetic sections (e.g. singleAnnulusSection,
+//  ringStackSection) that don't have real machine configs.  Every test that calls
+//  MotorMesh.build() on a synthetic section MUST pass opts.physics = syntheticPhysics().
+//
+//  opts:
+//    m      - phases (default 3)
+//    p      - pole count (default 2)
+//    Q      - slot count (default 6)
+//    poles  - poles override (default = p)
+//    member - winding member (default 'rotor')
+// ---------------------------------------------------------------------------
+function syntheticPhysics(opts) {
+  opts = opts || {};
+  const m      = opts.m      != null ? opts.m      : 3;
+  const p      = opts.p      != null ? opts.p      : 2;
+  const Q      = opts.Q      != null ? opts.Q      : 6;
+  const poles  = opts.poles  != null ? opts.poles  : p;
+  const member = opts.member != null ? opts.member : 'rotor';
+  return {
+    windings: new Map([[0, { kind: 'wound', m, p, Q, member }]]),
+    poles,
+  };
+}
+
+// ---------------------------------------------------------------------------
 //  meshFromConfig(config, opts) → { rotor, stator }
 //
 //  Expand the config via ConfigSchema, take slice-0 section, build mesh.
+//  Automatically extracts physics from config if opts.physics not provided.
 // ---------------------------------------------------------------------------
 function meshFromConfig(config, opts) {
   const expanded = window.UnifiedMotor.ConfigSchema.expand(config);
   const section = expanded.slices[0].section;
-  return LIB.MotorMesh.build(section, opts || {});
+  const mergedOpts = opts || {};
+  if (!mergedOpts.physics) {
+    mergedOpts.physics = LIB.MotorMesh.physicsFromConfig(config);
+  }
+  return LIB.MotorMesh.build(section, mergedOpts);
 }
 
 // ---------------------------------------------------------------------------
@@ -494,6 +526,7 @@ function readMsh(filePath) {
 
 module.exports = {
   assertClose,
+  syntheticPhysics,
   singleAnnulusSection,
   ringStackSection,
   meshFromConfig,

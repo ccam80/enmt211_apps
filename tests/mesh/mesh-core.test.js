@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 
 const {
   LIB,
+  syntheticPhysics,
   singleAnnulusSection,
   ringStackSection,
   signedAreaOf,
@@ -23,7 +24,7 @@ const TWO_PI = 2 * Math.PI;
 describe("M0 struct shape", () => {
   it("typed arrays have correct sizes and materials[0] is air", () => {
     const section = singleAnnulusSection();
-    const { rotor } = MotorMesh.build(section, {});
+    const { rotor } = MotorMesh.build(section, { physics: syntheticPhysics() });
 
     const Ne = rotor.elems.length / 4;
     const Nn = rotor.nodes.length / 2;
@@ -88,7 +89,7 @@ describe("Bknee distinguishes otherwise-identical iron materials", () => {
       ],
     };
 
-    const { rotor } = MotorMesh.build(section, {});
+    const { rotor } = MotorMesh.build(section, { physics: syntheticPhysics() });
     const ironMats = rotor.materials.filter(m => m.kind === "iron");
     assert.strictEqual(ironMats.length, 2, "two iron entries in materials[]");
 
@@ -105,7 +106,7 @@ describe("Bknee distinguishes otherwise-identical iron materials", () => {
 describe("M1 no inverted or degenerate elements", () => {
   it("single iron annulus has zero inverted and degenerate elements", () => {
     const section = singleAnnulusSection();
-    const { rotor } = MotorMesh.build(section, {});
+    const { rotor } = MotorMesh.build(section, { physics: syntheticPhysics() });
     const q = MotorMesh.quality(rotor);
     assert.strictEqual(q.nInverted, 0, `nInverted: ${q.nInverted}`);
     assert.strictEqual(q.nDegenerate, 0, `nDegenerate: ${q.nDegenerate}`);
@@ -119,7 +120,7 @@ describe("M1 no inverted or degenerate elements", () => {
 describe("M1 total area equals annulus", () => {
   it("areaError < 1e-2 for single iron annulus", () => {
     const section = singleAnnulusSection();
-    const { rotor } = MotorMesh.build(section, {});
+    const { rotor } = MotorMesh.build(section, { physics: syntheticPhysics() });
     const q = MotorMesh.quality(rotor);
     assert.ok(q.areaError < 1e-2, `areaError ${q.areaError} >= 1e-2`);
   });
@@ -132,7 +133,7 @@ describe("M1 total area equals annulus", () => {
 describe("M1 near-90 degree quads", () => {
   it("minAngle > 20 and maxAngle < 160 for single iron annulus", () => {
     const section = singleAnnulusSection();
-    const { rotor } = MotorMesh.build(section, { gapLayers: 3 });
+    const { rotor } = MotorMesh.build(section, { gapLayers: 3, physics: syntheticPhysics() });
     const q = MotorMesh.quality(rotor);
     assert.ok(q.minAngle > 20, `minAngle ${q.minAngle} <= 20`);
     assert.ok(q.maxAngle < 160, `maxAngle ${q.maxAngle} >= 160`);
@@ -146,7 +147,7 @@ describe("M1 near-90 degree quads", () => {
 describe("M2 rotor and stator nodes are disjoint", () => {
   it("no (x,y) coordinate appears in both bodies", () => {
     const section = ringStackSection();
-    const { rotor, stator } = MotorMesh.build(section, {});
+    const { rotor, stator } = MotorMesh.build(section, { physics: syntheticPhysics() });
 
     const rotorCoords = new Set();
     const Nn_r = rotor.nodes.length / 2;
@@ -169,28 +170,58 @@ describe("M2 rotor and stator nodes are disjoint", () => {
 });
 
 // ---------------------------------------------------------------------------
-//  M2: conforming interfaces (no hanging nodes)
+//  M2: conforming interfaces
+//
+//  Under the two-band architecture (inner per-feature section + gap-adjacent
+//  uniform section), hanging nodes exist at the band transition by design.
+//  Those hanging nodes are described by body.constraints.  Every other
+//  interior edge must be shared by exactly two elements (i.e. no spurious
+//  gaps or T-junctions outside the intentional constraint transition).
+//
+//  The principled test: any "bad edge" (interior edge referenced only once)
+//  must involve at least one node that is a declared slave in body.constraints.
 // ---------------------------------------------------------------------------
 
-describe("M2 conforming interfaces (no hanging nodes)", () => {
-  it("every interior edge is shared by exactly two elements", () => {
+// Helper: set of slave node indices from body.constraints
+function slaveSet(body) {
+  if (!body.constraints || !body.constraints.slaves) return new Set();
+  const s = new Set();
+  for (let k = 0; k < body.constraints.slaves.length; k++) {
+    s.add(body.constraints.slaves[k]);
+  }
+  return s;
+}
+
+describe("M2 conforming interfaces", () => {
+  it("every bad interior edge involves a declared constraint slave (rotor, single annulus)", () => {
     const section = singleAnnulusSection();
-    const { rotor } = MotorMesh.build(section, {});
+    const { rotor } = MotorMesh.build(section, { physics: syntheticPhysics() });
     const result = interiorEdgeSharing(rotor);
-    const diagMsg = result.badEdges.length > 0
-      ? `bad edges: ${JSON.stringify(result.badEdges.slice(0, 3))}`
-      : "";
-    assert.ok(result.ok, `interiorEdgeSharing failed: ${diagMsg}`);
+    if (result.ok) return; // no bad edges — perfect conformity
+
+    // Every bad edge must involve at least one slave node
+    const slaves = slaveSet(rotor);
+    for (const [a, b] of result.badEdges) {
+      assert.ok(
+        slaves.has(a) || slaves.has(b),
+        `bad edge [${a},${b}] involves neither slave; non-constraint topology gap`
+      );
+    }
   });
 
-  it("ring stack stator: every interior edge shared by exactly two elements", () => {
+  it("every bad interior edge involves a declared constraint slave (stator, ring stack)", () => {
     const section = ringStackSection();
-    const { stator } = MotorMesh.build(section, {});
+    const { stator } = MotorMesh.build(section, { physics: syntheticPhysics() });
     const result = interiorEdgeSharing(stator);
-    const diagMsg = result.badEdges.length > 0
-      ? `bad edges: ${JSON.stringify(result.badEdges.slice(0, 3))}`
-      : "";
-    assert.ok(result.ok, `interiorEdgeSharing failed: ${diagMsg}`);
+    if (result.ok) return;
+
+    const slaves = slaveSet(stator);
+    for (const [a, b] of result.badEdges) {
+      assert.ok(
+        slaves.has(a) || slaves.has(b),
+        `bad edge [${a},${b}] involves neither slave; non-constraint topology gap`
+      );
+    }
   });
 });
 
@@ -201,7 +232,7 @@ describe("M2 conforming interfaces (no hanging nodes)", () => {
 describe("M2 radial grading toward the gap", () => {
   it("layer adjacent to gap is finer than mid-yoke for rotor", () => {
     const section = singleAnnulusSection();
-    const { rotor } = MotorMesh.build(section, { gapLayers: 4 });
+    const { rotor } = MotorMesh.build(section, { gapLayers: 4, physics: syntheticPhysics() });
 
     // Collect unique radii
     const Nn = rotor.nodes.length / 2;
@@ -225,7 +256,7 @@ describe("M2 radial grading toward the gap", () => {
 
   it("layer adjacent to gap is finer than mid-yoke for stator", () => {
     const section = singleAnnulusSection();
-    const { stator } = MotorMesh.build(section, { gapLayers: 4 });
+    const { stator } = MotorMesh.build(section, { gapLayers: 4, physics: syntheticPhysics() });
 
     const Nn = stator.nodes.length / 2;
     const rSet = new Set();

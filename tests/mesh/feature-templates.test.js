@@ -5,6 +5,7 @@ const assert = require("node:assert/strict");
 
 const {
   LIB,
+  syntheticPhysics,
   assertClose,
 } = require("./_fixtures.js");
 
@@ -362,7 +363,7 @@ function featureFootprintArea(feat) {
 describe("no element straddles a feature boundary", () => {
   it("I salient teeth: no element spans two distinct feature regions", () => {
     const section = iSectionWithTeeth(4);
-    const { rotor } = MotorMesh.build(section, { gapLayers: 2 });
+    const { rotor } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const bad = findStraddlingElements(rotor, section.features, "rotor");
     assert.strictEqual(bad.length, 0,
       `${bad.length} elements straddle feature boundaries (first: ${bad[0]})`);
@@ -370,7 +371,7 @@ describe("no element straddles a feature boundary", () => {
 
   it("M magnets: no element spans two distinct feature regions", () => {
     const section = mSection(4);
-    const { rotor } = MotorMesh.build(section, { gapLayers: 2 });
+    const { rotor } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const bad = findStraddlingElements(rotor, section.features, "rotor");
     assert.strictEqual(bad.length, 0,
       `${bad.length} elements straddle feature boundaries (first: ${bad[0]})`);
@@ -378,7 +379,7 @@ describe("no element straddles a feature boundary", () => {
 
   it("W conductors: no element spans two distinct feature regions", () => {
     const section = wSection(4);
-    const { stator } = MotorMesh.build(section, { gapLayers: 2 });
+    const { stator } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const bad = findStraddlingElements(stator, section.features, "stator");
     assert.strictEqual(bad.length, 0,
       `${bad.length} elements straddle feature boundaries (first: ${bad[0]})`);
@@ -388,7 +389,7 @@ describe("no element straddles a feature boundary", () => {
 describe("every feature region is tiled", () => {
   it("I kind: each tooth iron footprint covered by matching material elements within rel tol 1e-2", () => {
     const section = iSectionWithTeeth(4);
-    const { rotor } = MotorMesh.build(section, { gapLayers: 2 });
+    const { rotor } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const Ne = rotor.elems.length / 4;
 
     for (const feat of section.features) {
@@ -418,7 +419,7 @@ describe("every feature region is tiled", () => {
 
   it("M kind: each magnet footprint covered by magnet elements within rel tol 1e-2", () => {
     const section = mSection(4);
-    const { rotor } = MotorMesh.build(section, { gapLayers: 2 });
+    const { rotor } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const Ne = rotor.elems.length / 4;
 
     for (const feat of section.features) {
@@ -443,7 +444,7 @@ describe("every feature region is tiled", () => {
 
   it("W kind: each conductor slot footprint covered by conductor elements within rel tol 1e-2", () => {
     const section = wSection(4);
-    const { stator } = MotorMesh.build(section, { gapLayers: 2 });
+    const { stator } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const Ne = stator.elems.length / 4;
 
     for (const feat of section.features) {
@@ -471,7 +472,7 @@ describe("I salient iron leaves air between teeth", () => {
   it("N teeth → exactly N iron→air transitions (2N total kind transitions)", () => {
     const nTeeth = 4;
     const section = iSectionWithTeeth(nTeeth);
-    const { rotor } = MotorMesh.build(section, { gapLayers: 2 });
+    const { rotor } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const Ne = rotor.elems.length / 4;
 
     // Collect the radial band that is the salient tooth layer [0.038, 0.043]
@@ -526,7 +527,7 @@ describe("M alternating magnetization", () => {
     const nMagnets = 4;
     const Mr = 9e5;
     const section = mSection(nMagnets);
-    const { rotor } = MotorMesh.build(section, { gapLayers: 2 });
+    const { rotor } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const Ne = rotor.elems.length / 4;
 
     // Find magnet elements
@@ -600,7 +601,7 @@ describe("W conductors carry circuit and turns", () => {
   it("every conductor element has srcId >= 0 and turns matching originating feature", () => {
     const nSlots = 4;
     const section = wSection(nSlots);
-    const { stator } = MotorMesh.build(section, { gapLayers: 2 });
+    const { stator } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const Ne = stator.elems.length / 4;
 
     const conductorFeatures = section.features.filter(
@@ -665,7 +666,7 @@ describe("C salient teeth plus conductors", () => {
   it("C ring produces both salient tooth iron elements and conductor elements with srcId", () => {
     const nSlots = 6;
     const section = cSection(nSlots);
-    const { stator } = MotorMesh.build(section, { gapLayers: 2 });
+    const { stator } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const Ne = stator.elems.length / 4;
 
     let hasIron = false;
@@ -690,7 +691,7 @@ describe("K bar conductors present", () => {
   it("K ring produces conductor elements with srcId >= 0 (mesher treats K like W)", () => {
     const nSlots = 6;
     const section = kSection(nSlots);
-    const { rotor } = MotorMesh.build(section, { gapLayers: 2 });
+    const { rotor } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
     const Ne = rotor.elems.length / 4;
 
     let conductorCount = 0;

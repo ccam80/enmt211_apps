@@ -7,6 +7,7 @@ const fs = require("fs");
 
 const {
   LIB,
+  syntheticPhysics,
   singleAnnulusSection,
   ringStackSection,
   meshFromConfig,
@@ -34,7 +35,7 @@ describe("area error converges under refinement", () => {
     const errors = [];
 
     for (const refine of refines) {
-      const { rotor } = MotorMesh.build(section, { refine });
+      const { rotor } = MotorMesh.build(section, { refine, physics: syntheticPhysics() });
       const q = MotorMesh.quality(rotor);
       errors.push(q.areaError);
     }
@@ -65,7 +66,7 @@ describe("min-angle stays bounded under refinement", () => {
     const refines = [1, Math.sqrt(2), 2];
 
     for (const refine of refines) {
-      const { rotor } = MotorMesh.build(section, { refine });
+      const { rotor } = MotorMesh.build(section, { refine, physics: syntheticPhysics() });
       const q = MotorMesh.quality(rotor);
       assert.ok(
         q.minAngle > 20,
@@ -85,7 +86,7 @@ describe("coverage error is zero at every level", () => {
     const refines = [1, Math.sqrt(2), 2];
 
     for (const refine of refines) {
-      const mesh = MotorMesh.build(section, { refine });
+      const mesh = MotorMesh.build(section, { refine, physics: syntheticPhysics() });
       const covErr = coverageError(section, mesh);
       assert.ok(
         covErr < 1e-2,
@@ -107,7 +108,8 @@ describe("15-fixture regression sweep", () => {
     for (const m of machines) {
       const expanded = window.UnifiedMotor.ConfigSchema.expand(m.config);
       const section = expanded.slices[0].section;
-      const mesh = MotorMesh.build(section, {});
+      const physics = MotorMesh.physicsFromConfig(m.config);
+      const mesh = MotorMesh.build(section, { physics });
 
       const qr = MotorMesh.quality(mesh.rotor);
       const qs = MotorMesh.quality(mesh.stator);
@@ -244,7 +246,8 @@ describe("gmsh reference diff", () => {
 
       const expanded = window.UnifiedMotor.ConfigSchema.expand(machine.config);
       const section = expanded.slices[0].section;
-      const mesh = MotorMesh.build(section, { gapLayers: gapLayersExpected });
+      const physics = MotorMesh.physicsFromConfig(machine.config);
+      const mesh = MotorMesh.build(section, { gapLayers: gapLayersExpected, physics });
       const body = member === "rotor" ? mesh.rotor : mesh.stator;
 
       const mesherNe = body.elems.length / 4;
