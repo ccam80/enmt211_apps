@@ -1,235 +1,309 @@
-# Phase 2.7 — MMF-harmonic-derived tangential mesh sizing
+# Phase 2.7 — Per-feature tangential mesh + uniform gap band + constraints
 
-> Treated as expanded scope on **batch-6** (Phase 2 wave 2.3) for the same
-> reason as Phases 2.5 and 2.6: the visual ack for T2.3.2 cannot honestly
-> pass while the tangential mesh sizing remains heuristic. Authorized by
-> the user 2026-05-27 after explicit audit finding.
+> Replaces an earlier (heuristic ν_max × poles uniform-Δθ) draft of this
+> phase. Treated as expanded scope on **batch-6** (Phase 2 wave 2.3) for
+> the same reason as Phases 2.5 and 2.6. Authorized by the user
+> 2026-05-28 after risk-investigation pass.
 
 ## Motivation
 
-After Phase 2.6 added physics-derived **radial** layer counts (skin depth
-in conductors, saturation gradient in irons, magnet pole-thickness floor),
-the **tangential** cell count remained heuristic: `Ntheta ≈ numFeatures × 12`
-with a hard cap. That formula has no derivation from FEM accuracy
-requirements — it just happens to give safe values for the current
-15 fixtures. A future fixture with a high pole count and low feature
-count would land in a thin tangential mesh without any test catching it
-until Phase 5's analytic-reference convergence test failed.
+The previous Phase 2.7 round added physics-derived ν_max but kept the
+heuristic-era constraint of uniform Δθ across the whole body, which
+forced LCM-alignment to feature boundaries. That gave:
+- Massive over-mesh on fixtures with irrational-looking feature angles
+  (universal rotor 204 cpp, brushed-DC rotors 108 cpp) when the LCM
+  alignment exploded
+- Under-mesh on magnet rotors (PMSM rotor 9 cpp) because per-body ν_max
+  ignored the stator's harmonics that the gap field carries
 
-The principled tangential sizing derives cells per pole from the MMF
-harmonic content the simulation needs to resolve.
+The principled fix:
+1. **Drop uniform-Δθ-across-whole-body.** Each feature gets cells uniform
+   WITHIN itself, no straddling, but adjacent features have different
+   cell widths.
+2. **Keep uniform Δθ only in the gap-adjacent band** so Phase 4's
+   harmonic gap interface sees uniform θ samples as it requires.
+3. **ν_max is per-slice**, taken as the maximum across all windings in
+   the slice (both rotor and stator), since the gap field couples both
+   bodies.
+4. **Bridge the per-feature vs uniform-gap mismatch with a constraint
+   matrix C** that ties hanging nodes (interior side) to bracketing
+   master nodes (gap-band side) via linear interpolation. The mesh
+   exports C; Phase 5's assembly applies CᵀKC to the body blocks.
 
-## Physics derivation
-
-For a 2-D magnetostatic motor solve, the relevant spatial scale in the
-tangential direction is the highest MMF harmonic carrying significant
-energy. For each winding type:
-
-### Wound (W) / slot+iron (C) stators
-
-The stator MMF Fourier decomposition for an m-phase, p-pole, Q-slot
-distributed winding has fundamental (ν=1) plus a discrete set of
-non-cancelled space harmonics. For integer-slot 3-phase distributed:
-ν ∈ {1, 5, 7, 11, 13, 17, 19, 23, 25, …}; the (6k±1) family. The 5th
-and 7th carry roughly 4-7% of fundamental MMF amplitude; the 11th and
-13th carry roughly 1-2%; higher harmonics drop below 1%. For a
-controllable-fidelity solve, the cutoff harmonic `ν_max` is:
-
-- 3-phase distributed (m=3): `ν_max = 17` (≥99% of MMF energy resolved)
-- 2-phase (m=2): `ν_max = 13` (hybrid stepper, two-phase brushless)
-- 1-phase (m=1): `ν_max = 11` (universal motor, brushed)
-- Concentrated fractional-slot: `ν_max = max(p, 13)` (these have
-  high-order harmonics by design)
-
-Nyquist requirement: `cells_per_pole ≥ 2 · ν_max`. Adding a safety
-factor of 1.2 for asymmetric MMF in fractional-slot:
-`cells_per_pole = round(2.4 · ν_max)`.
-
-### Squirrel cage (K) — induction rotors
-
-The rotor cage's effective harmonic content is dictated by the bar
-count `N_b` and the stator pole pairs `p_pp = p/2`. The slot
-harmonics in the rotor surface MMF are ν = 1 + k·N_b/p_pp (for
-integer k). The dominant non-fundamental is ν = 1 + N_b/p_pp; for
-N_b=28, p=4 (p_pp=2): ν = 1 + 14 = 15. Apply same Nyquist:
-`cells_per_pole = round(2.4 · ν_max)` with `ν_max = max(17, 1 + N_b/p_pp)`.
-
-### Surface magnet (M) — PMSM/BLDC rotors
-
-The rotor permanent-magnet MMF is dominated by the magnet count and
-pole arrangement. The magnet-edge discontinuity creates strong local
-gradients but the global MMF harmonic content is `ν ∈ {1, 3, 5, 7, …}`
-with the magnet pole-arc determining the fundamental's purity. Use
-the stator-side `ν_max` (so a 3-phase stator with 8-pole PMSM rotor
-uses `ν_max = 17`). Plus localized pole-edge refinement (below).
-
-### Salient iron (I) — switched-reluctance / synchronous-reluctance rotors
-
-Saliency creates strong tooth-tip flux concentration but the global
-MMF content is again stator-driven. Use stator `ν_max` plus localized
-tooth-tip refinement.
-
-## Localized refinement
-
-Beyond the global `cells_per_pole` count, add cells at two physically
-sharp boundaries:
-
-### Tooth-tip refinement (gap-facing salient teeth and stator slot openings)
-
-For each feature within `min(0.3 mm, 0.05 × pole_pitch)` of the
-gap-facing surface AND with angular span less than half the body
-period (i.e., a localized tooth/slot, not a back-iron full sector):
-add `3 × refine` extra column edges within the feature, distributed
-uniformly across the feature's angular span. The 3 extra cells
-resolve the tooth-tip flux-concentration gradient (which is local to
-the corner, not the whole feature).
-
-### Pole-edge magnet refinement
-
-For each magnet feature, add `5 × refine` extra column edges within a
-±0.5 mm band at each magnet pole edge (the discontinuity between
-adjacent magnet poles or between magnet and inter-pole gap). The
-5 extra cells per edge × 2 edges per magnet = 10 cells per magnet of
-local refinement, on top of the global cells_per_pole.
+This is the cleanest path that simultaneously:
+- Eliminates straddling at material boundaries (which causes 1-3% torque
+  error from the wrong-material assignment with iron-air μ ratio of
+  ~1000)
+- Preserves uniform gap-loop sampling (Phase 4 requirement)
+- Bounds total element count (no LCM explosion)
+- Resolves the highest MMF harmonic the simulation needs (per-slice
+  ν_max ensures both bodies get enough cells)
+- Keeps the linear system SPD (constraint preserves SPD under CᵀKC
+  transformation)
 
 ## Scope of fix
 
 ### Lib
 
-- `lib/motor-mesh.js` — add:
-  - `tangentialPhysicsTargets(features, member, opts) → { cellsPerPole, perFeatureLocalizedExtras }`
-    - Reads each feature's winding (passed via `opts.windings` per feature
-      `srcId`), poles (from `opts.poles`), and applies the per-element-kind
-      derivation above.
-    - `cellsPerPole` is the global Ntheta target divided by poles.
-    - `perFeatureLocalizedExtras` is a Map<featureIdx, extraCount> for
-      tooth-tip and pole-edge localized refinement.
-  - `buildAngularColumns` consumes `tangentialPhysicsTargets`:
-    - **Primary target**: `Ntheta_target = poles × cellsPerPole`
-    - **Floor**: the existing `numFeatures × 12 × refine` becomes a fallback
-      floor — used ONLY when winding/poles info is unavailable (the
-      function is called without `opts.windings`, e.g. by older callers).
-      With physics info, the floor is `max(P_body × 8, ν_max × poles × 2)`.
-    - **Cap**: the existing cells-per-feature ceiling is removed (it was
-      a heuristic safety net; the physics-derived target already bounds
-      growth correctly).
-    - **Snap**: snap up to nearest multiple of `P_body` for gap-row uniformity.
-    - **Localized extras**: after the global target columns are placed,
-      insert `perFeatureLocalizedExtras` per-feature extra column edges
-      at the appropriate physical locations.
+`lib/motor-mesh.js` — major rework of `buildAngularColumns` and a new
+constraint-matrix builder:
 
-- `lib/motor-mesh.js` `physicsTargets(features, opts)` (from Phase 2.6):
-  extend to also return `tangentialPhysicsTargets`'s output, so callers
-  get one unified physics structure.
+- **`tangentialPhysicsTargets(features, member, opts) → { cellsPerPole,
+  nuMax, perFeatureLocalizedExtras }`** — keeps same signature as the
+  prior round but now `ν_max` is taken as `max(ν_max_rotor,
+  ν_max_stator)` computed across `opts.windings` for the WHOLE slice,
+  not per-body. The helper sees both members' windings and returns the
+  slice-wide ν_max.
 
-- `lib/motor-mesh.js` `physicsFromConfig(config)` (from Phase 2.6): extend
-  to extract per-circuit winding spec (m, p, Q, coilPitch, kind) plus
-  per-body poles, and produce `opts.windings` and `opts.poles` for the
-  mesher.
+- **Per-feature column generation** in `buildAngularColumns`:
+  - Target cell angular width `Δθ_target = 2π / (poles × cells_per_pole)`.
+  - For each feature in the member (sorted by `thetaRange[0]`):
+    - `n_cells_feature = max(1, round(featureSpan / Δθ_target))`
+    - Place `n_cells_feature` cells uniformly within the feature's
+      angular span; cell edges land at the feature's exact boundaries
+      `thetaRange[0]` and `thetaRange[1]`.
+  - **Total Ntheta = sum of per-feature cell counts.** Adjacent features
+    have different cell widths in general.
+  - No LCM math. No uniform-Δθ assumption across features.
+
+- **Gap-adjacent band uniform-Δθ override**:
+  - The radial band immediately adjacent to the gap (top band on rotor,
+    bottom band on stator) gets `Ntheta_gap = poles ×
+    round(2.4 × ν_max_slice)`, uniform spacing, ignoring feature
+    boundaries.
+  - Cells in this band may straddle feature boundaries — but every
+    feature in the gap-adjacent band is, in the worst case, a magnet
+    pole edge or salient tooth tip, where the local feature-edge
+    straddling is bounded by the magnet/tooth count (12-50 per body),
+    and the `perFeatureLocalizedExtras` already adds 5-10 extra columns
+    at each magnet pole-edge / 3 extra at each tooth-tip to densify
+    locally. The dominant material per cell still gives bounded error
+    because the gap-band feature widths are typically much larger than
+    Δθ_gap.
+
+- **Constraint matrix generation** — new internal helper
+  `buildBandTransitionConstraints(body, bands) → { slaves: Int32Array,
+  masters: Float64Array }`:
+  - Walk each pair of adjacent bands.
+  - For each transition where the two bands have different column
+    structures: nodes on the "more uniform" side are masters; nodes on
+    the "less uniform" side that don't coincide (within ε = 1e-9) with
+    a master are slaves.
+  - Coincident nodes are merged into the master (no constraint needed,
+    just shared index).
+  - Each slave is constrained to its two bracketing masters with
+    weights `(1-w), w` where `w = (θ_slave - θ_master_left) /
+    (θ_master_right - θ_master_left)`. The assertion `0 < w < 1` is
+    enforced; failures are mesher bugs (bracket logic).
+  - Output: `slaves[k] = global_idx_of_slave_k`; `masters[k*4 +
+    {0,1,2,3}] = {idx_left, w_left=(1-w), idx_right, w_right=w}` —
+    flat Float64Array of master indices and weights, parallel to slaves.
+
+- **`BodyMesh.constraints`** — new optional field on the returned body
+  struct, populated only when band transitions create hanging nodes
+  (i.e., the gap-adjacent band's Ntheta differs from the next band
+  inward). Shape: `{ slaves, masters }` per the helper above. When the
+  whole body happens to have uniform columns (e.g., a single-band
+  fixture), the field is `null`.
+
+- **Element generation respects per-band column counts**: cells in each
+  band connect to nodes within the band's column structure. At band
+  transitions, the band on each side has its own column edges; cells
+  are quads bounded by within-band column edges. Hanging nodes appear
+  on the band-boundary row — they belong topologically to the inner
+  band's elements but are constrained by the outer band's nodes.
+
+- **`physicsTargets` and `physicsFromConfig`** (extended in prior
+  round): now ν_max is computed slice-wide. `physicsFromConfig` returns
+  `windings` as a Map keyed by ringIdx (unchanged), plus a new
+  `nuMaxSlice` derived from the max across the map.
+
+- **`signature` (cache key)**: include `nuMaxSlice` and the per-band
+  column count vector — when slice-wide ν_max changes, cache
+  invalidates.
 
 ### Tests
 
-- `tests/mesh/tangential-physics.test.js` (NEW):
-  - For a 48-slot 8-pole 3-phase PMSM fixture, mesh `cells_per_pole`
-    is `≥ 34` (=2.4 × 17 for m=3) and `≤ 48` (with safety + alignment).
-  - For a 12-slot 14-pole 3-phase concentrated BLDC fixture (when
-    Phase 6.5 winding-model concentrated mode lands), `cells_per_pole`
-    is `≥ 36` (=2.4 × max(p=14, 13)).
-  - For an induction-3ph 28-bar / 4-pole fixture, rotor `cells_per_pole`
-    is `≥ 36` (=2.4 × 15) and stator `≥ 41` (=2.4 × 17).
-  - For a hybrid-stepper 50-tooth 8-pole fixture, rotor `cells_per_pole`
-    is `≥ 41` (=2.4 × 17 from the 2-phase stator's ν_max=13, plus
-    the 50-tooth localized refinement adds tooth-tip extras).
-  - Each test asserts that the mesh's `gapTheta` count divided by `poles`
-    meets the expected `cells_per_pole`.
+`tests/mesh/per-feature-columns.test.js` (NEW):
+- PMSM stator: number of cells in each slot feature equals
+  `round(slotSpan / Δθ_target)`; cells are uniform within each feature;
+  cell EDGES land EXACTLY on feature boundaries (within 1e-9 rad).
+- Universal rotor: total Ntheta is now `Σ round(featureSpan / Δθ_target)`
+  not LCM-driven; total elements drop from ~4080 to ~ poles × cells_per_pole
+  × layers + localized extras.
+- Brushed-DC-PM rotor: same.
+- Back-iron full-period feature gets exactly one cell across its angular
+  span (or however many `round(span/Δθ_target)` gives, but no special
+  per-feature padding).
 
-- `tests/mesh/tangential-localized.test.js` (NEW):
-  - PMSM with magnets: count column edges within ±0.5 mm of each
-    magnet pole edge; assert ≥ 5 extra per edge.
-  - Hybrid-stepper with 50 salient rotor teeth: count column edges
-    within each tooth feature; assert ≥ 3 extra per tooth.
-  - Back-iron full-sector feature (e.g., outer iron ring): assert NO
-    extra columns (the localized refinement is gap-surface-only).
+`tests/mesh/uniform-gap-band.test.js` (NEW):
+- For each of the 15 fixtures, the gap-adjacent band has uniform Δθ at
+  `2π / Ntheta_gap` where `Ntheta_gap = poles × cells_per_pole`.
+- Gap-loop nodes are evenly spaced — `gapTheta[i+1] - gapTheta[i] ===
+  gapTheta[1] - gapTheta[0]` within 1e-12 rad for all i.
+- Phase 4's `N_gap ≥ 4·K` floor is satisfied for all 15 fixtures at
+  default physics opts.
 
-- `tests/mesh/refine-and-dofbudget.test.js` (UPDATE):
-  - The existing "every fixture has 6-12 cells per feature at default
-    opts" test is rewritten to "every fixture has cells_per_pole ≥
-    2 · ν_max_for_its_winding". The old cells-per-feature metric is
-    not principled and is replaced.
+`tests/mesh/constraints.test.js` (NEW):
+- For a fixture with non-trivial band transitions (e.g., PMSM where
+  back-iron band has different per-feature counts vs slot-iron band):
+  - `body.constraints` is non-null
+  - Every slave global index is in `[0, body.nodes.length / 2)`
+  - Every master index is `< slave's index` (masters come earlier in
+    global numbering — convenient for triangular elimination)
+  - Every weight pair `(w_left, w_right)` sums to 1.0 within 1e-12
+  - Every weight is in `[ε, 1 - ε]` strictly (no degenerate
+    constraints — coincident nodes are merged not constrained)
+- Full-rank test: for each fixture's `body.constraints`, build C as a
+  sparse matrix (N_total × N_master), verify rank = N_master via a
+  small singular-value check (use Float64Array sparse SVD if available,
+  or assert non-singular by attempting Cholesky factorization on
+  CᵀIC = CᵀC for the identity case → must be positive definite).
 
-- `tests/mesh/auto-sizing.test.js` (existing Phase 2.6): MUST still
-  pass without softening. The radial sizing is unchanged; only the
-  tangential side gets the new physics derivation.
+`tests/mesh/spd-preserved.test.js` (NEW):
+- Build a tiny representative K (e.g., 2D Laplacian on a 4×4 grid
+  modified to test the CᵀKC transformation with manually-constructed C).
+- Verify CᵀKC is SPD (positive diagonal, dominant by sum of off-diag
+  magnitudes, Cholesky factorization succeeds).
+- Verify CᵀKC condition number is bounded (within 10× of K's
+  condition number for typical w values in [0.1, 0.9]).
 
-- All 61 existing mesh tests: re-run, classify failures honestly. If a
-  test asserted a specific tangential Ntheta value, rewrite the
-  assertion to derive from physics rather than hardcoded. No tolerance
-  widening to make hardcoded assertions pass.
+`tests/mesh/tangential-physics.test.js` (UPDATE from prior round):
+- PMSM rotor cells_per_pole now ≥ 41 (was 9 in the prior round) because
+  ν_max is slice-wide.
+- Universal rotor cells_per_pole now ≤ 30 (was 204) because LCM
+  alignment is gone.
+
+`tests/mesh/refine-and-dofbudget.test.js` (UPDATE):
+- The "all 15 fixtures satisfy cells_per_pole ≥ 2×ν_max" assertion now
+  uses slice-wide ν_max for the body's slice.
+- Element count budget: tighten from 10000 to 8000 per body (no
+  LCM-driven explosion).
+
+`tests/mesh/tangential-localized.test.js` (UPDATE):
+- Magnet pole-edge extras now apply within the uniform gap-adjacent
+  band as +5 extra columns per pole edge in the gap-band's uniform
+  spacing (added on top of the base ν_max-derived count for that band).
+- Salient tooth-tip extras: same pattern, +3 extra per tooth in the
+  gap-band's uniform spacing.
+
+**All 96 existing mesh tests**: re-classify under the new architecture.
+Expected failure modes:
+- Assertions about specific Ntheta values: rewrite to derive from ν_max
+  + poles + per-feature math.
+- Assertions about uniform Δθ across the whole body: split into "uniform
+  in gap-adjacent band" (still asserts) and "per-feature uniform within
+  each feature" (new assertion).
+- Assertions about "no element straddles a feature boundary" in body
+  interior: STILL passes — per-feature columns guarantee no interior
+  straddling.
+- Assertions in the gap-adjacent band about element-material assignment
+  at a feature edge: may need to relax to "dominant material" for that
+  band only, since the gap band is uniform and may straddle small
+  features.
+
+No tolerance widening. If a test fails because it was asserting
+buggy/heuristic behavior, rewrite the assertion to test the principled
+behavior. If it fails because the new code has a bug, fix the code.
 
 ### Caller updates
 
-- `lessons/unified_motor/mesh-dev.html`: extract winding info via
-  `physicsFromConfig` (now richer) and pass to `MotorMesh.buildCached`.
-- The LRU cache key (`signature`): include a hash of windings + poles so
-  changing winding spec (e.g., flipping from m=3 to m=2) invalidates the
-  cached mesh.
+- `lessons/unified_motor/mesh-dev.html`: no change (passes
+  `physicsFromConfig(config)` unchanged; the helper now returns
+  slice-wide ν_max internally).
+- The LRU cache key (`signature`) extension already in prior round
+  picks up the new behavior because `windings` Map hash captures the
+  slice-wide structure.
+
+### What the mesh API exposes to Phase 5
+
+`BodyMesh` adds one new optional field:
+
+```
+constraints: {
+  slaves: Int32Array      // slave node global indices, length S
+  masters: Float64Array   // [idx_left, w_left, idx_right, w_right] per slave, length 4S
+} | null
+```
+
+Phase 5 reads this field (per rotor and stator body), builds the
+constraint matrix C internally, and applies CᵀKC to the body blocks
+before invoking the solver. The mesh doesn't know about FEM
+assembly; Phase 5 doesn't know about mesh generation. Clean boundary.
 
 ## Acceptance
 
-1. Default `MotorMesh.build(section, { physics })` on every one of the
-   15 fixtures produces a mesh whose `cells_per_pole ≥ 2.4 · ν_max` for
-   the body's winding type.
+1. **PMSM rotor cells_per_pole ≥ 41** (slice-wide ν_max for m=3 stator
+   pulls the rotor up). Was 9.0 in the prior round.
 
-2. Tooth-tip and pole-edge localized refinement is present in fixtures
-   that have those features: magnets get ≥ 5 extra cells per pole edge;
-   salient teeth get ≥ 3 extra cells per tooth.
+2. **Universal rotor cells_per_pole ≤ 30** and total elements ≤ 1500
+   (no LCM-driven explosion). Was 204 cpp / 4080 elements in the prior
+   round.
 
-3. Phase 5's slotless-ring-magnet analytic-reference test (added in
-   the Phase 5 amendments) PASSES at default `refine=1` without any
-   manual mesh tuning — proof that the auto-derived tangential mesh is
-   adequate for FEM accuracy, not just visually plausible.
+3. **Every fixture's gap-adjacent band has perfectly uniform Δθ** at
+   the slice-wide physics target. `gapTheta` spacing constant within
+   1e-12 rad on every body of every fixture.
 
-4. `node --test tests/mesh/*.test.js` passes (≥ 65 tests: 61 prior +
-   tangential-physics + tangential-localized + at least 2 cache
-   invalidation cases).
+4. **Every fixture's body-interior cells respect feature boundaries**:
+   no element's centroid lies on the "wrong side" of a feature boundary
+   compared to its dominant material region. (Equivalently: per-feature
+   columns guarantee no straddling in interior bands.)
 
-5. No fixture's Ne explodes beyond a reasonable budget (≤ 8000 elements
-   per body at default opts) — the per-pole derivation is bounded above
-   by `poles × 48` ≈ a few hundred angular cells per body even for
-   high-pole machines, multiplied by the typical 8-12 radial layers.
+5. **Constraint matrix is full rank** for every fixture (Cholesky on
+   CᵀC succeeds; condition number bounded).
 
-6. `signature` correctly invalidates the cache when winding spec or
-   poles change.
+6. **All 96 existing mesh tests pass** under re-classification — no
+   tolerance softening. Plus the 4 new test files (per-feature-columns,
+   uniform-gap-band, constraints, spd-preserved) add ~20 new tests.
 
-7. The `numFeatures × 12` cap from the previous round is removed (it
-   was a heuristic patch over a missing derivation; with the physics
-   target in place, it's dead code).
+7. **`signature` correctly invalidates** the cache when slice-wide
+   ν_max changes (e.g., flipping a fixture from m=3 to m=2 stator
+   triggers a new mesh build).
 
 ## Strict rules for the implementer
 
-- **NO threshold or tolerance softening.** Same rule as 2.5/2.6.
-- **NO** hardcoded `ν_max` values per fixture in the source — they MUST
-  be derived from the winding spec (m, p, Q for wound; bars + poles for
-  cage; pole count for magnet/salient with stator-side override).
-- **NO** silent reuse of cache entries when winding spec changes.
+- **NO threshold or tolerance softening** to make assertions pass. If
+  a test fails, classify honestly: (a) bug in new code → fix code, or
+  (b) assertion tested heuristic behavior → rewrite assertion.
+- **NO** silent fallback to LCM alignment. The LCM-based path from the
+  prior round must be REMOVED, not preserved as a fallback. With
+  per-feature columns and physics-derived gap-band Ntheta, there is no
+  scenario requiring LCM.
+- **NO** uniform-Δθ-across-whole-body assumption anywhere outside the
+  gap-adjacent band override.
+- **NO** silent merging of distinct features with the same material at
+  the same radius — keep feature identity intact for per-feature column
+  generation.
 - **NO** `// TODO`, `// for now`, deferred-cleanup comments.
 
 ## Out of scope
 
-- **Adaptive mesh refinement (AMR)** — same as Phase 2.6. Stays out.
-- **Anisotropic ν_max per harmonic** — using a uniform `ν_max` per
-  body is sufficient; we don't try to be denser only at high-harmonic-
-  amplitude angles.
-- **Time-harmonic eddy-current solve** — Phase 5 amendment statement
-  applies; static-magnetostatic remains the assumption for now.
+- **AMR** — same as prior rounds. Stays out.
+- **Higher-order p-refinement** — linear quads only.
+- **Triangular elements** at band transitions — quads only with
+  hanging-node constraints. The constraint mechanism handles the
+  topological mismatch; no need for tri transition cells.
+- **The Phase 5 assembly-side work** (applying CᵀKC, recovering A from
+  Â) is specified in the Phase 5 spec amendment, not here. This phase
+  exports `constraints` on the mesh; Phase 5 consumes it.
 
-## Why this matters
+## Phase 5 amendment summary (for cross-reference)
 
-Without this phase, the mesher's tangential sizing is heuristic in
-exactly the same way the user (and the project audit) called out for
-Phase 2 as a whole. The Phase 5 analytic-reference test would
-eventually fail at default refine if a fixture landed in a bad spot
-of the heuristic — and the recovery loop ("Phase 5 fails → implementer
-raises cap") is exactly the slop pattern we are explicitly trying to
-avoid. Adding the physics derivation here, BEFORE Phase 5
-implementation, closes that loop preemptively.
+Phase 5's `motor-slice.js` assembly layer applies the constraint
+transformation:
+- After assembling K_rotor (triplet form): `K̂_rotor =
+  applyConstraints(K_rotor_triplets, body.constraints)`
+- Same for K_stator
+- After assembling f_rotor: `f̂_rotor = Cᵀ_r · f_rotor` (sparse matvec)
+- The harmonic-coupling blocks B_r, B_s and harmonic block M stay
+  byte-identical (the gap-loop nodes are in the uniform gap-adjacent
+  band, where C is identity for those indices)
+- After solving the bordered system for `[Â_rotor, Â_stator, a_b]`:
+  `A_rotor = C_r · Â_rotor` and `A_stator = C_s · Â_stator` (sparse
+  matvecs to recover full nodal vectors for field extraction)
+
+Phase 1 solver wrapper: **zero changes**. The constrained system is
+just another SPD sparse linear problem; SimplicialLDLT factorizes it
+identically. Per-solve perf overhead near zero (constraint transformation
+is one-time per geometry change; only `Cᵀf` and `C·Â` matvecs happen
+per solve, at microsecond cost).

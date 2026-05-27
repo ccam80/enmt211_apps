@@ -1020,6 +1020,103 @@ with the analytic round-rotor `dL/dθ = 0` (identically zero for a round
 rotor) to within `1e-12` (machine-epsilon * |L|), demonstrating that
 the chosen step does not lose precision to round-off.
 
+## Constraint-matrix handling for per-feature mesh (added 2026-05-28)
+
+Phase 2.7 (per-feature tangential columns + uniform gap band) exports a
+`body.constraints` field on each `BodyMesh` when band transitions create
+hanging nodes:
+
+```
+constraints: {
+  slaves: Int32Array      // slave node global indices (within the body)
+  masters: Float64Array   // [idx_left, w_left, idx_right, w_right] per slave
+} | null
+```
+
+The slice's assembly layer applies the constraint transformation
+`K̂ = CᵀKC, f̂ = Cᵀf` to the rotor and stator body blocks before
+invoking the solver, and recovers full nodal vectors via `A = C·Â`
+after the solve. Phase 1's sparse solver wrapper is unchanged — the
+constrained system is just another SPD sparse problem.
+
+**Critical layout fact**: the constraints touch body-INTERIOR nodes
+only. The gap-loop nodes (used by `B_r`, `B_s` in the bordered system)
+are in the uniform gap-adjacent band, where C is identity for those
+indices. Therefore the harmonic-coupling blocks `B_r`, `B_s` and the
+harmonic-self block `M` stay BYTE-IDENTICAL under the constraint
+transformation. Only `K_rotor`, `K_stator`, `f_rotor`, `f_stator`
+transform.
+
+The constrained bordered system:
+
+```
+[Cᵀ_r·K_r·C_r       0                       B_r ] [Â_rotor ]   [Cᵀ_r·f_r ]
+[0                   Cᵀ_s·K_s·C_s           B_s ] [Â_stator] = [Cᵀ_s·f_s ]
+[B_rᵀ                B_sᵀ                    M   ] [a_b      ]   [0         ]
+```
+
+SPD preserved: if the unconstrained system was SPD, so is the
+constrained system (CᵀKC is SPD for any full-rank C; the bordering by
+B_r, B_s, M preserves the property).
+
+**Implementation contract** for the new internal helpers in
+`lib/motor-slice.js`:
+
+- `buildConstraintOps(constraints, N) → { applyKLeft, applyKRight,
+  applyFLeft, recoverFull }`
+  - `applyKLeft(triplets) → triplets`: pre-multiplies CᵀK by walking
+    each (I, J, V) triplet; if I is a slave, distributes V to
+    (masters of I, J) entries with the slave's weights. Output is
+    triplets indexed only by master nodes (slave row index never
+    appears in output I).
+  - `applyKRight(triplets) → triplets`: post-multiplies K·C; mirror
+    of `applyKLeft` applied to J indices.
+  - `applyFLeft(f: Float64Array) → f_hat: Float64Array`: dense version
+    for the RHS vector. For each slave i, distributes f[i] to its
+    masters; sets f_hat[slave] = 0 (or removes the entry — the slave
+    index is eliminated from f_hat).
+  - `recoverFull(A_hat: Float64Array) → A: Float64Array`: writes
+    A[master] = A_hat[master] for each master, then computes
+    A[slave] = (1-w)·A[m_left] + w·A[m_right] for each slave.
+
+- The pattern `K̂ = applyKLeft(applyKRight(K_triplets))` is computed
+  once per geometry change and cached (the slice already caches
+  symbolic factorization across Newton iters; the constraint
+  application piggybacks on that cache).
+
+- At Newton iteration: `K(A)` is rebuilt with current ν per element
+  (Brauer update), then `K̂ = applyKRight(applyKLeft(K_triplets))` is
+  re-applied because the triplet values change. Symbolic factorization
+  is preserved.
+
+**Test additions** in Wave 5.1:
+
+- `tests/slice/constraints-spd.test.js`:
+  - For a small representative mesh with non-trivial constraints
+    (a 4×4 quad fixture with hanging-node band transition):
+    - Verify the constraint application produces an SPD matrix
+      (Cholesky factorization succeeds via the existing solver).
+    - Solve a known problem with constraints applied; verify
+      `‖K·(C·Â) − f‖∞ < 1e-9` (the full unconstrained system is
+      satisfied to solver tolerance).
+    - Recover full vector `A = C·Â`; verify all slave nodes satisfy
+      `A[slave] = (1-w)·A[m_left] + w·A[m_right]` exactly.
+  - For each of the 15 fixtures' rotor body with non-null
+    constraints: build the slice, perform one solve at zero current,
+    verify SPD-ness via the solver's residual check passes.
+
+**Acceptance addendum** for Phase 5:
+
+- All slice tests pass on fixtures with `body.constraints != null` AND
+  on fixtures where it's null (no-op path must work — the assembly
+  code's constraint handling is bypassed when `constraints === null`).
+- The full system residual `‖K·A − f‖∞/‖f‖∞ < 1e-9` is verified after
+  reconstruction of full A, not just on the reduced system — proves
+  the constraint application is consistent with the full unconstrained
+  problem.
+- No Phase 1 solver API change. The wrapper sees a standard SPD
+  sparse problem.
+
 ## Phase 5 acceptance now includes ONE non-self-referential physical test (added 2026-05-27)
 
 To close the "solver converges on itself" loophole, Wave 5.2 adds:
