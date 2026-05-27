@@ -91,3 +91,14 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - tests/mesh/_fixtures.js: singleAnnulusSection, ringStackSection, meshFromConfig, signedAreaOf, annulusArea, interiorEdgeSharing, recordingCtx, assertClose.
   - All M0/M1/M2 acceptance criteria met: zero inverted/degenerate, areaError < 1e-2, minAngle > 20°, rotor/stator disjoint nodes, conforming interfaces, radial grading toward gap.
   - Pre-existing motor-stack failures (TypeError: compile undefined) are pre-existing from Phase 0 deletions, not caused by this task.
+
+## Task T2.2.1: Angular sector templates dispatched on element kind
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/mesh/feature-templates.test.js
+- **Files modified**: lib/motor-mesh.js
+- **Tests**: 24/24 passing (tests/mesh/mesh-core.test.js + tests/mesh/mesh-view.test.js + tests/mesh/feature-templates.test.js; all 11 new feature-templates tests pass)
+- **Implementation notes**:
+  - lib/motor-mesh.js: Replaced uniform angular grid with feature-boundary-aligned non-uniform grid. New `buildAngularColumns()` function collects feature thetaRange edges via `collectThetaEdgesInSector()`, subdivides each inter-boundary band into equal sub-cells, and tiles by P_body. This ensures no element straddles a feature boundary (M3 requirement). Fixed floating-point precision bug in `collectThetaEdgesInSector`: modulo arithmetic over multiple thetaRange edges produces values that differ by ±4.4e-16; fixed by snapping to 12-decimal-digit precision before deduplication via a Map. The angular sector template dispatch (iron/magnet/conductor/air) was already correct in T2.1.1; the M3 gap was the misaligned angular grid.
+  - tests/mesh/feature-templates.test.js: 7 describe blocks covering all 5 element kinds (I/M/W/C/K). "no element straddles a feature boundary" uses quarter-point angular samples to detect boundary crossings without false positives at element edges. "M alternating magnetization" checks radial projection sign (magDir·radialUnit) alternates between adjacent poles rather than comparing magDir vectors at different angles (which are orthogonal not anti-parallel for radially-magnetized magnets). "I salient iron leaves air between teeth" counts transitions in the sorted angular sequence, starting from a non-iron element to avoid wrap-around double-counting.
+  - All 24 mesh tests pass; all 40 non-mesh tests pass; pre-existing motor-stack failures unchanged.
