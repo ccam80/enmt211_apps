@@ -185,6 +185,12 @@
           "timestamp": "2026-05-27T03:40:38.315Z",
           "task_group": "2.3.a",
           "reason": "Phase 2.5 winding-model cleanup approved by user (2026-05-27). Industrial-scale fixtures from prior round are correct on geometry but sit on the broken cage-as-winding + over-strict validator + p-semantic ambiguity. Spec: spec/phase-2.5-winding-model-cleanup.md. Treat as expanded batch-6 scope; T2.3.2 user-visual ack will only be possible after this lands."
+        },
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-27T06:04:46.002Z",
+          "task_group": "2.3.a",
+          "reason": "Mesher correctness bugs surfaced by industrial-scale fixtures: (1) lib/motor-mesh.js buildAngularColumns uses 'LCM of rational denominators' for feature alignment, which explodes baseN to ~1300 for fixtures with non-clean feature edges (brushed-dc-pm rotor: 50160 elements vs ~2000 expected). (2) refine knob clamped to [1,inf) so refine<1 has no effect. (3) dofBudget knob does not influence element count. User chose 'fix both properly'."
         }
       ]
     },
@@ -511,5 +517,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T03:54:34.400Z"
+  "last_updated": "2026-05-27T06:33:28.419Z"
 }

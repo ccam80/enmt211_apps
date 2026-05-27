@@ -248,3 +248,33 @@ Progress is recorded here by implementation agents. Each completed task appends 
 - **Status**: complete (fixtures corrected; visual ack pending user)
 - **Agent**: implementer
 - **Notes**: All 15 machine fixtures are geometrically correct and load through config-schema without errors. Cage fixtures (induction-3ph, induction-1ph) now produce nCircuits=31 and nCircuits=30 respectively with correct cage representation. Fractional-slot fixtures (bldc, pm-stepper) now use correct pole-count p values and are handled by the loosened standardWinding without throwing.
+
+## Task motor-mesh-bug-fix: Fix LCM overflow, refine range, and dofBudget in motor-mesh.js
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/mesh/refine-and-dofbudget.test.js
+- **Files modified**: lib/motor-mesh.js
+- **Tests**: 48/48 passing (41 original mesh tests + 7 new refine/dofBudget tests)
+
+### Changes in lib/motor-mesh.js
+
+1. **Restored `lcm(a,b)` and `rationalDenominator(frac, maxDenom)` helpers** — needed for the LCM-based column strategy.
+
+2. **Rewrote `computeBodyPeriod`** — old algorithm used `count = round(2π/featureSpan)` which gave wrong period for salient-tooth geometries (e.g. iSectionWithTeeth(4) with 60%-span teeth gave P_body=13 instead of 4). New algorithm groups features by angular span and uses the count of features sharing the same span.
+
+3. **Rewrote `buildAngularColumns`** — replaced non-uniform feature-aligned grid with LCM-with-cap uniform grid:
+   - LCM_CAP = 1000. For each feature boundary angle θ_k, compute `q = rationalDenominator(θ_k/(2π), LCM_CAP)` and extend `baseN = lcm(baseN, q)`.
+   - If LCM would exceed cap (irrational-fraction boundaries, e.g. brushed-dc-pm), fall back to `nBandsPerSector * P_body` as baseN — manageable element count, no exact alignment but straddling test doesn't apply to real fixtures.
+   - Uniform grid: `thetaColumns[j] = j * 2π/Ntheta` — gapTheta automatically uniform to machine precision, no inversions.
+
+4. **Reverted `assembleMesh`** — removed gap-row-override (was causing 33 inverted elements in BLDC stator). All rows now use `thetaColumns[j]` uniformly. `gapTheta[j] = thetaColumns[j]`.
+
+5. **refine range [0.25, 4]** — clamped in both `buildRadialNodes` and `buildBodyMesh`.
+
+6. **dofBudget** — uses `divsPerBandOverride` path in `buildAngularColumns` to reduce Ntheta.
+
+### Key results
+- brushed-dc-pm rotor: 50,160 → 4,800 elements (under 5,000 requirement)
+- All 15 fixtures: nInverted=0, nDegenerate=0
+- gapTheta uniform to 1e-9 on all fixtures
+- Straddling test passes for iSectionWithTeeth(4): exact LCM alignment (baseN=80, boundary at column 3 exactly)
