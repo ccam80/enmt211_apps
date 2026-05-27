@@ -156,12 +156,16 @@
       return;
     }
 
-    MotorMeshView.draw(ctx, body, {
-      x: W / 2,
-      y: H / 2,
-      scale: (Math.min(W, H) * 0.44) / body.gapR,
-      showGapLoop: showGap,
-    });
+    // MotorMeshView.draw plots node coordinates directly (in metres) using
+    // whatever transform the caller has installed. Centre on the canvas,
+    // scale so the body fits, and flip Y so math-convention (CCW from +x)
+    // renders right-side-up on screen.
+    var scale = (Math.min(W, H) * 0.44) / body.gapR;
+    ctx.translate(W / 2, H / 2);
+    ctx.scale(scale, -scale);
+    ctx.lineWidth = 1 / scale;
+
+    MotorMeshView.draw(ctx, body, { showGapLoop: showGap });
   }
 
   // ---------------------------------------------------------------------------

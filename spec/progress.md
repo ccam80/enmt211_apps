@@ -134,3 +134,14 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - gmsh invocation: shell:true required on Windows since gmsh is installed as Python package (C:\Program Files\Python314\Scripts\gmsh.bat) and not on the Node child process PATH by default.
   - The gmsh reference diff test runs (not skipped) because .msh files are committed.
   - User-required browser pass (mesh-dev.html visual inspection) is a separate coordinator gate.
+
+---
+## Fix to batch-6 implementer's artifacts (coordinator in-place)
+
+- **2026-05-27** — `lessons/unified_motor/mesh-dev.html` did not render (user-reported during the T2.3.2 visual-ack gate).
+  - **Cause 1**: `renderBody()` passed `{x, y, scale}` to `MotorMeshView.draw`, but the view ignores those (its contract is "use whatever transform the caller installed on `ctx`"). Mesh was drawn at node coords in metres ≈ sub-pixel.
+  - **Cause 2**: `MotorMeshView.draw` hardcoded `ctx.lineWidth = 2` and `ctx.lineWidth = 1` for the gapLoop overlay. Under any caller-installed `ctx.scale(s, -s)`, those line widths blow up to `2·s` and `s` physical px and fill the canvas.
+  - **Fix**: `mesh-dev.html` `renderBody()` now installs `ctx.translate(W/2, H/2); ctx.scale(scale, -scale); ctx.lineWidth = 1/scale;` and calls `draw(ctx, body, { showGapLoop })` only. `lib/motor-mesh-view.js` `draw()` removed the hardcoded `lineWidth = 2` / `lineWidth = 1`, leaving line widths to the caller's `ctx` state.
+  - **Tests**: all 41 mesh tests still pass.
+  - **Browser check**: pmsm, brushed-dc-pm, bldc, induction-3ph, switched-reluctance, hybrid-stepper, skew-demo, pole-mismatch-demo all render distinct per-material colors with visible gapLoop overlay.
+  - The user-required visual walkthrough of all 15 fixtures is still required before T2.3.2 can be acked.
