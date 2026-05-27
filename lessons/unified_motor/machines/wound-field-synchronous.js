@@ -40,9 +40,9 @@
     ],
     circuits: [
       {
-        terminal: { type: "DC", amp: 24 },
+        terminal: { type: "CURRENT", amp: 12 },
         commutation: { mode: "none" },
-        R: 4.0,
+        R: 2.0,
       },
       {
         terminal: { type: "AC", amp: 230, freq: 50, phaseOffset: -2 * Math.PI * 0 / 3 },

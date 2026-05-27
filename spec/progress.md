@@ -331,3 +331,39 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - tests/mesh/_fixtures.js (added syntheticPhysics, singleAnnulusSection, ringStackSection helpers)
 - **Tests**: 89/89 passing (62 pre-existing + 27 new)
 - **Pre-existing failures noted**: motor-stack.test.js (10 failures, TypeError: ConfigSchema.compile undefined) — not caused by Phase 2.7 changes; motor-stack test file predates FEA rebuild and depends on ConfigSchema.compile which is not yet wired in the unified motor pipeline.
+
+## Task T3.1.1: CURRENT terminal vocabulary, circuit enforcement, run routing, schema validation
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/pipeline/current-schema.test.js, tests/circuit/current-terminal.test.js
+- **Files modified**: lib/excitation.js, lib/motor-circuit.js, lib/motor-run.js, lessons/unified_motor/config-schema.js, tests/excitation/sources.test.js
+- **Tests**: 21/21 passing (node --test tests/excitation/sources.test.js tests/pipeline/current-schema.test.js tests/circuit/current-terminal.test.js)
+- **Acceptance criteria**:
+  - evalTerminal returns {kind:"current", I} for CURRENT in none/electronic-*/sequencer modes; gates ±amp in mechanical mode; OPEN/SHORT still bypass
+  - MotorCircuit.stepCurrents/advance pin every CURRENT circuit to Iimp exactly (strict equality), solve free circuits with CURRENT contribution on RHS
+  - config-schema.validate accepts CURRENT circuit; rejects unknown terminal type with terminal.type error
+  - motor-run.js maps {kind:"current"} → "CURRENT" + Iimp[k]; passes Iimp to advance
+  - No machine identity in any changed file
+
+## Task T3.1.2: Wound-field-synchronous fixture — regulated CURRENT field
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none
+- **Files modified**: lessons/unified_motor/machines/wound-field-synchronous.js (circuit 0 terminal.type DC→CURRENT, amp 24→12, R 4.0→2.0)
+- **Tests**: no new test file (per spec); inline verification node -e exits 0 confirming type=CURRENT amp=12 R=2.0
+- **Acceptance criteria**: circuit 0 terminal.type=CURRENT, amp=12; circuits 1–3 AC stator unchanged; machine still registered on window.UnifiedMotor.MACHINES as wound-field-synchronous
+
+## Task T3.1.3: Per-iron Bknee passthrough in config-schema.js
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/pipeline/bknee-schema.test.js
+- **Files modified**: lessons/unified_motor/config-schema.js (validate: Bknee range check; buildIronFeatures: Bknee field; buildMagnetFeatures back-iron: Bknee field; buildWoundFeatures back-iron + C salient teeth: Bknee field)
+- **Tests**: 7/7 passing (node --test tests/pipeline/bknee-schema.test.js)
+- **Acceptance criteria**:
+  - validate accepts finite positive Bknee on any ring; rejects 0/-1.5/NaN/Infinity/"1.6" with "Bknee" error string
+  - buildIronFeatures emits Bknee on every iron feature; null when ring.Bknee absent
+  - buildMagnetFeatures emits Bknee on back-iron feature only; magnet features unchanged (no Bknee property)
+  - buildWoundFeatures emits Bknee on back-iron + C salient teeth; null when ring.Bknee absent
+  - Non-iron features (magnets, conductors) are unchanged
+  - No machine identity introduced
+- **Full suite**: 204/270 passing, 65 failing (all pre-existing Phase 5 stub errors, unchanged count), 1 skipped (pre-existing WFS self-start skip)

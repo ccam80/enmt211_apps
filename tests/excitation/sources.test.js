@@ -107,6 +107,82 @@ test("STEP in mode:none at a dead-sector angle holds voltage, not open", () => {
   assert.deepStrictEqual(cond, { kind: "voltage", V: 10 });
 });
 
+test("CURRENT in mode none imposes a constant current", () => {
+  const circuit = {
+    terminal: { type: "CURRENT", amp: 12 },
+    commutation: { mode: "none" },
+  };
+  for (const t of [0, 0.137, 10]) {
+    assert.deepStrictEqual(
+      evalTerminal(circuit, { t, theta: 0, stepIndex: 0 }),
+      { kind: "current", I: 12 }
+    );
+  }
+});
+
+test("CURRENT under electronic-sine is commutation-phase-independent", () => {
+  const circuit = {
+    terminal: { type: "CURRENT", amp: 12 },
+    commutation: { mode: "electronic-sine", poles: 4 },
+  };
+  for (const theta of [0, 0.5, 2.1]) {
+    assert.deepStrictEqual(
+      evalTerminal(circuit, { t: 0, theta, stepIndex: 0 }),
+      { kind: "current", I: 12 }
+    );
+  }
+});
+
+test("CURRENT under sequencer imposes a constant current", () => {
+  const circuit = {
+    terminal: { type: "CURRENT", amp: 12 },
+    commutation: { mode: "sequencer", stepAngleElec: Math.PI / 2 },
+  };
+  for (const ctx of [{ t: 0, theta: 0, stepIndex: 0 }, { t: 0, theta: 0, stepIndex: 2 }]) {
+    assert.deepStrictEqual(
+      evalTerminal(circuit, ctx),
+      { kind: "current", I: 12 }
+    );
+  }
+});
+
+test("CURRENT under mechanical gates like DC", () => {
+  const circuit = {
+    terminal: { type: "CURRENT", amp: 12 },
+    commutation: { mode: "mechanical", poles: 2, conductionAngle: 2 * Math.PI / 3 },
+  };
+  // theta = π/6: base = (2/2)·π/6 = π/6; sectorGate(π/6, 2π/3): a=π/6 ∈ [0,2π/3) → g=+1
+  assert.deepStrictEqual(
+    evalTerminal(circuit, { t: 0, theta: Math.PI / 6, stepIndex: 0 }),
+    { kind: "current", I: 12 }
+  );
+  // theta = 5π/6: base = 5π/6; sectorGate(5π/6, 2π/3): a=5π/6 ∈ [2π/3,π) → g=0 → open
+  assert.deepStrictEqual(
+    evalTerminal(circuit, { t: 0, theta: 5 * Math.PI / 6, stepIndex: 0 }),
+    { kind: "open" }
+  );
+  // theta = 7π/6: base = 7π/6; sectorGate(7π/6, 2π/3): a=7π/6 ∈ [π, π+2π/3) → g=-1
+  assert.deepStrictEqual(
+    evalTerminal(circuit, { t: 0, theta: 7 * Math.PI / 6, stepIndex: 0 }),
+    { kind: "current", I: -12 }
+  );
+});
+
+test("evalDrive maps a mixed CURRENT + AC circuit set", () => {
+  const circuits = [
+    { terminal: { type: "CURRENT", amp: 12 }, commutation: { mode: "none" } },
+    { terminal: { type: "AC", amp: 1, freq: 50, phaseOffset: 0 }, commutation: { mode: "none" } },
+    { terminal: { type: "AC", amp: 1, freq: 50, phaseOffset: -TWO_PI / 3 }, commutation: { mode: "none" } },
+    { terminal: { type: "AC", amp: 1, freq: 50, phaseOffset: -4 * Math.PI / 3 }, commutation: { mode: "none" } },
+  ];
+  const conds = evalDrive(circuits, { t: 0, theta: 0, stepIndex: 0 });
+  assert.strictEqual(conds[0].kind, "current");
+  assert.strictEqual(conds[1].kind, "voltage");
+  assert.strictEqual(conds[2].kind, "voltage");
+  assert.strictEqual(conds[3].kind, "voltage");
+  assert.strictEqual(conds[0].I, 12);
+});
+
 test("OPEN→open, SHORT→short regardless of mode", () => {
   const modes = ["none", "electronic-sine", "electronic-trap", "sequencer", "mechanical"];
   const ctx = { t: 0.1, theta: 0.5, stepIndex: 1 };

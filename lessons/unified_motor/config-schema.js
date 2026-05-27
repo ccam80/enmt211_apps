@@ -214,6 +214,7 @@
     const spanFraction = ring.spanFraction != null ? ring.spanFraction : 0.5;
     const theta0 = ring.theta0 != null ? ring.theta0 : 0;
 
+    const Bknee = ring.Bknee != null ? ring.Bknee : null;
     for (let t = 0; t < count; t++) {
       const centre = theta0 + t * TWO_PI / count;
       const h = spanFraction * (Math.PI / count);
@@ -223,6 +224,7 @@
         rRange,
         thetaRange: [centre - h, centre + h],
         muR,
+        Bknee,
       });
     }
     return features;
@@ -254,6 +256,7 @@
         rRange: ring.backIronRRange,
         thetaRange: [0, TWO_PI],
         muR,
+        Bknee: ring.Bknee != null ? ring.Bknee : null,
       });
     }
 
@@ -287,6 +290,8 @@
       features.push(Object.assign({}, f, { circuit: f.circuit + circuitBase }));
     }
 
+    const BkneeWound = ring.Bknee != null ? ring.Bknee : null;
+
     // Back-iron feature spanning the full ring rRange
     features.push({
       kind: "iron",
@@ -294,6 +299,7 @@
       rRange: ring.ironRRange != null ? ring.ironRRange : ring.rRange,
       thetaRange: [0, TWO_PI],
       muR,
+      Bknee: BkneeWound,
     });
 
     // Concentrated coil ("C") also emits salient tooth iron features (one per slot)
@@ -309,6 +315,7 @@
           rRange: ring.rRange,
           thetaRange: [centre - h, centre + h],
           muR,
+          Bknee: BkneeWound,
         });
       }
     }
@@ -455,6 +462,11 @@
             }
           }
         }
+        if (ring.Bknee !== undefined) {
+          if (typeof ring.Bknee !== "number" || !isFinite(ring.Bknee) || ring.Bknee <= 0) {
+            errors.push(`rings[${ri}].Bknee must be a finite positive number when present; got ${ring.Bknee}`);
+          }
+        }
         // For wound rings, validate the winding routing
         if (ring.element === "W" || ring.element === "C" || ring.element === "K") {
           try {
@@ -478,7 +490,7 @@
 
     // circuits
     const circuits = config.circuits;
-    const validTerminalTypes = ["AC", "DC", "PULSE", "STEP", "OPEN", "SHORT"];
+    const validTerminalTypes = ["AC", "DC", "PULSE", "STEP", "OPEN", "SHORT", "CURRENT"];
     const validCommModes = ["none", "mechanical", "electronic-trap", "electronic-sine", "sequencer"];
     if (!Array.isArray(circuits)) {
       errors.push("circuits must be an array");
