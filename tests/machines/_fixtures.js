@@ -19,7 +19,10 @@ const P = require("../pipeline/_fixtures.js");
 const LIB        = P.LIB;
 const UnifiedMotor = P.UnifiedMotor;
 const assertClose = P.assertClose;
-const fitCos2    = require("../engine/_fixtures.js").fitCos2;
+// fitCos2 lived in tests/engine/_fixtures.js in a prior project attempt;
+// that whole tests/engine/ directory no longer exists. The function itself
+// lives in tests/_assert.js — import directly to drop the dead indirection.
+const fitCos2    = require("../_assert.js").fitCos2;
 
 // ---------------------------------------------------------------------------
 //  Load all 15 machine fixtures so they register on UnifiedMotor.MACHINES.

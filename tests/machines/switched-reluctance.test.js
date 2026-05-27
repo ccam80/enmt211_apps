@@ -6,7 +6,7 @@ const assert = require("node:assert/strict");
 const {
   build, validate, sweepInductance, crossCheck, runFromRest, LIB,
 } = require("./_fixtures.js");
-const { fitCos2Cos4 } = require("../engine/_fixtures.js");
+const { fitCos2Cos4 } = require("../_assert.js");
 
 const POLES = 4;
 const TIMEOUT = 25000;
