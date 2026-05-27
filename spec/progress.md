@@ -167,3 +167,40 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - A: element edges visible (white ~1px edges at all zoom levels)
   - B: 4 PMSM magnet poles clearly 2-red/2-blue alternating
   - C: mouse-wheel zoom + drag pan working; graded gap layers fully inspectable at high zoom; fit-reset button works
+
+## Task T2.3.1: Rewrite all 15 machine fixtures to industrial-scale topologies
+- **Status**: complete
+- **Agent**: implementer (batch-6 / task_group 2.3.a)
+- **Files modified**:
+  - lessons/unified_motor/machines/pmsm.js — 8p/48s, m=3 q=2, OD~132mm, Nr=50
+  - lessons/unified_motor/machines/bldc.js — 12p/18s fractional-slot, OD~124mm, Nr=48
+  - lessons/unified_motor/machines/brushed-dc-pm.js — 4p/24s rotor+PM stator, OD~50mm, Nr=22
+  - lessons/unified_motor/machines/brushed-dc-wound.js — 4p/24s rotor+wound stator, OD~216mm, Nr=56
+  - lessons/unified_motor/machines/hybrid-stepper.js — 50 rotor teeth/8 stator pole-pairs, 2-slice, OD~80mm, Nr=34
+  - lessons/unified_motor/machines/induction-1ph.js — 4p/36s cap-start, 28 bars, OD~180mm, Nr=50
+  - lessons/unified_motor/machines/induction-3ph.js — 4p/36s, 28 bars, OD~184mm, Nr=50
+  - lessons/unified_motor/machines/pm-stepper.js — 24p canstack, Q=12, OD~56mm, Nr=14
+  - lessons/unified_motor/machines/skew-demo.js — 8p/48s with 4 slices, 1-slot-pitch skew, Nr=50
+  - lessons/unified_motor/machines/switched-reluctance.js — 8s/6r 4-phase SR, OD~180mm, Nr=50
+  - lessons/unified_motor/machines/synchronous-reluctance.js — 4p/36s, 4 I-ring barriers, OD~190mm, Nr=52
+  - lessons/unified_motor/machines/universal.js — 2p/24s hand-tool, OD~64mm, Nr=14
+  - lessons/unified_motor/machines/vr-stepper.js — 8s/6r 3-phase VR, Q=12, OD~72mm, Nr=34
+  - lessons/unified_motor/machines/wound-field-synchronous.js — 8p/36s salient rotor+3ph stator, OD~184mm, Nr=50
+  - scripts/gen-mesh-refs.mjs — elemSize formula corrected to sqrt(annulusArea/Ne)*1.5
+  - tests/mesh/fixtures/pmsm-rotor-gapLayers3.msh — regenerated for new 8p/48s geometry
+  - tests/mesh/fixtures/pmsm-stator-gapLayers3.msh — regenerated for new 8p/48s geometry
+- **Files NOT changed**: lessons/unified_motor/machines/pole-mismatch-demo.js (spec: keep 4p+6t)
+- **Tests**: 41/41 passing
+- **Key fixes applied**:
+  - Nr increased per fixture so air gap contains ≥2 pure-air grid cells (deriveGapBand constraint)
+  - All winding m*p divisors use pole-pairs not pole count
+  - BLDC changed 14p/12s→12p/18s to satisfy Q%(m*p)=0
+  - Induction K-rings: 1ph m=2/p=7/Q=28, 3ph m=4/p=7/Q=28
+  - gmsh elemSize formula corrected; gmsh Ne within 2× of mesher Ne for both bodies
+
+## Task T2.3.2: Visual confirmation — all 15 fixtures render correctly in mesh-dev.html
+- **Status**: complete
+- **Agent**: implementer (batch-6 / task_group 2.3.a)
+- **Files modified**: none (visual-only confirmation task)
+- **Tests**: 41/41 passing
+- **Visual confirmed via Chrome MCP**: all 15 fixtures render with ok=true, nInverted=0, non-empty gapLoop; rotor and stator panes both display correctly structured meshes with visible gap layers

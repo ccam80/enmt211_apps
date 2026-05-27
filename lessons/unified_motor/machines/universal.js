@@ -1,53 +1,57 @@
 (function () {
   "use strict";
 
-  const ROTOR_YOKE     = [0.030, 0.038];
-  const ROTOR_SURFACE  = [0.038, 0.043];
-  const STATOR_YOKE    = [0.051, 0.055];
-  const STATOR_SURFACE = [0.047, 0.051];
+  // Universal motor (AC series), 2 poles, 24 commutator segments
+  // Hand-tool scale, OD ≈ 50 mm
+  // Rotor: 24-slot lap winding, 1 pole-pair, coilPitch=12
+  // Stator: 2-pole wound field on laminated core (W ring)
+  const ROTOR_YOKE_R    = [0.006, 0.012];
+  const ROTOR_SURFACE_R = [0.012, 0.018];
+  const STATOR_BORE_R   = [0.020, 0.028];
+  const STATOR_YOKE_R   = [0.028, 0.032];
 
   const config = {
-    grid: { Nr: 12, Ntheta: 256, rInner: 0.030, rOuter: 0.055, ell: 0.10 },
+    grid: { Nr: 14, Ntheta: 256, rInner: 0.006, rOuter: 0.032, ell: 0.050 },
     poles: 2,
-    mechanical: { J: 1e-4, damping: 1e-5, loadTorque: 0 },
+    mechanical: { J: 1e-5, damping: 3e-6, loadTorque: 0 },
     rings: [
       {
         member: "rotor",
         element: "W",
-        rRange: ROTOR_SURFACE,
-        winding: { standard: { m: 1, p: 2, Q: 8, coilPitch: 4, turns: 30 } },
-        slotRRange: ROTOR_SURFACE,
-        slotFraction: 0.5,
-        ironRRange: ROTOR_YOKE,
+        rRange: ROTOR_SURFACE_R,
+        winding: { standard: { m: 1, p: 1, Q: 24, coilPitch: 12, turns: 20 } },
+        slotRRange: ROTOR_SURFACE_R,
+        slotFraction: 0.55,
+        ironRRange: ROTOR_YOKE_R,
         muR: 1000,
       },
       {
         member: "stator",
         element: "W",
-        rRange: STATOR_SURFACE,
-        winding: { standard: { m: 1, p: 2, Q: 8, coilPitch: 4, turns: 60 } },
-        slotRRange: STATOR_SURFACE,
+        rRange: STATOR_BORE_R,
+        winding: { standard: { m: 1, p: 1, Q: 4, coilPitch: 2, turns: 60 } },
+        slotRRange: STATOR_BORE_R,
         slotFraction: 0.5,
-        ironRRange: STATOR_YOKE,
+        ironRRange: STATOR_YOKE_R,
         muR: 1000,
       },
     ],
     circuits: [
       {
-        terminal: { type: "AC", amp: 12, freq: 50, phaseOffset: 0 },
+        terminal: { type: "AC", amp: 230, freq: 50, phaseOffset: 0 },
         commutation: { mode: "mechanical", poles: 2, conductionAngle: Math.PI },
-        R: 1.0,
+        R: 1.5,
       },
       {
-        terminal: { type: "AC", amp: 12, freq: 50, phaseOffset: 0 },
+        terminal: { type: "AC", amp: 230, freq: 50, phaseOffset: 0 },
         commutation: { mode: "none" },
-        R: 1.0,
+        R: 2.0,
       },
     ],
     stack: { slices: 1, sliceOffsets: [0], fluxSources: [] },
   };
 
   const UM = window.UnifiedMotor || (window.UnifiedMotor = {});
-  (UM.MACHINES || (UM.MACHINES = [])).push({ id: "universal", label: "Universal (AC series)", config });
+  (UM.MACHINES || (UM.MACHINES = [])).push({ id: "universal", label: "Universal 2p/24s (AC series)", config });
   if (!UM.defaultConfig) UM.defaultConfig = config;
 })();

@@ -196,10 +196,6 @@ function buildGeoSimple(body, section, member, gapLayers) {
   const rInner = rBounds[0];
   const rOuter = rBounds[rBounds.length - 1];
 
-  // Match our mesher's angular resolution: use gapLoop length as Ntheta
-  // This targets element count within 2× of our mesher output.
-  const Ntheta = body.gapLoop.length;
-
   // For simplicity, mesh the full annulus as one surface with structured mesh
   // Use 4 arc quadrants (gmsh requires 3 or 4 points per circle via arcs)
   const lines = [];
@@ -214,9 +210,15 @@ function buildGeoSimple(body, section, member, gapLayers) {
   let surfId = 1;
   const emit = (s) => lines.push(s);
 
-  // Mesh size: match our mesher's Ntheta so element count stays within 2×
-  const rMid = (rInner + rOuter) / 2;
-  const elemSize = (2 * Math.PI * rMid) / Ntheta;
+  // Target element size so gmsh element count ≈ our mesher's Ne.
+  // Annulus area / Ne gives target element area; sqrt gives target edge length.
+  // gmsh unstructured quads typically run ~1.3–1.6× denser than structured quads
+  // at the same nominal element size, so we apply a 1.5× scale-up factor so
+  // the gmsh count lands within 2× of our mesher output on both sides.
+  const Ne = body.elems.length / 4;
+  const annulusArea = Math.PI * (rOuter * rOuter - rInner * rInner);
+  const targetElemArea = annulusArea / Ne;
+  const elemSize = Math.sqrt(targetElemArea) * 1.5;
 
   emit(`lc = ${elemSize.toFixed(6)};`);
   emit("");
