@@ -291,3 +291,10 @@ Progress is recorded here by implementation agents. Each completed task appends 
   - tests/mesh/cache.test.js: Added "physics change invalidates cache" test — changing circuits[0].freq from 60 Hz to 1000 Hz causes a cache miss and produces a finer (or equal) mesh.
   - tests/mesh/convergence.test.js: Rewrote "gmsh reference diff" test assertion from "within 2x" to "mesher is at least as fine as reference" (the physics-driven mesher is correctly denser than the old 1-layer gmsh reference). Added "PMSM physics-driven convergence" test — at refine=1 with physics, areaError < 1e-2, coverageError < 1e-2, and coverageError within 2% of refine=2 (physics sizing is sufficient without manual tuning).
   - lessons/unified_motor/mesh-dev.html: Added opts.physics = MotorMesh.physicsFromConfig(m.config) in rebuild() before buildCached call so the dev harness passes physics through.
+
+## Task adhoc: Ntheta cap in buildAngularColumns
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none
+- **Files modified**: lib/motor-mesh.js
+- **Tests**: 61/61 passing

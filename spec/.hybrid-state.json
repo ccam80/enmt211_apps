@@ -151,12 +151,12 @@
           "T2.3.2"
         ]
       ],
-      "spawned": 1,
+      "spawned": 3,
       "completed": 1,
       "verifications_passed": 0,
       "verifications_failed": 0,
       "stops_for_clarification": 0,
-      "dead_implementers": 0,
+      "dead_implementers": 2,
       "dead_verifiers": 0,
       "group_status": {
         "2.3.a": "pending"
@@ -197,6 +197,12 @@
           "timestamp": "2026-05-27T08:09:39.828Z",
           "task_group": "2.3.a",
           "reason": "Phase 2.6 physics-driven mesh sizing approved by user. Spec: spec/phase-2.6-physics-driven-mesh-sizing.md. Treat as continued batch-6 scope; T2.3.2 user-visual ack pending. Prior implementers' work (Phase 2.5 cage routing, mesher correctness fix, LOD viz, fixtures industrial-scale) is correct and must be preserved."
+        },
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-27T09:07:45.642Z",
+          "task_group": "2.3.a",
+          "reason": "Distributed-winding over-meshing surfaced by user. Specific bug: brushed-dc-pm rotor, brushed-dc-wound rotor, universal rotor all get ~147 cells per slot (1920 angular cells / ~13 features). bldc stator gets 26 cells/slot (1440 / 55). Mesher densities are 18-50x inconsistent across fixtures (7.8 on PMSM stator vs 147 on brushed-DC-PM rotor). Root cause: LCM-cap fallback in buildAngularColumns produces unbounded nBandsPerSector*P_body cell count, ignoring any per-feature target. Need explicit cap at ~8 cells per feature (visualization-grade default), scalable via refine."
         }
       ]
     },
@@ -579,5 +585,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T09:03:49.268Z"
+  "last_updated": "2026-05-27T09:47:02.872Z"
 }
