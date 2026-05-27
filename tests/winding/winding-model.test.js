@@ -13,7 +13,7 @@ const TWO_PI = 2 * Math.PI;
 describe("WindingModel surface", () => {
   it("surface exposes only routing functions", () => {
     const actual = new Set(Object.keys(WM));
-    const expected = new Set(["validate", "ampereConductors", "conductorFeatures", "standardWinding"]);
+    const expected = new Set(["validate", "ampereConductors", "conductorFeatures", "standardWinding", "cageRouting"]);
     assert.deepStrictEqual(actual, expected);
   });
 });
@@ -351,10 +351,10 @@ describe("standardWinding", () => {
     assertClose(kw, analytic, 0.01, "winding factor kw");
   });
 
-  it("standardWinding throws on non-divisible Q", () => {
+  it("standardWinding throws on odd p (not a valid pole-count)", () => {
     assert.throws(() => {
       WM.standardWinding({
-        m: 3, p: 4, Q: 23, coilPitch: 6, turns: 1,
+        m: 3, p: 3, Q: 18, coilPitch: 3, turns: 1,
         member: "stator", rRange: [0.045, 0.05],
       });
     }, Error);

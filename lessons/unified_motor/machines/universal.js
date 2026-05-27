@@ -3,8 +3,8 @@
 
   // Universal motor (AC series), 2 poles, 24 commutator segments
   // Hand-tool scale, OD ≈ 50 mm
-  // Rotor: 24-slot lap winding, 1 pole-pair, coilPitch=12
-  // Stator: 2-pole wound field on laminated core (W ring)
+  // Rotor: 24-slot lap winding, p=2 (pole-count), coilPitch=12
+  // Stator: 2-pole wound field on laminated core (W ring), p=2 (pole-count)
   const ROTOR_YOKE_R    = [0.006, 0.012];
   const ROTOR_SURFACE_R = [0.012, 0.018];
   const STATOR_BORE_R   = [0.020, 0.028];
@@ -19,7 +19,7 @@
         member: "rotor",
         element: "W",
         rRange: ROTOR_SURFACE_R,
-        winding: { standard: { m: 1, p: 1, Q: 24, coilPitch: 12, turns: 20 } },
+        winding: { standard: { m: 1, p: 2, Q: 24, coilPitch: 12, turns: 20 } },
         slotRRange: ROTOR_SURFACE_R,
         slotFraction: 0.55,
         ironRRange: ROTOR_YOKE_R,
@@ -29,7 +29,7 @@
         member: "stator",
         element: "W",
         rRange: STATOR_BORE_R,
-        winding: { standard: { m: 1, p: 1, Q: 4, coilPitch: 2, turns: 60 } },
+        winding: { standard: { m: 1, p: 2, Q: 4, coilPitch: 2, turns: 60 } },
         slotRRange: STATOR_BORE_R,
         slotFraction: 0.5,
         ironRRange: STATOR_YOKE_R,

@@ -3,7 +3,7 @@
 
   // PM stepper (can-stack style), 24 poles (12 pole-pairs), Q=12 slots, small frame
   // OD ≈ 42 mm (NEMA 17 / canstack), air gap at ~14 mm radius
-  // m=2 phases, p=6 pole-pairs, Q=12: Q%(m*p)=12%12=0 ✓, coilPitch=1 ≤ Q/p=2 ✓
+  // m=2 phases, p=12 (pole-count), Q=12, coilPitch=1, SPP=Q/(m*p)=0.5
   const ROTOR_YOKE_R    = [0.005, 0.010];
   const ROTOR_SURFACE_R = [0.010, 0.014];
   const STATOR_BORE_R   = [0.016, 0.024];
@@ -28,7 +28,7 @@
         member: "stator",
         element: "C",
         rRange: STATOR_BORE_R,
-        winding: { standard: { m: 2, p: 6, Q: 12, coilPitch: 1, turns: 100 } },
+        winding: { standard: { m: 2, p: 12, Q: 12, coilPitch: 1, turns: 100 } },
         slotRRange: STATOR_BORE_R,
         slotFraction: 0.5,
         ironRRange: STATOR_YOKE_R,

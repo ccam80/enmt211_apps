@@ -5,8 +5,8 @@
   // Salient rotor with 8 separately-excited field coils, small alternator
   // OD ≈ 184 mm, air gap 3.0 mm at 54 mm radius
   // Nr=50 ensures at least 2 grid cells across the 3 mm air gap
-  // Stator: m=3, p=4 pole-pairs, Q=36: Q%(m*p)=36%12=0 ✓, coilPitch=4
-  // Rotor: m=1, p=4 pole-pairs, Q=8 salient poles: Q%(m*p)=8%4=0 ✓, coilPitch=1
+  // Stator: m=3, p=8 (pole-count), Q=36, coilPitch=4, SPP=36/(3*8)=1.5
+  // Rotor:  m=1, p=8 (pole-count), Q=8,  coilPitch=1, SPP=8/(1*8)=1
   const ROTOR_YOKE_R    = [0.022, 0.040];
   const ROTOR_POLES_R   = [0.040, 0.054];
   const STATOR_BORE_R   = [0.057, 0.074];
@@ -21,7 +21,7 @@
         member: "rotor",
         element: "W",
         rRange: ROTOR_POLES_R,
-        winding: { standard: { m: 1, p: 4, Q: 8, coilPitch: 1, turns: 80 } },
+        winding: { standard: { m: 1, p: 8, Q: 8, coilPitch: 1, turns: 80 } },
         slotRRange: ROTOR_POLES_R,
         slotFraction: 0.5,
         ironRRange: ROTOR_YOKE_R,
@@ -31,7 +31,7 @@
         member: "stator",
         element: "W",
         rRange: STATOR_BORE_R,
-        winding: { standard: { m: 3, p: 4, Q: 36, coilPitch: 4, turns: 30 } },
+        winding: { standard: { m: 3, p: 8, Q: 36, coilPitch: 4, turns: 30 } },
         slotRRange: STATOR_BORE_R,
         slotFraction: 0.5,
         ironRRange: STATOR_YOKE_R,

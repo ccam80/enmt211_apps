@@ -16,9 +16,18 @@
     return Number.isInteger(v) && v >= 2 && v % 2 === 0;
   }
 
-  // Build a standard routing object from { standard:{m,p,Q,coilPitch,turns} }
-  // or return the explicit routing object directly.
+  // Build a routing object from a ring descriptor.
+  // For element "K" rings: uses ring.cage = { bars } to build a cage routing.
+  // For element "W" or "C" rings: uses ring.winding.standard or explicit routing.
   function resolveWinding(ring) {
+    if (ring.element === "K") {
+      if (!ring.cage || !Number.isInteger(ring.cage.bars)) {
+        throw new Error(
+          `resolveWinding: element "K" ring requires cage.bars (integer); got ${JSON.stringify(ring.cage)}`
+        );
+      }
+      return LIB.WindingModel.cageRouting({ bars: ring.cage.bars });
+    }
     const w = ring.winding;
     if (!w) return null;
     if (w.standard) {

@@ -3,7 +3,7 @@
 
   // BLDC: 12-pole 18-slot fractional-slot concentrated winding (SPP=0.5)
   // High-torque inrunner, OD=124 mm (servo class), air gap 2.0 mm at 38 mm radius
-  // 12p/18s is a canonical high-pole-count BLDC topology (fractional-slot, m=3, p=6)
+  // 12p/18s: m=3 phases, p=12 (pole-count), Q=18, coilPitch=1, SPP=Q/(m*p)=0.5
   // Nr=48 ensures at least 2 grid cells across the 2 mm air gap
   const ROTOR_YOKE_R    = [0.018, 0.030];
   const ROTOR_SURFACE_R = [0.030, 0.038];
@@ -29,7 +29,7 @@
         member: "stator",
         element: "C",
         rRange: STATOR_BORE_R,
-        winding: { standard: { m: 3, p: 6, Q: 18, coilPitch: 1, turns: 30 } },
+        winding: { standard: { m: 3, p: 12, Q: 18, coilPitch: 1, turns: 30 } },
         slotRRange: STATOR_BORE_R,
         slotFraction: 0.55,
         ironRRange: STATOR_YOKE_R,

@@ -3,7 +3,7 @@
 
   // 4-pole 36-slot three-phase induction motor, m=3 q=3, 28 rotor bars
   // Small industrial, OD ≈ 184 mm, air gap 3.0 mm at 54 mm radius
-  // Rotor: 28 squirrel-cage bars (K ring, m=4 p=7 Q=28: Q%(m*p)=0)
+  // Rotor: 28 squirrel-cage bars
   // Nr=50 ensures at least 2 grid cells across the 3 mm air gap
   const ROTOR_YOKE_R    = [0.022, 0.042];
   const ROTOR_BAR_R     = [0.042, 0.054];
@@ -19,7 +19,7 @@
         member: "rotor",
         element: "K",
         rRange: ROTOR_BAR_R,
-        winding: { standard: { m: 4, p: 7, Q: 28, coilPitch: 1, turns: 1 } },
+        cage: { bars: 28 },
         slotRRange: ROTOR_BAR_R,
         slotFraction: 0.45,
         ironRRange: ROTOR_YOKE_R,
@@ -37,6 +37,30 @@
       },
     ],
     circuits: [
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
+      { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
       { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
       { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },
       { terminal: { type: "SHORT" }, commutation: { mode: "none" }, R: 0.03 },

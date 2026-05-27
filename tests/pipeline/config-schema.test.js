@@ -15,6 +15,10 @@ const {
   skewN2Config,
 } = require("./_fixtures.js");
 
+// Load the induction-3ph machine fixture so its config is available via
+// UnifiedMotor.MACHINES for the cage-routing nCircuits assertion.
+require("../../lessons/unified_motor/machines/induction-3ph.js");
+
 const CS = UnifiedMotor.ConfigSchema;
 
 describe("config-schema", function () {
@@ -142,6 +146,30 @@ describe("config-schema", function () {
     const result = CS.validate(cfg);
     assert.strictEqual(result.ok, false, "validate must return ok:false for mismatched circuit count");
     assert.ok(Array.isArray(result.errors) && result.errors.length > 0, "validate must return non-empty errors array");
+  });
+
+  // -------------------------------------------------------------------------
+  it("induction-3ph cage routing produces nCircuits = 28 + 3 stator phases", function () {
+    // After the cage fix, the K-ring rotor uses cageRouting({ bars:28 })
+    // producing 28 independent bar-loop circuits. The stator W-ring
+    // (m=3, Q=36) produces 3 phase circuits. Total = 31.
+    const machines = UnifiedMotor.MACHINES || [];
+    const entry = machines.find(function (m) { return m.id === "induction-3ph"; });
+    assert.ok(entry, "induction-3ph machine must be registered in UnifiedMotor.MACHINES");
+
+    const expanded = CS.expand(entry.config);
+
+    // 28 cage bars + 3 stator phases
+    assert.strictEqual(
+      expanded.nCircuits,
+      31,
+      "induction-3ph expanded.nCircuits must be 31 (28 cage bars + 3 stator phases)"
+    );
+    assert.strictEqual(
+      expanded.circuits.length,
+      31,
+      "induction-3ph circuits array must have 31 entries"
+    );
   });
 
   // -------------------------------------------------------------------------

@@ -179,6 +179,12 @@
           "timestamp": "2026-05-27T02:47:01.401Z",
           "task_group": "2.3.a",
           "reason": "User-visual ack cannot pass on the existing 15 educational-scale fixtures (audit found pole-4/Q-12/teeth-4-6 monotony, SR 4/4 produces zero torque, hybrid stepper has 5 teeth instead of 50, etc.). User requires industrial-scale realistic fixtures (PMSM 8p/48s, hybrid stepper 50 teeth, SR 8/6, induction 4p/36s/28bars, etc., per coordinator's audit table) plus per-class radii variation. Prior implementer's viz work (visible edges, magnet pole differentiation, zoom/pan, difference-mode stroke) is correct and must be preserved."
+        },
+        {
+          "script": "reopen-implementer-slot.sh",
+          "timestamp": "2026-05-27T03:40:38.315Z",
+          "task_group": "2.3.a",
+          "reason": "Phase 2.5 winding-model cleanup approved by user (2026-05-27). Industrial-scale fixtures from prior round are correct on geometry but sit on the broken cage-as-winding + over-strict validator + p-semantic ambiguity. Spec: spec/phase-2.5-winding-model-cleanup.md. Treat as expanded batch-6 scope; T2.3.2 user-visual ack will only be possible after this lands."
         }
       ]
     },
@@ -505,5 +511,5 @@
       "user_acks": {}
     }
   ],
-  "last_updated": "2026-05-27T03:06:37.549Z"
+  "last_updated": "2026-05-27T03:54:34.400Z"
 }

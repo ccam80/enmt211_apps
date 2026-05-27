@@ -31,17 +31,24 @@ ordering) + ~66 ms (numeric refactor) + ~3 ms (solve), residual ~1e-10.
 task tables are removed.** What that work produced splits cleanly into two sets
 (`fea-engine-rebuild.md` §11.2):
 
-- **Preserved unchanged (the seam is `MotorSlice`):** `winding-model.js`,
+- **Preserved unchanged (the seam is `MotorSlice`):**
   `excitation.js`, `motor-circuit.js`, `motor-run.js`, the four editors
   (`cross-section-render.js`, `winding-editor.js`, `schematic-panel.js`,
-  `matrix-panel.js`), the 15 `machines/*.js` fixtures, and the Phase-0 frozen
-  EM set. These consume only the slice API and do **not** change. (The four
-  editors are extended for live geometry control in Phase 6, but their
-  physics-facing contracts are stable.) **Two near-preserved files** carry
-  small, byte-localized edits and are noted in their owning phases:
-  `lessons/unified_motor/config-schema.js` (Phase 3 — adds the `"CURRENT"`
-  terminal type to `validTerminalTypes` and the optional per-iron `ring.Bknee`
-  passthrough that Phase 5's Brauer fit consumes) and `lib/motor-stack.js`
+  `matrix-panel.js`), and the Phase-0 frozen EM set. These consume only the
+  slice API and do **not** change. (The four editors are extended for live
+  geometry control in Phase 6, but their physics-facing contracts are stable.)
+  **Three files were unfrozen in Phase 2.5** (`spec/phase-2.5-winding-model-cleanup.md`)
+  after the industrial-scale fixture rewrite in batch-6 surfaced architectural
+  defects hidden by trivial geometries: `lib/winding-model.js` (over-strict
+  `Q % (m·p)` validator, no cage routing), `lessons/unified_motor/config-schema.js`
+  (`K` element wrongly bucketed with `W`), and the 15 `lessons/unified_motor/machines/*.js`
+  fixtures (mixed `p` semantics, cage forced through standardWinding). Phase 8's
+  `git diff motor-baseline` invariant now allows these three sets to differ.
+  **Two near-preserved files** carry small, byte-localized edits and are noted
+  in their owning phases: `lessons/unified_motor/config-schema.js` (Phase 3 —
+  adds the `"CURRENT"` terminal type to `validTerminalTypes` and the optional
+  per-iron `ring.Bknee` passthrough that Phase 5's Brauer fit consumes) and
+  `lib/motor-stack.js`
   (Phase 5 — `sliceGrid(k) → sliceMesh(k)` per §10, plus the `opts.poles =
   expanded.poles` passthrough to each slice; every other line byte-identical
   to baseline).
