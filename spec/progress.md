@@ -458,3 +458,36 @@ The prior CLARIFICATION NEEDED entry (see recovery events) documented the harmon
   - Convergence: currents=[5] passes the §11.3 1% bar (2.05% delta at refine 1→√2); currents=[0] (pure-cogging point convergence) deferred to Phase 7 validation suite per 2026-05-28 spec amendment
   - cogging amplitude convergence passes 2% bar across all test angles
   - All Wave-5.1 tests (assembly, newton) still 18/18 passing
+
+## Task T5.3.1: Staggered extractCoeffs + motor-stack reconnection + perf diagnostic — CLARIFICATION NEEDED
+- **Agent**: implementer (batch-12 / task_group 5.3.a)
+- **Blocker**: §11.4 embed-vs-Schur escalation gate tripped — measured embed per-θ-step exceeds 16 ms on hybrid-stepper.
+- **What the spec says**: phase-5-fea-slice.md §"Wave 5.3 ## Acceptance criteria" / lines 930-937:
+  > **§11.4 escalation (manual, mandatory):** if `perf.test.js`'s logged `meanMs` or `maxMs` **exceeds 16 ms**, the implementer takes a **Clarification Exit** and escalates to the user — quoting the measured value, the fixture, and the §11.4 criterion — rather than silently building the §9-G5 Schur path or silently ignoring the threshold. The G5 build is a scope addition the user authorizes; it is **not** part of Phase 5 acceptance.
+- **Measurement (this is the escalation evidence)**:
+  - Fixture: `hybrid-stepper` (full-annulus zero-symmetry, the §11.4 stress case).
+  - Build: `LIB.MotorSlice.create(section, { poles, saturation: { enabled: true, BkneeDefault: 1.6 } })` (no `mesh.refine` reduction, realistic DOF).
+  - Procedure: one warm-up `solve(0, currents=ones)`, then 5 timed `solve(i·π/180, currents)` calls for i=1..5; per-step time = wall-clock between `process.hrtime.bigint()` snapshots converted ns→ms.
+  - **Result**: `[perf] embed per-θ-step (hybrid-stepper, full annulus, full Newton): mean=207.113ms max=241.490ms (§11.4 escalation gate: 16ms)`
+  - Both `meanMs` (207 ms) and `maxMs` (241 ms) exceed the 16 ms gate by roughly 13×–15×.
+  - Catastrophic-regression sanity guards in `perf.test.js` (`< 500ms`) still pass, so the test itself is GREEN; the gate is purely the manual escalation criterion. The test file is committed as specified — it logs and records the diagnostic; it does not assert `< 16 ms`.
+- **Why it is ambiguous (decision point for user)**:
+  1. **Authorize Schur condensation (§9-G5)?** Building the §9-G5 interior Schur condensation per the locked decision D1 is a scope addition the user must green-light; the spec explicitly forbids silently building it. Authorising this is the canonical "lower the wall-clock" response.
+  2. **Or accept the measured embed wall-clock as Phase-5-final?** The text states "Phase 5 acceptance closes once the diagnostic is logged and the rest of the suite is green" — read literally, this means the gate is documentation/escalation-only and Phase 5 can close at the current performance once the diagnostic is logged. If the user reads it this way, the implementer should proceed to finish the rest of Wave 5.3 (pipeline + machine tests) without building Schur.
+  3. **Or relax the realistic-DOF setting?** A third option is to drop the spec's "no `refine` reduction" wording and ship the perf measurement at a coarser mesh — but that ducks the §11.4 stress-case intent and is not authorized by the spec.
+- **What you checked before stopping**:
+  - Read all three Wave-5.3 paragraphs in `spec/phase-5-fea-slice.md` (lines 671–942), the D1 locked decision (lines 38–44), and the §11.4 escalation block.
+  - Confirmed the hybrid-stepper fixture loads, the slice constructs successfully, and the Newton path converges for the 5 timed steps (the per-step time is real solve wall-clock, not a divergence retry loop).
+  - Did NOT build §9-G5 Schur path. Did NOT silently relax the test or the realistic-DOF setting.
+- **What is already complete (left in working tree for the user / next implementer)**:
+  - `lib/motor-slice.js`: `extractCoeffs(thetaR, opts2)` added per spec — staggered 3-angle probe via `solverLin.setValues` + `factorize` per angle, magnetization-only solve + m unit-current solves per angle, central-difference `dL/dθ` + `dλ_pm/dθ`, default `derivStep = Math.PI/180`. Exposed on returned slice object as `slice.extractCoeffs`.
+  - `lib/motor-stack.js`: Reconnected from stub to full implementation per spec D2 + D8. `MotorSlice.create(s.section, Object.assign({}, opts, { poles: expanded.poles }))` (D8), `sliceMesh(k) → { rotor, stator }` replaces `sliceGrid(k)` (D2). Adds `.slices: MotorSlice[]` to returned object per D2 elevation.
+  - `tests/pipeline/_fixtures.js`: Restored the FEA module requires (`motor-mesh`/`motor-mesh-view`/`airgap-harmonic`/`fea-solver`/`motor-slice`), added `initSolver()` + `feaOpts(extra)` helpers, exports `CS = UnifiedMotor.ConfigSchema`, removed `tinySection` (grid-only scaffold).
+  - `tests/slice/extract.test.js`: 8 tests, all PASS — shape + finiteness, reciprocity (L symmetric), L_self > 0, magnet-free → lambdaPm strictly 0 (zero-not-skip), PM section lambdaPm changes with θ, dLdth matches central-difference of L from independent recomputation, exact 3 factorize / 3·(m+1) solve call counts, `derivStep` override honored via `gapStampLog` diagnostic.
+  - `tests/slice/perf.test.js`: 1 test, PASSES (timing captured, 5/5 finite). Logs the §11.4 diagnostic line.
+- **What is NOT yet done (deferred to user decision / next implementer)**:
+  - `tests/pipeline/motor-stack.test.js`: NOT WRITTEN. The full-rewrite per spec ("nCircuits mismatch throws", "N=1 stack equals its single slice", "N=2 zero-offset sums torque and flux", "non-zero slice offset produces a different torque", "perSliceField length equals nSlices", "coenergyTorque returns finite parts", "extractCoeffs returns correct-length arrays all finite", "module loads under require with no DOM access", "clearWarmStart resets all slices without error", `sliceMesh returns rotor and stator BodyMeshes for each slice`) was not started.
+  - `tests/pipeline/agnostic-pipeline.test.js`: NOT WRITTEN. The surgical edit per spec (replace `{ceiling:…}` with `feaOpts({saturation:…})`, step count 600 → 200, theta bar 1e-3 → 1e-4, unchanged-files machine-name scan) was not started.
+  - `tests/machines/*` tolerance/step loosening per spec: NOT STARTED. With `lib/motor-stack.js` now reconnected, the 65 pre-existing stub failures will now exercise the FEA path for the first time; whether they pass with current tolerances or need the Wave-5.3 loosening is unmeasured.
+  - Full-suite test run with all reconnections in place: NOT RUN. Slice tests (34) + extract (8) + perf (1) = 43 confirmed GREEN locally; the rest of the suite (machines, pipeline) is unmeasured against the reconnected stack.
+- **Exact ack command for the user (if/when they authorize G5 build OR explicit "ship at measured perf, finish remaining tests"):** none — this is a §11.4 measurement-gated decision, not a user-required ack task. The user's response should be (a) a spec amendment authorizing G5 build, OR (b) a spec amendment relaxing the §11.4 gate to documentation-only, OR (c) confirmation that the literal text ("Phase 5 acceptance closes once the diagnostic is logged and the rest of the suite is green") IS the gate-relaxation reading. Whichever option, a fresh implementer can then close the remaining Wave-5.3 work.
