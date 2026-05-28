@@ -96,9 +96,13 @@ BodyMesh {
   normalized. Pole sign and slice sign (from `config-schema` `fluxSources`) are
   carried entirely by `magDir`'s direction (a 180° flip), so `mrMag` stays
   positive.
-- A conductor element's source is `(srcId = feature.circuit, turns = feature.turns)`;
-  the signed `turns` is the per-element ampere-conductor count Phase 5 converts to
-  a turns-density. `srcId = -1` and `turns = 0` for non-conductor elements.
+- A conductor element's source is `(srcId = feature.circuit, turns = feature.turns · area_e / A_feature)`
+  where `area_e` is the element's area and `A_feature = Σ_{e' : srcId[e'] = srcId[e]} area_{e'}`
+  is the total cross-sectional area of the feature. This makes `turns[e]` the
+  area-weighted share of the feature's ampere-conductor count, so Phase 5's bridge
+  `Jz_e = current · turns[e] / area_e = current · feature.turns / A_feature` is
+  uniform across the feature and mesh-invariant. `srcId = -1` and `turns = 0` for
+  non-conductor elements.
 
 ## Collar / gap-circle geometry (§3.3, §9-G0, §11.4)
 
@@ -540,3 +544,46 @@ part of the topology `signature` (it changes `N_gap`).
 - Field/torque convergence and any physics acceptance criterion (Phase 7).
 - Promotion of `motor-mesh-view.js` to the production cross-section render and
   the live machine picker / geometry sliders (Phase 6).
+
+## Amendments (2026-05-28) — area-weighted `turns[e]` semantic
+
+The original `BodyMesh` contract specified `turns[e] = feature.turns` —
+i.e. the full feature `turns` value replicated into every element of a
+conductor feature. Combined with Phase 5's bridge formula
+`Jz_e = current · turns[e] / area_e`, this made the total ampere-turns
+through a slot cross-section equal `K · N · I`, where `K` is the number
+of mesh elements covering the feature and `N = feature.turns`. The total
+ampere-turns therefore scaled linearly with mesh refinement: doubling the
+mesh density doubled the effective excitation, and torque under load was
+non-convergent under mesh refinement (the symptom that surfaced T5.2.1's
+convergence failure on `pmConfig` with `currents = [5]`).
+
+The fix, settled with the author: `turns[e]` is the area-weighted share
+of the feature's ampere-conductor count,
+`turns[e] = feature.turns · area_e / A_feature`, with
+`A_feature = Σ area_{e'}` over all elements that share `srcId[e]`. Then
+`Jz_e = current · turns[e] / area_e = current · feature.turns / A_feature`
+is uniform across the feature and independent of how many mesh elements
+cover it. Total ampere-turns through the slot is
+`∫ Jz dA = current · feature.turns`, the physical N·I, mesh-invariant.
+
+The physical justification is the standard low-frequency magnetostatic
+winding model: at 60 Hz the copper skin depth (~8 mm) is several times
+larger than any slot dimension in a small machine, so the current density
+`Jz` is uniform across the slot cross-section. Dedicated FEA codes
+(Maxwell, FEMM, etc.) all use uniform `Jz` for winding sources for this
+reason. The cage-rotor "each-bar-its-own-feature" path is unaffected:
+each bar is a single feature with its own `srcId`, so the area-weighted
+share still gives uniform `Jz` across the bar.
+
+Implementation note: Phase 5's flux-linkage extraction
+`λ_k = ell · Σ_{e : srcId[e]=k} A_avg(e) · turns[e]` is also correct under
+the new semantic — it becomes `ell · feature.turns · (∫ A dA / A_feature)`,
+the area-averaged `A` times the feature turn count, which is the physical
+flux linkage per turn integrated over the conductor cross-section.
+
+This amendment does not change the per-element-magnet `magDir` semantic
+(magnets remain per-element unit-direction vectors at element centroids,
+with magnitude in the material entry) and does not change the `srcId` or
+`materials` interpretation. Only the conductor `turns[e]` value is
+redefined.

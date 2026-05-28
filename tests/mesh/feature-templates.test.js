@@ -598,7 +598,7 @@ describe("M alternating magnetization", () => {
 });
 
 describe("W conductors carry circuit and turns", () => {
-  it("every conductor element has srcId >= 0 and turns matching originating feature", () => {
+  it("every conductor element has srcId >= 0 and turns sum per srcId equals feature.turns", () => {
     const nSlots = 4;
     const section = wSection(nSlots);
     const { stator } = MotorMesh.build(section, { gapLayers: 2, physics: syntheticPhysics() });
@@ -620,24 +620,69 @@ describe("W conductors carry circuit and turns", () => {
     }
     assert.ok(conductorCount > 0, "should have conductor elements");
 
-    // Each conductor element's turns should match the originating feature
+    // Per the 2026-05-28 Phase-2 amendment, turns[e] is the area-weighted share:
+    // turns[e] = feature.turns * area_e / A_feature, where A_feature is the
+    // total area of elements sharing the same srcId. Therefore Σ_{e : srcId[e]=k}
+    // turns[e] == feature.turns (when all features sharing circuit k have the
+    // same feature.turns value, which is the case in this fixture).
+    const turnsSumPerSrc = new Map();
+    const areaSumPerSrc  = new Map();
     for (let e = 0; e < Ne; e++) {
-      const mat = stator.materials[stator.matId[e]];
-      if (mat.kind !== "conductor") continue;
-
-      const { cx, cy } = elementCentroid(stator, e);
-      const r = Math.hypot(cx, cy);
-      const theta = Math.atan2(cy, cx);
-
-      // Find matching conductor feature
-      let matchFeat = null;
-      for (const feat of conductorFeatures) {
-        if (inFeatureFootprint(r, theta, feat)) { matchFeat = feat; break; }
+      const sid = stator.srcId[e];
+      if (sid < 0) continue;
+      const n0 = stator.elems[4*e], n1 = stator.elems[4*e+1];
+      const n2 = stator.elems[4*e+2], n3 = stator.elems[4*e+3];
+      const x0=stator.nodes[2*n0],y0=stator.nodes[2*n0+1];
+      const x1=stator.nodes[2*n1],y1=stator.nodes[2*n1+1];
+      const x2=stator.nodes[2*n2],y2=stator.nodes[2*n2+1];
+      let a;
+      if (n3 === -1) {
+        a = 0.5 * Math.abs((x1-x0)*(y2-y0) - (x2-x0)*(y1-y0));
+      } else {
+        const x3=stator.nodes[2*n3],y3=stator.nodes[2*n3+1];
+        a = 0.5 * Math.abs((x0*y1-x1*y0)+(x1*y2-x2*y1)+(x2*y3-x3*y2)+(x3*y0-x0*y3));
       }
+      turnsSumPerSrc.set(sid, (turnsSumPerSrc.get(sid) || 0) + stator.turns[e]);
+      areaSumPerSrc.set(sid,  (areaSumPerSrc.get(sid)  || 0) + a);
+    }
 
-      if (matchFeat !== null) {
-        assert.strictEqual(stator.turns[e], matchFeat.turns,
-          `Conductor element ${e}: turns ${stator.turns[e]} should be ${matchFeat.turns}`);
+    // For each circuit, expected total turns is the matching feature.turns.
+    // (In this fixture each circuit has one feature, but the assertion is
+    // written to handle the general case where multiple same-turns features
+    // share a circuit.)
+    for (const [sid, turnsSum] of turnsSumPerSrc) {
+      // Find any feature with this circuit
+      const feat = conductorFeatures.find(f => f.circuit === sid);
+      assert.ok(feat !== undefined,
+        `srcId ${sid} has no matching conductor feature in section`);
+      assert.ok(Math.abs(turnsSum - feat.turns) < 1e-9 * Math.abs(feat.turns + 1),
+        `srcId ${sid}: Σ turns[e] = ${turnsSum} should equal feature.turns = ${feat.turns} ` +
+        `(area-weighted share sums to feature turns)`);
+    }
+
+    // Additionally: turns[e] / area_e must be the same constant across all
+    // elements sharing one srcId (uniform Jz density).
+    for (const [sid, Atot] of areaSumPerSrc) {
+      const feat = conductorFeatures.find(f => f.circuit === sid);
+      const expectedDensity = feat.turns / Atot;
+      for (let e = 0; e < Ne; e++) {
+        if (stator.srcId[e] !== sid) continue;
+        const n0 = stator.elems[4*e], n1 = stator.elems[4*e+1];
+        const n2 = stator.elems[4*e+2], n3 = stator.elems[4*e+3];
+        const x0=stator.nodes[2*n0],y0=stator.nodes[2*n0+1];
+        const x1=stator.nodes[2*n1],y1=stator.nodes[2*n1+1];
+        const x2=stator.nodes[2*n2],y2=stator.nodes[2*n2+1];
+        let a;
+        if (n3 === -1) {
+          a = 0.5 * Math.abs((x1-x0)*(y2-y0) - (x2-x0)*(y1-y0));
+        } else {
+          const x3=stator.nodes[2*n3],y3=stator.nodes[2*n3+1];
+          a = 0.5 * Math.abs((x0*y1-x1*y0)+(x1*y2-x2*y1)+(x2*y3-x3*y2)+(x3*y0-x0*y3));
+        }
+        const density = stator.turns[e] / a;
+        assert.ok(Math.abs(density - expectedDensity) < 1e-9 * (Math.abs(expectedDensity) + 1),
+          `srcId ${sid}, element ${e}: turns/area = ${density} should be ` +
+          `feature.turns/A_feature = ${expectedDensity} (uniform density)`);
       }
     }
 
