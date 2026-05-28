@@ -1324,3 +1324,63 @@ to log the §11.4 number on every run.
   before and after the five fixes (275 / 65 / 1, unchanged from
   baseline). The 65 failing machine tests remain the pre-existing
   FeaSolver init-order issue documented in `spec/progress.md`.
+
+## Amendments (2026-05-29 #2) — §9-G5 Schur condensation authorized for the linear-material extract path
+
+During the inline Wave 5.4 perf sessions (commits `00c8861`, `b1f5704`),
+`extractCoeffs`' linear-material probe path was implemented via the §9-G5
+interior Schur condensation (`evaluateAt → _ensureLinearSchurFactorAt →
+linearSchurPrepare / linearSchurSolve`: a create-time-factored
+Lagrange-augmented `K_b'` plus a per-angle dense Cholesky on `−S(φ)`), not
+via the D1 **embed** mechanism (one reused `solverLin` `FeaSolver`
+instance, `setValues` + `factorize` per probe angle). The wave-verifier
+correctly flagged this as a divergence from locked decision **D1** ("the
+§9-G5 interior Schur condensation is **not** built"), and the fix
+implementer correctly took a Clarification Exit rather than renaming test
+counters to mask the unauthorized mechanism. The user reviewed the
+model/math/error analysis and **authorizes §9-G5 for the extract path**.
+
+**D1 amendment.** The clause "The §9-G5 interior Schur condensation is
+**not** built" is amended: §9-G5 is now an **authorized** mechanism **for
+the linear-material `extractCoeffs` probe path**. The saturated
+`slice.solve` Newton path continues to use the embed `solver` instance
+unchanged. The §11.4 perf gate is unaffected — it was already resolved by
+the five 2026-05-29 correctness fixes (mean 20.9 ms), independent of this
+authorization; G5 here is the already-shipped extract-path mechanism being
+ratified, not a new perf remediation.
+
+**§873/§888 test-assertion amendment.** Because `extractCoeffs` reuses the
+Schur factorization rather than `solverLin`:
+
+- `tests/slice/extract.test.js` `"linear FeaSolver instance handles all
+  three probe angles"` (§873): the assertions `factorize` called exactly 3
+  times and `solve` called `3·(m+1)` times are restated against the Schur
+  counters — assert `slice.__internals.schurPrepCount === 3` (one
+  `linearSchurPrepare` per probe angle) and
+  `slice.__internals.schurSolveCount === 3·(m+1)` (m unit-current probes +
+  1 magnetization probe per angle). The "same instance was used (no second
+  `LIB.FeaSolver.create` during extract)" intent is preserved: assert the
+  create-time Schur factor is reused (no per-angle re-factorization of
+  `K_b'`). The test name may reflect the Schur path.
+- `"derivStep override is honored at the unit level"` (§888): instrument
+  the Schur prepare counter (`schurPrepCount`) in place of
+  `solverLin.factorize`; assert it is `3`. The `gapStampLog` angle
+  assertions are mechanism-independent and stand as written, EXCEPT the
+  default-step expectation is governed by the 2026-05-27 derivStep
+  amendment below.
+
+**The 2026-05-27 `derivStep` amendment (lines ~996-1024) still stands and
+remains UNIMPLEMENTED — implement it in this same pass:**
+
+- default `derivStep = Math.PI / (poles · 1e5)` (the old `Math.PI/180`
+  default is removed);
+- override validated within `[1e-7, π/(10·poles)]`, throwing out-of-range;
+- `extract.test.js` override-validation bounds test (both lower and upper);
+- `extract.test.js` round-rotor `dL/dθ = 0` within `1e-12` acceptance test;
+- consequently the §890 no-override `gapStampLog` expectation becomes
+  `[0.3 − Math.PI/(poles·1e5), 0.3, 0.3 + Math.PI/(poles·1e5)]`, not the
+  old `Math.PI/180` form.
+
+`lib/motor-stack.js` stays byte-identical over the frozen set (D2 rename
+only); this amendment touches `lib/motor-slice.js` `extractCoeffs` and
+`tests/slice/extract.test.js` only.
