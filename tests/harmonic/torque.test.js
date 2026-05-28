@@ -92,37 +92,26 @@ describe("harmonic torque matches the meshed Arkkio integral", function () {
 describe("torque is radius-independent in the oracle", function () {
   it("Arkkio integral at inner vs outer integration radius agrees within 2%", function () {
     // Validate the oracle's own radius-independence by integrating the
-    // Maxwell stress at two different mid-annulus radii and checking the
-    // two values agree within the 2% cross-method bar (the integrand
-    // (1/μ0)·r²·B_r·B_θ for a source-free annular Laplace field is exactly
-    // r-independent in the continuum, so finite-discretisation oracle
-    // estimates at different radii should agree to discretisation order).
+    // Maxwell-stress on the inner integration radius and the outer
+    // integration radius for the same boundary data, then asserting the
+    // two values agree within the 2% cross-method bar.
     //
-    // We perturb the gap by ±10% on each side and run two oracle solves
-    // (each with its own mid-radius integration); both should report
-    // essentially the same torque for the same boundary data.
+    // For a source-free Laplace field on the annulus the Arkkio integrand
+    // (1/μ0)·r²·B_r·B_θ is exactly r-independent in the continuum, so any
+    // finite-discretisation oracle estimate at two distinct radii must
+    // also agree to leading discretisation order.
+    //
+    // nTheta=128 keeps the (h_θ)² ≈ (2π/128)² ≈ 2.4×10⁻³ discretisation
+    // error of the angular central-difference well under the 2% bar even
+    // at the inner/outer radii where the radial-stencil bias is largest
+    // (2026-05-27 amendment authorizes nTheta ∈ {64,128} for this case).
 
-    const NTH = 64;
-    const NRD = 16;  // extra radial resolution for the radius sweep
+    const NTH = 128;
+    const NRD = 16;
 
-    // Oracle 1: integration mid-radius r_mid1 = (r1+r2)/2 with r1=R_MR, r2=R_MS
-    const oracle1 = annulusOracle({
+    const oracle = annulusOracle({
       rIn: R_MR, rOut: R_MS,
       nTheta: NTH, nRad: NRD,
-      ell: ELL, mu0: MU0,
-    });
-
-    // Oracle 2: same gap radii but with a different nRad mesh so the
-    // mid-radius integration ring lands at a different relative location.
-    // (mid-radius is at frac=0.5 across the radial layers; with nRad=16
-    // it lands exactly on ring 8; with nRad=18 it lands at frac 9/18 = 0.5
-    // also — but the absolute radial discretisation differs so the
-    // interpolated B_r and B_θ at the same r_mid differ to discretisation
-    // order. This validates the oracle's torque is stable across mesh
-    // refinement, which is the same as radius-independence under refinement.)
-    const oracle2 = annulusOracle({
-      rIn: R_MR, rOut: R_MS,
-      nTheta: NTH, nRad: NRD * 2,
       ell: ELL, mu0: MU0,
     });
 
@@ -132,13 +121,13 @@ describe("torque is radius-independent in the oracle", function () {
     const Arotor  = field.sample(R_MR, rotor.gapTheta);
     const Astator = field.sample(R_MS, stator.gapTheta);
 
-    const { torque: T1 } = oracle1.solve(Arotor, Astator);
-    const { torque: T2 } = oracle2.solve(Arotor, Astator);
+    const { torque: T_inner } = oracle.solveAtRadius(Arotor, Astator, R_MR);
+    const { torque: T_outer } = oracle.solveAtRadius(Arotor, Astator, R_MS);
 
-    const denom = Math.max(Math.abs(T1), Math.abs(T2));
-    const relErr = Math.abs(T1 - T2) / Math.max(denom, 1e-30);
+    const denom = Math.max(Math.abs(T_inner), Math.abs(T_outer));
+    const relErr = Math.abs(T_inner - T_outer) / Math.max(denom, 1e-30);
     assert.ok(relErr < 2e-2,
-      `oracle torque differs across radial mesh refinement: T1=${T1}, T2=${T2}, relErr=${relErr} >= 2e-2`);
+      `oracle Arkkio torque disagrees between inner/outer integration radius: T_inner=${T_inner}, T_outer=${T_outer}, relErr=${relErr} >= 2e-2`);
   });
 });
 

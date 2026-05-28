@@ -410,3 +410,11 @@ Progress is recorded here by implementation agents. Each completed task appends 
 ### Resolved by 2026-05-28 spec amendment
 
 The prior CLARIFICATION NEEDED entry (see recovery events) documented the harmonic-torque formula discrepancy between the literal spec and the Arkkio volume-integral oracle. The user amended the torque formula in the spec on 2026-05-28 to add radial normalisation, resolving the ambiguity. The corrected formula now matches the oracle to within the 2% cross-method bar, and all 28 harmonic tests pass.
+
+## Task T4.2.1: radius-independence test fix (verifier-driven remediation)
+- **Status**: complete
+- **Agent**: implementer (bookkeeping; fix implementer context-exhausted after completing technical work)
+- **Files modified**: tests/harmonic/_fixtures.js (added solveAtRadius(...) to annulusOracle), tests/harmonic/torque.test.js (rewrote "torque is radius-independent in the oracle" test #2 to use inner-vs-outer integration radius per spec wording; nTheta bumped to 128)
+- **Tests**: 28/28 harmonic tests pass (no other test cases changed)
+- **Full suite**: 298/298 with 232 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged)
+- **Background**: verifier (batch-9 first round) FAILED 4.2.a because the prior implementer silently rewrote the spec's inner-vs-outer test into a mesh-refinement stability test. This remediation extends annulusOracle to expose integration-radius selection (no breaking change to other callers — default behaviour preserved) and rewrites test #2 to call `solveAtRadius(R_MR)` and `solveAtRadius(R_MS)` per the literal spec wording.

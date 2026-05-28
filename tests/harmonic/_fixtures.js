@@ -130,12 +130,24 @@ function manufactured(coeffs) {
 }
 
 // ---------------------------------------------------------------------------
-//  annulusOracle({ rIn, rOut, nTheta, nRad, ell, mu0 }) → { solve }
+//  annulusOracle({ rIn, rOut, nTheta, nRad, ell, mu0, integrationFrac? }) → { solve, solveAtRadius }
 //
 //  Self-contained dense meshed-annulus FEM (D2.2).
 //  Structured nTheta×nRad quad mesh on [rIn, rOut] with ν=1/μ0 Laplace stiffness.
 //
+//  integrationFrac (default 0.5) selects which radial layer the Arkkio
+//  Maxwell-stress integral is evaluated at when solve() reports torque:
+//    0   ⇒ inner circle (r = rIn)
+//    1   ⇒ outer circle (r = rOut)
+//    0.5 ⇒ mid-annulus (default — preserves legacy call-site behavior)
+//
 //  solve(aInnerNodal, aOuterNodal) → { fluxInner, fluxOuter, torque }
+//    Uses opts.integrationFrac for the torque integration radius.
+//
+//  solveAtRadius(aInnerNodal, aOuterNodal, integrationRadius) → { torque }
+//    Solves once and evaluates the Arkkio Maxwell-stress integral at the
+//    explicit integration radius (must satisfy rIn ≤ integrationRadius ≤ rOut).
+//    Useful for asserting radius-independence in one solve.
 //
 //  Node ordering: [inner-circle nodes 0..nTheta-1 | radial layers | outer-circle nodes]
 //  Each circle has nTheta nodes at θ_i = 2π·i/nTheta (uniform).
@@ -143,10 +155,11 @@ function manufactured(coeffs) {
 //  Returns:
 //    fluxInner: Float64Array(nTheta) — consistent nodal reaction flux on inner circle
 //    fluxOuter: Float64Array(nTheta) — consistent nodal reaction flux on outer circle
-//    torque: number — Arkkio mid-annulus Maxwell-stress torque
+//    torque: number — Arkkio Maxwell-stress torque at integrationFrac
 // ---------------------------------------------------------------------------
 function annulusOracle(opts) {
   const { rIn, rOut, nTheta, nRad, ell, mu0 } = opts;
+  const integrationFrac = (opts.integrationFrac != null) ? opts.integrationFrac : 0.5;
 
   // Total nodes: (nRad+1) rings × nTheta nodes per ring
   const nRings = nRad + 1;
@@ -254,78 +267,14 @@ function annulusOracle(opts) {
   }
 
   function solve(aInnerNodal, aOuterNodal) {
-    // Partition DOFs: inner (ir=0) and outer (ir=nRad) are Dirichlet; interior is free.
-    // Inner nodes: nodeIdx(0, j) for j=0..nTheta-1
-    // Outer nodes: nodeIdx(nRad, j) for j=0..nTheta-1
-    // Interior: nodeIdx(ir, j) for ir=1..nRad-1
+    const u_full = solveFull(aInnerNodal, aOuterNodal);
 
-    const nInner = nTheta;
-    const nOuter = nTheta;
-    const nInterior = (nRad - 1) * nTheta;
-    const nDirichlet = nInner + nOuter;
-
-    // Reorder DOFs: [interior | inner | outer]
-    // interior_dofs[i] = nodeIdx(1 + Math.floor(i/nTheta), i%nTheta)
-    const interiorDofs = [];
-    for (let ir = 1; ir < nRad; ir++) {
-      for (let j = 0; j < nTheta; j++) {
-        interiorDofs.push(nodeIdx(ir, j));
-      }
-    }
-
-    const innerDofs = [];
-    const outerDofs = [];
+    // Inner/outer node global indices, used for the reaction-flux assembly.
+    const innerDofs = new Array(nTheta);
+    const outerDofs = new Array(nTheta);
     for (let j = 0; j < nTheta; j++) {
-      innerDofs.push(nodeIdx(0, j));
-      outerDofs.push(nodeIdx(nRad, j));
-    }
-
-    const dirichletDofs = innerDofs.concat(outerDofs);
-    const dirichletVals = new Float64Array(nDirichlet);
-    for (let j = 0; j < nTheta; j++) {
-      dirichletVals[j]          = aInnerNodal[j];
-      dirichletVals[nTheta + j] = aOuterNodal[j];
-    }
-
-    // Build K_ff (interior × interior) and K_fd (interior × dirichlet)
-    const nF = nInterior;
-    const nD = nDirichlet;
-    const K_ff = new Float64Array(nF * nF);
-    const K_fd = new Float64Array(nF * nD);
-
-    for (let i = 0; i < nF; i++) {
-      const gi = interiorDofs[i];
-      for (let j = 0; j < nF; j++) {
-        const gj = interiorDofs[j];
-        K_ff[i * nF + j] = K_mat[gi * nNodes + gj];
-      }
-      for (let j = 0; j < nD; j++) {
-        const gj = dirichletDofs[j];
-        K_fd[i * nD + j] = K_mat[gi * nNodes + gj];
-      }
-    }
-
-    // RHS: f = -K_fd · d
-    const f = new Float64Array(nF);
-    for (let i = 0; i < nF; i++) {
-      let s = 0;
-      for (let j = 0; j < nD; j++) {
-        s += K_fd[i * nD + j] * dirichletVals[j];
-      }
-      f[i] = -s;
-    }
-
-    // Solve K_ff · u = f by LDLT (dense Cholesky for SPD)
-    const u_int = denseSolveGeneral(nF, K_ff, f);
-
-    // Full solution vector
-    const u_full = new Float64Array(nNodes);
-    for (let i = 0; i < nF; i++) {
-      u_full[interiorDofs[i]] = u_int[i];
-    }
-    for (let j = 0; j < nTheta; j++) {
-      u_full[innerDofs[j]] = aInnerNodal[j];
-      u_full[outerDofs[j]] = aOuterNodal[j];
+      innerDofs[j] = nodeIdx(0, j);
+      outerDofs[j] = nodeIdx(nRad, j);
     }
 
     // Compute consistent reaction fluxes on inner and outer circles.
@@ -361,60 +310,158 @@ function annulusOracle(opts) {
       fluxOuter[j] = fi / dth_div;
     }
 
-    // Arkkio mid-annulus Maxwell-stress torque
-    // T = (ell/μ0) ∫_Γ_mid r · B_r · B_θ dΓ
-    //   = (ell/(μ0)) ∫_0^{2π} r · (1/r·∂A/∂θ) · (-∂A/∂r) · r · dθ  ... wrong signs
-    // Standard form: T = (ell/μ0) · r_mid² · ∫_0^{2π} B_r · B_θ dθ
-    //   B_r = (1/r)·∂A/∂θ,  B_θ = -∂A/∂r
-    //   T = (ell·r_mid/μ0) · ∫_0^{2π} (∂A/∂θ) · (-∂A/∂r) dθ   ... still need sign check
-    //
     // Maxwell stress tensor torque (Arkkio volume integral version, per Arkkio 1987):
     //   T = (ell / (μ0 · (r2²-r1²))) · 2·∫_{gap annulus} r · B_r · B_θ dV
-    // In our 2D per-unit-length version:
-    //   T = (ell / μ0) · ∫_0^{2π} r_mid · B_r(r_mid,θ) · B_θ(r_mid,θ) dθ
-    // where integration is at the mid-radius r_mid = (rIn+rOut)/2 in the gap.
+    // In our 2D per-unit-length form, evaluated on a single circle at r_eval:
+    //   T = (ell / μ0) · r_eval² · ∫_0^{2π} B_r(r_eval,θ) · B_θ(r_eval,θ) dθ
+    //   B_r = (1/r)·∂A/∂θ,  B_θ = -∂A/∂r
     //
-    // We interpolate u at the mid-radius ring to get B_r and B_θ numerically.
-    // The mid-radius ring is at r_mid_idx = floor(nRad/2) or we interpolate.
+    // For a source-free Laplace field on the annulus the integrand is
+    // exactly r-independent in the continuum, so the value of r_eval is a
+    // free parameter — opts.integrationFrac (default 0.5) selects the
+    // radial layer used by solve().
 
-    const r_mid = (rIn + rOut) / 2;
-    const ir_below = Math.floor((r_mid - rIn) / (rOut - rIn) * nRad);
-    const ir_above = Math.min(ir_below + 1, nRad);
-    const frac = (r_mid - rings_r[ir_below]) / (rings_r[ir_above] - rings_r[ir_below] + 1e-30);
+    const torque = arkkioAtRadius(u_full, integrationFrac);
+
+    return { fluxInner, fluxOuter, torque };
+  }
+
+  // Compute the Arkkio Maxwell-stress integral on the circle at
+  // r_eval = rIn + frac·(rOut − rIn) given the full FEM solution u_full.
+  // Uses two adjacent radial rings for ∂A/∂r and linear-interp + central
+  // angular differencing for ∂A/∂θ.
+  function arkkioAtRadius(u_full, frac) {
+    const r_eval = rIn + frac * (rOut - rIn);
+
+    // Pick the radial-ring stencil. When r_eval lands inside the annulus,
+    // straddle it with rings (ir_below, ir_above). When r_eval is at the
+    // outer boundary (frac=1), shift the stencil down one cell so we still
+    // have two distinct rings without indexing past nRad.
+    let ir_below = Math.floor(frac * nRad);
+    if (ir_below >= nRad) ir_below = nRad - 1;
+    if (ir_below < 0)     ir_below = 0;
+    const ir_above = ir_below + 1;
+    const r_below  = rings_r[ir_below];
+    const r_above  = rings_r[ir_above];
+    const denom_r  = r_above - r_below;
+    const rfrac    = (r_eval - r_below) / denom_r;
 
     const dth_arkkio = TWO_PI / nTheta;
     let T_arkkio = 0;
 
     for (let j = 0; j < nTheta; j++) {
-      // A at mid-radius (linear interpolation between rings)
-      const A_bel = u_full[nodeIdx(ir_below, j)];
-      const A_abv = u_full[nodeIdx(ir_above, j)];
-      const A_bel1 = u_full[nodeIdx(ir_below, (j + 1) % nTheta)];
-      const A_abv1 = u_full[nodeIdx(ir_above, (j + 1) % nTheta)];
-      const A_belm1 = u_full[nodeIdx(ir_below, (j - 1 + nTheta) % nTheta)];
-      const A_abvm1 = u_full[nodeIdx(ir_above, (j - 1 + nTheta) % nTheta)];
+      const A_bel    = u_full[nodeIdx(ir_below, j)];
+      const A_abv    = u_full[nodeIdx(ir_above, j)];
+      const A_bel1   = u_full[nodeIdx(ir_below, (j + 1) % nTheta)];
+      const A_abv1   = u_full[nodeIdx(ir_above, (j + 1) % nTheta)];
+      const A_belm1  = u_full[nodeIdx(ir_below, (j - 1 + nTheta) % nTheta)];
+      const A_abvm1  = u_full[nodeIdx(ir_above, (j - 1 + nTheta) % nTheta)];
 
-      // ∂A/∂r at mid: finite difference between rings
-      const dAdr_mid = (A_abv - A_bel) / (rings_r[ir_above] - rings_r[ir_below]);
+      // ∂A/∂r at r_eval: finite difference across the straddling rings.
+      const dAdr_eval = (A_abv - A_bel) / denom_r;
 
-      // ∂A/∂θ at mid: central difference in θ at the interpolated radius
-      const A_mid_plus  = (1 - frac) * A_bel1  + frac * A_abv1;
-      const A_mid_minus = (1 - frac) * A_belm1 + frac * A_abvm1;
-      const dAdth_mid = (A_mid_plus - A_mid_minus) / (2 * dth_arkkio);
+      // ∂A/∂θ at r_eval: linear interp the two ring samples to r_eval,
+      // then central difference in θ.
+      const A_plus  = (1 - rfrac) * A_bel1  + rfrac * A_abv1;
+      const A_minus = (1 - rfrac) * A_belm1 + rfrac * A_abvm1;
+      const dAdth_eval = (A_plus - A_minus) / (2 * dth_arkkio);
 
       // B_r = (1/r)·∂A/∂θ,  B_θ = -∂A/∂r
-      const Br  = dAdth_mid / r_mid;
-      const Bth = -dAdr_mid;
+      const Br  = dAdth_eval / r_eval;
+      const Bth = -dAdr_eval;
 
-      // Contribution to torque: r_mid · B_r · B_θ · dθ · r_mid  (×ell/μ0 outside)
-      T_arkkio += r_mid * Br * Bth * dth_arkkio;
+      // Per-θ contribution: r_eval · B_r · B_θ · dθ; the second r_eval and
+      // ell/μ0 prefactor are applied after the loop.
+      T_arkkio += r_eval * Br * Bth * dth_arkkio;
     }
-    T_arkkio *= r_mid * ell / mu0;
-
-    return { fluxInner, fluxOuter, torque: T_arkkio };
+    return T_arkkio * r_eval * ell / mu0;
   }
 
-  return { solve };
+  // Solve once and evaluate the Arkkio Maxwell-stress integral at an
+  // explicit radius (rIn ≤ integrationRadius ≤ rOut). Returns { torque }.
+  // Used by the radius-independence test to compare inner-vs-outer
+  // integration on a single FEM solution without re-factorizing.
+  function solveAtRadius(aInnerNodal, aOuterNodal, integrationRadius) {
+    if (integrationRadius < rIn - 1e-12 || integrationRadius > rOut + 1e-12) {
+      throw new Error(
+        "solveAtRadius: integrationRadius " + integrationRadius +
+        " is outside [" + rIn + ", " + rOut + "]"
+      );
+    }
+    const u_full = solveFull(aInnerNodal, aOuterNodal);
+    const frac = (integrationRadius - rIn) / (rOut - rIn);
+    return { torque: arkkioAtRadius(u_full, frac) };
+  }
+
+  // Internal: same dense FEM solve as solve(), but returns only u_full
+  // (no boundary flux assembly). Factored out so solveAtRadius can
+  // evaluate the Arkkio integral at any radius without re-solving the
+  // unrelated nodal-flux reactions.
+  function solveFull(aInnerNodal, aOuterNodal) {
+    const nInner = nTheta;
+    const nOuter = nTheta;
+    const nInterior = (nRad - 1) * nTheta;
+    const nDirichlet = nInner + nOuter;
+
+    const interiorDofs = [];
+    for (let ir = 1; ir < nRad; ir++) {
+      for (let j = 0; j < nTheta; j++) {
+        interiorDofs.push(nodeIdx(ir, j));
+      }
+    }
+    const innerDofs = [];
+    const outerDofs = [];
+    for (let j = 0; j < nTheta; j++) {
+      innerDofs.push(nodeIdx(0, j));
+      outerDofs.push(nodeIdx(nRad, j));
+    }
+    const dirichletDofs = innerDofs.concat(outerDofs);
+    const dirichletVals = new Float64Array(nDirichlet);
+    for (let j = 0; j < nTheta; j++) {
+      dirichletVals[j]          = aInnerNodal[j];
+      dirichletVals[nTheta + j] = aOuterNodal[j];
+    }
+
+    const nF = nInterior;
+    const nD = nDirichlet;
+    const K_ff = new Float64Array(nF * nF);
+    const K_fd = new Float64Array(nF * nD);
+
+    for (let i = 0; i < nF; i++) {
+      const gi = interiorDofs[i];
+      for (let j = 0; j < nF; j++) {
+        const gj = interiorDofs[j];
+        K_ff[i * nF + j] = K_mat[gi * nNodes + gj];
+      }
+      for (let j = 0; j < nD; j++) {
+        const gj = dirichletDofs[j];
+        K_fd[i * nD + j] = K_mat[gi * nNodes + gj];
+      }
+    }
+
+    const f = new Float64Array(nF);
+    for (let i = 0; i < nF; i++) {
+      let s = 0;
+      for (let j = 0; j < nD; j++) {
+        s += K_fd[i * nD + j] * dirichletVals[j];
+      }
+      f[i] = -s;
+    }
+
+    const u_int = denseSolveGeneral(nF, K_ff, f);
+
+    const u_full = new Float64Array(nNodes);
+    for (let i = 0; i < nF; i++) {
+      u_full[interiorDofs[i]] = u_int[i];
+    }
+    for (let j = 0; j < nTheta; j++) {
+      u_full[innerDofs[j]] = aInnerNodal[j];
+      u_full[outerDofs[j]] = aOuterNodal[j];
+    }
+    return u_full;
+  }
+
+  return { solve, solveAtRadius };
 }
 
 // ---------------------------------------------------------------------------
