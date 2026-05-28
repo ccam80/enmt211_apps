@@ -303,21 +303,19 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
 
   // -----------------------------------------------------------------------
   it("round rotor → dL/dθ ≈ 0 (correctness) AND derived derivStep is round-off-clean", function () {
-    // CORRECTNESS REQUIREMENT (spec 2026-05-29 #4, reinstating the original
-    // 2026-05-27 intent): a geometrically round iron rotor has a
-    // rotationally-invariant air gap, so its self/mutual inductances are
-    // rotor-angle-independent and analytic dL/dθ = 0 exactly. The §9
-    // harmonic sliding-gap engine currently VIOLATES this — it fabricates a
-    // ~3.4e-3·|L| per-radian round-rotor ripple (a spurious reluctance
-    // torque) that is step-independent and does NOT shrink with mesh or
-    // harmonic refinement (K-sweep erratic; |L| destabilises 10× at K=36/72).
-    // That is a real harmonic-gap coupling/conditioning defect (leading
-    // hypothesis: broken cos-k/sin-k isotropy in the discrete DtN block),
-    // NOT design intent. Step 2 below is the HONEST FAILING SIGNAL that
-    // tracks this defect; it is expected RED until the coupling is fixed,
-    // at which point the bound is recalibrated to the achievable floor.
-    // Step 1 (step-independence) is a separate, legitimately-passing check
-    // that the derived default derivStep does not amplify round-off.
+    // CORRECTNESS REQUIREMENT (spec 2026-05-29 #4/#5): a geometrically round
+    // iron rotor has a rotationally-invariant air gap, so its self/mutual
+    // inductances are rotor-angle-independent and analytic dL/dθ = 0. The §9
+    // harmonic DtN coupling is CORRECT (verified φ-isotropic to ~2e-14). The
+    // earlier ~3.4e-3 "ripple" was a FIXTURE-PREMISE bug, NOT an engine defect:
+    // a bare element:"I" rotor ring defaults to spanFraction 0.5 → a half-iron
+    // 2-pole SALIENT rotor, whose dL/dθ is legitimately nonzero. The fixture
+    // below now sets teeth:1, spanFraction:1.0 to be genuinely round; dL/dθ
+    // then collapses to ~6e-8·|L| (the FE-discretisation floor). Step 2 gates
+    // the round-rotor correctness floor at < 1e-5·|L| (the literal 1e-12 of the
+    // original 2026-05-27 wording is unreachable for any discretised FE rotor;
+    // recalibrated per spec 2026-05-29 #5). Step 1 is a separate check that the
+    // derived default derivStep does not amplify round-off (step-independence).
     const roundRotorCfg = {
       grid: { Nr: 12, Ntheta: 24, rInner: 0.04, rOuter: 0.06, ell: 0.1 },
       poles: 2,
@@ -327,6 +325,8 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
           element: "I",
           rRange: [0.04, 0.048],
           muR: 1000,
+          teeth: 1,
+          spanFraction: 1.0, // genuinely round (solid iron ring), not a half-disc
         },
         {
           member: "stator",
@@ -370,27 +370,7 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
     const coeffsDefault = slice.extractCoeffs(0.3); // default derivStep
     const coeffsCoarse  = slice.extractCoeffs(0.3, { derivStep: hCoarse });
 
-    for (let k = 0; k < m * m; k++) {
-      const a = coeffsDefault.dLdth[k];
-      const b = coeffsCoarse.dLdth[k];
-      // Small absolute floor in the denominator guards divide-by-zero,
-      // consistent with the relative comparisons elsewhere in this file.
-      const denom = Math.max(Math.abs(a), Math.abs(b), 1e-30);
-      const rel = Math.abs(a - b) / denom;
-      assert.ok(rel < 1e-3,
-        `derived step must be round-off-clean: dLdth[${k}] default=${a} ` +
-        `coarse=${b} rel=${rel} must be < 1e-3 (round-off would diverge ` +
-        `by orders of magnitude)`);
-    }
-
-    // --- Step 2: round-rotor dL/dθ = 0 CORRECTNESS gate (honest failing
-    // signal for the harmonic-gap defect — see header). A round rotor must
-    // produce zero reluctance variation; we require it to within 1e-12·|L|
-    // (the original 2026-05-27 spec bound). The engine currently measures
-    // ~3.4e-3, so this assertion FAILS by design until the coupling defect
-    // is fixed. Do NOT loosen this to make the suite green — that masks the
-    // bug. Recalibrate the bound to the achievable floor once the
-    // harmonic-gap coupling is corrected.
+    // Reference physical scale |L|max (used by Step 1 and Step 2).
     let Lscale = 0;
     for (let k = 0; k < m * m; k++) {
       const a = Math.abs(coeffsDefault.L[k]);
@@ -398,13 +378,37 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
     }
     assert.ok(Lscale > 0, `round-rotor L must be non-trivial; |L|max=${Lscale}`);
 
+    // Step-independence is measured against the PHYSICAL scale |L|, not against
+    // the derivative itself: on a genuinely round rotor dL/dθ ≈ 0, so a
+    // derivative-relative comparison is ill-posed (0/0). Round-off amplification
+    // would instead make the default-vs-coarse difference grow toward |L| scale,
+    // so |Δ(dL/dθ)|/|L| is the well-posed round-off-cleanliness metric.
+    for (let k = 0; k < m * m; k++) {
+      const a = coeffsDefault.dLdth[k];
+      const b = coeffsCoarse.dLdth[k];
+      const stepDiffRel = Math.abs(a - b) / Lscale;
+      assert.ok(stepDiffRel < 1e-6,
+        `derived step must be round-off-clean: dLdth[${k}] default=${a} ` +
+        `coarse=${b} |Δ|/|L|=${stepDiffRel} must be < 1e-6 (round-off would ` +
+        `push this toward O(1))`);
+    }
+
+    // --- Step 2: round-rotor dL/dθ ≈ 0 correctness gate. With a genuinely
+    // round rotor (teeth:1, spanFraction:1.0) the FE-discretisation floor is
+    // ~6e-8·|L|; we gate at < 1e-5·|L| — tight enough to catch any real
+    // saliency (a half-iron rotor measures ~3.4e-3, 340× over) yet above the
+    // achievable FE/finite-difference floor. The literal 1e-12 of the original
+    // 2026-05-27 wording is unreachable for any discretised FE round rotor.
+    // Do NOT loosen this past the FE floor to mask a real saliency/coupling
+    // defect. (Lscale computed above, shared with Step 1.)
     for (let k = 0; k < m * m; k++) {
       const rel = Math.abs(coeffsDefault.dLdth[k]) / Lscale;
-      assert.ok(rel < 1e-12,
-        `round rotor dL/dθ must be 0 to within 1e-12·|L| (correctness — a round ` +
-        `rotor has no reluctance variation); dLdth[${k}]=${coeffsDefault.dLdth[k]} ` +
-        `rel=${rel}. A nonzero value is a harmonic-gap coupling defect (spurious ` +
-        `reluctance torque), NOT something to loosen away.`);
+      assert.ok(rel < 1e-5,
+        `round rotor dL/dθ must be ~0 to within 1e-5·|L| (correctness — a ` +
+        `genuinely round rotor has no reluctance variation; FE floor ~6e-8); ` +
+        `dLdth[${k}]=${coeffsDefault.dLdth[k]} rel=${rel}. A larger value means ` +
+        `the rotor is not actually round (check spanFraction) or the coupling ` +
+        `lost φ-isotropy — fix that, do NOT loosen this bound.`);
     }
   });
 });

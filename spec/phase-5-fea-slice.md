@@ -1451,3 +1451,43 @@ defects are real and tracked; the corresponding tests fail honestly. Per the
 directive, the broader pipeline is NOT halted/reverted for them beyond
 reinstating the honest tests — the root-cause + fix of the harmonic-gap
 coupling is tracked work (see `spec/progress.md`).
+
+## Amendments (2026-05-29 #5) — DIAGNOSIS RESOLVED: Defect A was a fixture-premise bug (engine correct); Defect B was a real overflow (fixed)
+
+A diagnose-only investigation (user-directed; no source edited until approved)
+resolved both defects. They do NOT share a cause.
+
+**Defect A — NOT an engine bug; the harmonic coupling is correct.** The §9
+harmonic DtN operator was verified φ-isotropic (rotor/stator self-blocks
+φ-invariant to ~2e-14, cross-block rotation correct). The ~3.4e-3 round-rotor
+"ripple" was a **test-fixture premise error**: `element:"I"` models *salient
+iron* (`count = teeth||1`, `spanFraction` = iron fraction of a half-tooth-
+pitch), and the round-rotor fixture declared a bare `element:"I"` ring with no
+`teeth`/`spanFraction`, which expanded (default `spanFraction=0.5`, count 1) to
+iron over `[−π/2, +π/2]` — a half-iron 2-pole **salient** rotor, whose `dL/dθ`
+is *legitimately* nonzero. Evidence: spanFraction 0.5 → 3.378e-3 (the exact
+"defect" value); 1.0 (genuinely round) → 6.27e-8. All 9 `element:"I"` rings in
+the real machine fixtures already set `teeth` AND `spanFraction` explicitly;
+solid back-iron comes from the magnet/wound back-iron paths (full `[0,2π]`
+rings). My earlier 2026-05-29 #4 framing of A as an engine defect is therefore
+WITHDRAWN. **Resolution (approved):** (1) the round-rotor test fixture now sets
+`teeth:1, spanFraction:1.0` (genuinely round); (2) the unreachable `1e-12` gate
+is recalibrated to a `< 1e-5·|L|` correctness floor (the genuine round value
+6.27e-8 passes with margin; a real salient/coupling defect would not) — this is
+calibrating to the true FE floor with the engine proven correct, NOT loosening
+to mask a flaw; (3) the `config-schema.js buildIronFeatures` default is fixed so
+a bare un-toothed iron ring defaults to a full ring (`spanFraction = ring.teeth
+? 0.5 : 1.0`) — verified to change the geometry of ZERO existing fixtures.
+
+**Defect B — real engine bug, FIXED.** `lib/airgap-harmonic.js computeMk`
+computed `a=pow(r1,k)`, `b=pow(r2,k)`, `E=b²−a²`, `c=k/(μ0·E)`; at high harmonic
+order (pmsm `K=defaultK=3·max(48,8)=144`) `pow(r,144)` underflows → `E=0` →
+`c=Infinity` → all-NaN solve. Fixed by reformulating the k≥1 branch with the
+bounded ratio `ρ=(r1/r2)^k∈(0,1)`: `m00=m11=(k/μ0)(1+ρ²)/(1−ρ²)`,
+`m01=m10=−(k/μ0)(2ρ)/(1−ρ²)` — algebraically identical where the old form is
+finite (to rel 1e-16), bounded for all k. After the fix pmsm `extractCoeffs(0)`
+and `solve(0,zeros)` are finite. Guarded by the new `tests/slice/pmsm-finite.test.js`.
+
+A third item — `surfaceFlux` non-reciprocity for φ≠0 (`airgap-harmonic.js`
+~402-456) — was flagged latent (off the L-extraction path) and is being
+diagnosed under the same diagnose-verify-propose-then-approve flow.

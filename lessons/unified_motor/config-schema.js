@@ -211,7 +211,14 @@
     const member = ring.member;
     const rRange = ring.rRange;
     const muR = ring.muR != null ? ring.muR : 1000;
-    const spanFraction = ring.spanFraction != null ? ring.spanFraction : 0.5;
+    // A bare un-toothed iron ring is a SOLID ring (full annulus). spanFraction
+    // 0.5 (iron over half each tooth-pitch) is only a sensible default for an
+    // explicitly-toothed/salient structure (teeth>1); defaulting the count=1
+    // case to 0.5 would silently produce a half-disc 2-pole salient rotor,
+    // which is never what "a plain iron ring" means. (spec 2026-05-29 #5)
+    const spanFraction = ring.spanFraction != null
+      ? ring.spanFraction
+      : (ring.teeth ? 0.5 : 1.0);
     const theta0 = ring.theta0 != null ? ring.theta0 : 0;
 
     const Bknee = ring.Bknee != null ? ring.Bknee : null;
