@@ -181,34 +181,30 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
   });
 
   // -----------------------------------------------------------------------
-  it("linear FeaSolver instance handles all three probe angles (3 factorizes per extract)", function () {
+  it("Schur path handles all three probe angles (3 dense Schur factors per extract, (m+1) RHS each)", function () {
+    // Wave 5.4 C: extractCoeffs now goes through the Lagrange-augmented
+    // Schur path. K_b' is factored ONCE at create-time (not per phi); per
+    // phi we factor only the small dense -S(phi). Per phi we solve (m+1)
+    // RHS — one magnetization-only + m unit-current — all reusing the same
+    // K_b' factor and the same -S(phi) factor.
     const cfg = woundConfig();
     const slice = LIB.MotorSlice.create(
       sectionFromConfig(cfg),
       feaOpts({ poles: polesFromConfig(cfg) })
     );
     const m = slice.nCircuits;
-    const solverLin = slice.__internals.solverLin;
+    const internals = slice.__internals;
 
-    // Instrument: count factorize() and solve() calls.
-    const origFactorize = solverLin.factorize.bind(solverLin);
-    const origSolve = solverLin.solve.bind(solverLin);
-    let factCount = 0;
-    let solveCount = 0;
-    solverLin.factorize = function () { factCount++; return origFactorize(); };
-    solverLin.solve = function (b) { solveCount++; return origSolve(b); };
+    const prepBefore  = internals.schurPrepCount;
+    const solveBefore = internals.schurSolveCount;
+    slice.extractCoeffs(0.2);
+    const prepDelta  = internals.schurPrepCount  - prepBefore;
+    const solveDelta = internals.schurSolveCount - solveBefore;
 
-    try {
-      slice.extractCoeffs(0.2);
-      assert.strictEqual(factCount, 3,
-        `extractCoeffs must call factorize 3 times (one per angle); got ${factCount}`);
-      // Each angle does 1 magnetization-only solve + m unit-current solves.
-      assert.strictEqual(solveCount, 3 * (m + 1),
-        `extractCoeffs must call solve 3*(m+1)=${3 * (m + 1)} times; got ${solveCount}`);
-    } finally {
-      solverLin.factorize = origFactorize;
-      solverLin.solve = origSolve;
-    }
+    assert.strictEqual(prepDelta, 3,
+      `extractCoeffs must prepare the dense Schur factor 3 times (one per angle); got ${prepDelta}`);
+    assert.strictEqual(solveDelta, 3 * (m + 1),
+      `extractCoeffs must call linearSchurSolve 3*(m+1)=${3 * (m + 1)} times; got ${solveDelta}`);
   });
 
   // -----------------------------------------------------------------------
@@ -218,42 +214,36 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
       sectionFromConfig(cfg),
       feaOpts({ poles: polesFromConfig(cfg) })
     );
-    const solverLin = slice.__internals.solverLin;
-    const gapStampLog = slice.__internals.gapStampLog;
-    const origFactorize = solverLin.factorize.bind(solverLin);
+    const internals = slice.__internals;
+    const gapStampLog = internals.gapStampLog;
 
-    let factCount = 0;
-    solverLin.factorize = function () { factCount++; return origFactorize(); };
-
-    try {
-      // Override derivStep = Math.PI/360 at θ=0.3
-      factCount = 0;
-      slice.extractCoeffs(0.3, { derivStep: Math.PI / 360 });
-      assert.strictEqual(gapStampLog.length, 3,
-        `gapStampLog must record exactly 3 angles; got ${gapStampLog.length}: ${gapStampLog}`);
-      const expectedOverride = [0.3 - Math.PI / 360, 0.3, 0.3 + Math.PI / 360];
-      for (let i = 0; i < 3; i++) {
-        assert.ok(Math.abs(gapStampLog[i] - expectedOverride[i]) < 1e-12,
-          `gapStampLog[${i}]=${gapStampLog[i]} must equal ${expectedOverride[i]}`);
-      }
-      assert.strictEqual(factCount, 3,
-        `factorize must be called exactly 3 times for the override extract; got ${factCount}`);
-
-      // Default derivStep — extract clears gapStampLog at the start of each call.
-      factCount = 0;
-      slice.extractCoeffs(0.3);
-      assert.strictEqual(gapStampLog.length, 3,
-        `gapStampLog must record exactly 3 angles in the default extract; got ${gapStampLog.length}: ${gapStampLog}`);
-      const expectedDefault = [0.3 - Math.PI / 180, 0.3, 0.3 + Math.PI / 180];
-      for (let i = 0; i < 3; i++) {
-        assert.ok(Math.abs(gapStampLog[i] - expectedDefault[i]) < 1e-12,
-          `gapStampLog[${i}]=${gapStampLog[i]} must equal default ${expectedDefault[i]}`);
-      }
-      assert.strictEqual(factCount, 3,
-        `factorize must be called exactly 3 times for the default extract; got ${factCount}`);
-    } finally {
-      solverLin.factorize = origFactorize;
+    // Override derivStep = Math.PI/360 at θ=0.3
+    const prepBefore1 = internals.schurPrepCount;
+    slice.extractCoeffs(0.3, { derivStep: Math.PI / 360 });
+    const prepDelta1 = internals.schurPrepCount - prepBefore1;
+    assert.strictEqual(gapStampLog.length, 3,
+      `gapStampLog must record exactly 3 angles; got ${gapStampLog.length}: ${gapStampLog}`);
+    const expectedOverride = [0.3 - Math.PI / 360, 0.3, 0.3 + Math.PI / 360];
+    for (let i = 0; i < 3; i++) {
+      assert.ok(Math.abs(gapStampLog[i] - expectedOverride[i]) < 1e-12,
+        `gapStampLog[${i}]=${gapStampLog[i]} must equal ${expectedOverride[i]}`);
     }
+    assert.strictEqual(prepDelta1, 3,
+      `Schur factor must be prepared exactly 3 times for the override extract; got ${prepDelta1}`);
+
+    // Default derivStep — extract clears gapStampLog at the start of each call.
+    const prepBefore2 = internals.schurPrepCount;
+    slice.extractCoeffs(0.3);
+    const prepDelta2 = internals.schurPrepCount - prepBefore2;
+    assert.strictEqual(gapStampLog.length, 3,
+      `gapStampLog must record exactly 3 angles in the default extract; got ${gapStampLog.length}: ${gapStampLog}`);
+    const expectedDefault = [0.3 - Math.PI / 180, 0.3, 0.3 + Math.PI / 180];
+    for (let i = 0; i < 3; i++) {
+      assert.ok(Math.abs(gapStampLog[i] - expectedDefault[i]) < 1e-12,
+        `gapStampLog[${i}]=${gapStampLog[i]} must equal default ${expectedDefault[i]}`);
+    }
+    assert.strictEqual(prepDelta2, 3,
+      `Schur factor must be prepared exactly 3 times for the default extract; got ${prepDelta2}`);
   });
 });
 

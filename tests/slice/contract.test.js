@@ -121,17 +121,23 @@ describe("MotorSlice public solve / coggingTorque / clearWarmStart contract (Wav
 
   // -----------------------------------------------------------------------
   it("field changes with rotor angle (Anode differs between θ=0 and θ=0.3)", function () {
+    // slice.solve returns a result whose `field` arrays alias internal
+    // scratch buffers — the caller must consume or snapshot them before
+    // the next slice.solve call on the same instance. We snapshot Anode
+    // here so we can compare across two solves on the same slice.
     const cfg = pmConfig();
     const slice = LIB.MotorSlice.create(
       sectionFromConfig(cfg),
       feaOpts({ poles: polesFromConfig(cfg) })
     );
     const currents = new Float64Array([5]);
-    const r0   = slice.solve(0.0, currents);
-    const r03  = slice.solve(0.3, currents);
+    const r0 = slice.solve(0.0, currents);
+    const A0 = Float64Array.from(r0.field.rotor.Anode);
+    const r03 = slice.solve(0.3, currents);
+    const A03 = r03.field.rotor.Anode;
     let maxDiff = 0;
-    for (let i = 0; i < r0.field.rotor.Anode.length; i++) {
-      const d = Math.abs(r0.field.rotor.Anode[i] - r03.field.rotor.Anode[i]);
+    for (let i = 0; i < A0.length; i++) {
+      const d = Math.abs(A0[i] - A03[i]);
       if (d > maxDiff) maxDiff = d;
     }
     assert.ok(maxDiff > 1e-9,

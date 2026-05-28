@@ -1167,3 +1167,160 @@ The original Wave 5.2 convergence assertion required `slice.solve(0.0, currents)
 The `currents=[0]` (pure-cogging) point convergence is therefore moved to Phase 7's `tests/fea-engine/*.test.js` validation suite, where it lives next to the saturated-cogging headline, the Maxwell-vs-co-energy cross-method check, and the analytic gap-field test — all of which exercise the engine's numerical fidelity rather than its public contract. The Wave-5.2 acceptance criterion at line ~662-664 is amended to require torque convergence for the `currents=[5]` branch only; the `currents=[0]` branch is documented as a Phase-7 deliverable.
 
 This is a documentation/scope amendment, not a relaxation of the §11.3 bar. The 1% bar still applies in Phase 7; the deferral acknowledges that diagnosing the residual numerical artifact requires the validation-suite tooling that Phase 7 builds.
+
+## Amendments (2026-05-29) — saturated-solve correctness + Wave 5.4 perf gate resolution
+
+The Wave 5.3 T5.3.1 Clarification Exit (logged in `spec/progress.md`) reported
+`mean=207ms / max=241ms` per-θ-step on hybrid-stepper against the §11.4 16 ms
+gate. That measurement was real wall-clock, but it was time spent producing
+NaN: the saturated `slice.solve` was silently NaN-ing its torque, flux, and
+field outputs whenever B exceeded a fixture-dependent threshold. None of the
+existing slice tests caught it because the saturated-path tests either:
+
+- ran with `saturation: { enabled: false }` (the slice `feaOpts` default
+  hides the saturated path entirely for the contract / convergence
+  assertions), or
+- asserted only iter counts and warm-start behaviour (`newton.test.js`)
+  rather than the finiteness or value of `A`, or
+- asserted only wall-clock (`perf.test.js`).
+
+The §11.4 16 ms gate was therefore being measured against a solver that
+was completing its inner loop quickly because the convergence indicators
+were NaN-masked to zero, not because the physics had been solved. The
+original §9-G5 escalation framing (Schur condensation as a perf remediation)
+was the wrong tool — adding more solver structure to a NaN-producing
+algorithm would not have helped. The actual root-cause chain was four bugs,
+all upstream of the gap stamp / Schur question:
+
+**1. Brauer exponential overflow → NaN K matrix (the headline NaN source).**
+The model `ν(B²) = k1 + k2·(exp(B²/Bknee²) − 1)` (D5, line 90) overflows
+`Math.exp` at `B² > ~700·Bknee²`, returning `Infinity` for both `ν` and
+`dν/dB²`. At any Dirichlet-pinned boundary element or corner where one
+component of the per-element field-gradient `gA` is exactly zero, the
+rank-1 Brauer tangent `2·dν·gA·gAᵀ` then evaluates `Infinity · 0 = NaN`,
+which propagates through `setValues`, `factorize`, `solveInto` to a fully
+NaN `A_iter`. The Newton convergence loop's max-residual computation
+silently coerces NaN to zero (because `NaN > x` is always false, so the
+running max never updates), reports `residual = 0`, and returns
+`converged = true` after one full-step iteration.
+
+**Resolution:** replace the unbounded exponential with the standard
+two-parameter Marrocco bounded saturation curve:
+
+  `ν(B²) = ν_air · (B²² + α) / (B²² + β)`
+  `dν/dB² = ν_air · (β − α) · 2·B² / (B²² + β)²`
+
+with `α = (μᵣ − 2)·Bknee⁴ / μᵣ` and `β = α·μᵣ`. This preserves the locked
+D5 contracts (`ν(0) = k1`, `ν(Bknee²) = 2·k1`) exactly, asymptotes to
+`ν_air = 1/μ₀` as B² → ∞ (the physical saturation limit), produces a
+smooth bounded tangent everywhere, and has no overflow path. The
+`(k1, k2, k3)` explicit-override route remains the original Brauer
+exponential, now arg-clamped to ≤50 and result-capped at ν_air for the
+same safety reasons. (`lib/motor-slice.js: brauerNu`.)
+
+**2. Cold-start Newton overshoot → divergence on stiff knees.**
+Even after Marrocco closes the NaN path, Newton's first iter from
+`A_iter = 0` would solve against the unsaturated K₀(ν₀) and land on the
+linear-K solution, which for strong-magnet fixtures has element B values
+well past the knee. With Marrocco the resulting K(A_iter₁) is finite but
+substantially different from K₀; without damping, Newton's iter 2 could
+lurch in either direction.
+
+**Resolution:** add a backtracking line search around the Newton update.
+Each iter snapshots `A_iter` to `scratch.A_prev`, then tries
+`A_iter = A_prev + α·dA` for α ∈ {1, ½, ¼, …} until the residual `‖·‖∞ /
+‖f‖∞` is finite and not increasing (1.001× slack for round-off). Up to 12
+backtracks (α ≥ 4 × 10⁻⁴); if even the smallest step doesn't reduce
+residual, Newton bails with the last attempted A and the caller sees the
+unconverged state through `lastNewton.residual`. Warm-start hot path
+(near-solution) accepts α=1 on the first try — single extra `buildInto`
+per iter for the residual evaluation, no perf hit. (`lib/motor-slice.js:
+solveStaticRotor`, scratch buffer `A_prev`.)
+
+**3. Mesh cache signature collision → stale `mat.mrMag`.**
+`lib/motor-mesh.js: signature()` keyed magnet variants on `f.mrMag`, a
+field that features never carry (`mrMag` is the hypot computed *inside*
+`classifyElement` from the feature's `(Mr, Mtheta)` pair). The result was
+that every magnet variant — irrespective of remanence — hashed to the
+same signature, and the mesh cache returned the first-built mesh for any
+subsequent slice with the same geometry, leaving `mat.mrMag` stuck at
+whichever remanence the first slice happened to specify.
+
+**Resolution:** read the raw `(f.Mr, f.Mtheta)` the features actually
+carry. (`lib/motor-mesh.js: signature()`.)
+
+**4. Spurious `/MU0` in the magnet load → body A inflated ~8×10⁵.**
+The 2D axial-A weak-form derivation gives the magnet RHS
+
+  `f_i = ∫_Ω (M_x · ∂N_i/∂y − M_y · ∂N_i/∂x) dA`
+
+with no `/μ₀` — the `1/μ₀` lives on the LHS via `ν` in `K`. The code's
+`assembleInteriorMagnetLoadAndJzInto` had `· area / MU0` on the magnet
+contribution (the conductor branch correctly omits it), inflating the
+magnet load by `1/μ₀ ≈ 8 × 10⁵`. The downstream body `A` was off by the
+same factor, gap nodal projections by the same factor, and `gap.torque`
+output by `(1/μ₀)² ≈ 6 × 10¹¹` — masked entirely by the NaN regime, and
+masked partially by the cache-collision bug in the rare cases where NaN
+didn't intercept first.
+
+**Resolution:** drop the spurious `/MU0` from the magnet RHS branch only.
+(`lib/motor-slice.js: assembleInteriorMagnetLoadAndJzInto`.) After this
+fix, body A magnitudes are `O(10⁻²) T·m` for the `pmConfig` strong-magnet
+fixture (consistent with B ~ 1 T over the air gap), `gap.torque` produces
+a smooth sinusoidal cogging waveform with peak ~33 N·m at θ = π/10 for
+the `Mr = 8 × 10⁵` PMSM fixture, and `τ_linear == τ_saturated` at low
+Mr to machine precision (replacing the prior NaN-masked equality).
+
+**5. `residualTol` loosened from 1e-9 to 1e-6.**
+The original justification (line 159–164, D5 lock notes) for `1e-9` was
+"one decimal place above the solver floor"; that framing assumed the
+solver floor was the binding constraint. In practice the binding
+constraint is the mesh-discretisation floor on torque, which is `~10⁻²
+to 10⁻³` relative on this fixture stack. A Newton residual three orders
+of magnitude tighter than the mesh floor accomplishes nothing physical
+and costs Newton iterations. Loosening to `1e-6` keeps Newton an order
+of magnitude tighter than the worst-case mesh torque error, lets the
+pre-Newton warm-start fast path fire on the common case (Δθ small),
+and is invisible to every existing test (all 275/65 pass identically
+between `1e-9` and `1e-6`). The default in `newtonOpts` at line ~149 is
+updated; callers can still pass an explicit `newton.residualTol` to
+override.
+
+### Wave 5.4 §11.4 perf gate — outcome
+
+Hybrid-stepper, full-annulus, realistic-DOF saturated solve after all
+five fixes above:
+
+- mean = **20.9 ms / step**, max = **70.4 ms / step** (vs the 16 ms gate)
+- 4 of 5 steps complete in **<11 ms** via the pre-Newton warm-start fast
+  path (iters=0); the outlier is a cold-ish step that runs 3 Newton iters
+- Steady-state real-time @ 60 Hz frame budget (16.7 ms) is met for the
+  warm-start majority; the worst-case 70 ms remains above the gate.
+
+The original §11.4 gate is not yet met at max-step. The §9-G5 Schur
+condensation option (and a `slice.solve` modified-Newton / factor-reuse
+option, and a Δθ-threshold skip option) remain available as Wave 5.4
+follow-on if max-step matters; mean-step is now within 1.25× of the gate
+and the work to close it cleanly is incremental, not architectural.
+
+This amendment supersedes the T5.3.1 Clarification Exit logged in
+`spec/progress.md`. The diagnostic in `tests/slice/perf.test.js` continues
+to log the §11.4 number on every run.
+
+### Test-suite collateral
+
+- `tests/slice/newton.test.js: "linear and saturated agree at low excitation"`
+  previously passed only because `A_sat` was NaN and the loop's
+  `if (e > maxErr) maxErr = e` silently skipped non-finite differences.
+  The test is corrected (a) to add explicit `Number.isFinite` guards
+  per-element, (b) to weaken the magnet (`Mr = 8e-3` override on the
+  copied pmConfig) so that B² stays well below Bknee² and the linear ==
+  saturated identity actually holds, (c) to compare body DOFs only (the
+  bordered system's harmonic block has a k=0 null-space artifact, so
+  harmonic-DOF magnitudes are conditioning-dependent rather than
+  physical). The test now passes legitimately at residual ≤ 1e-11.
+
+- All other slice / mesh / harmonic / pipeline tests pass identically
+  before and after the five fixes (275 / 65 / 1, unchanged from
+  baseline). The 65 failing machine tests remain the pre-existing
+  FeaSolver init-order issue documented in `spec/progress.md`.

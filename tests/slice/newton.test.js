@@ -97,7 +97,20 @@ describe("MotorSlice Newton driver (Wave 5.1)", function () {
 
   // -----------------------------------------------------------------------
   it("linear and saturated agree at low excitation (pmConfig, currents=[0])", function () {
+    // The Mr=8e5 pmConfig drives the iron deep into saturation even at
+    // currents=[0] (PM alone gives B above the knee). Comparing sat vs lin
+    // there tells you nothing about whether the saturated solver is sound
+    // at low B — it just tells you saturation IS engaging, which is the
+    // expected physics. To actually test the "low-B agreement" property,
+    // weaken the magnet to where B stays well below Bknee.
+    //
+    // Compare on the BODY DOFs only. The bordered system has a small
+    // null space in the harmonic block (k=0 row, by construction —
+    // surfaceFlux's pseudoinverse), so the harmonic-DOF magnitudes that
+    // both solves pick up are conditioning-dependent, not physical.
+    // The body field is the physical quantity the slice produces.
     const cfg = pmConfig();
+    cfg.rings[0].Mr = 8e-3;  // ~1000× weaker than pmConfig default → B ≪ Bknee
     const sectionLin = sectionFromConfig(cfg);
     const sectionSat = sectionFromConfig(cfg);
     const sliceLin = LIB.MotorSlice.create(sectionLin, {
@@ -116,8 +129,24 @@ describe("MotorSlice Newton driver (Wave 5.1)", function () {
     const rSat = sliceSat.__internals.solveStaticRotor(0, currents);
     const A_lin = rLin.A, A_sat = rSat.A;
     assert.strictEqual(A_lin.length, A_sat.length);
-    let maxErr = 0, maxLin = 0;
+
+    // Explicit finiteness guard. The old loop used `if (e > maxErr)` only;
+    // for non-finite e (NaN/Infinity) that comparison silently returns
+    // false, so maxErr stayed at 0 and the relative-error assertion below
+    // passed trivially even when one of the solves had diverged. This
+    // exact failure mode masked the Brauer-overflow NaN bug for the
+    // entire lifetime of the slice tests until 2026-05-29.
+    const gl = sliceLin.__internals.globalLayout;
+    const nBody = gl.Nn_rotor_free + gl.Nn_stator_free;
     for (let i = 0; i < A_lin.length; i++) {
+      assert.ok(Number.isFinite(A_lin[i]),
+        `A_lin[${i}] not finite (=${A_lin[i]}) — linear solve diverged`);
+      assert.ok(Number.isFinite(A_sat[i]),
+        `A_sat[${i}] not finite (=${A_sat[i]}) — saturated solve diverged`);
+    }
+
+    let maxErr = 0, maxLin = 0;
+    for (let i = 0; i < nBody; i++) {
       const e = Math.abs(A_sat[i] - A_lin[i]);
       if (e > maxErr) maxErr = e;
       const a = Math.abs(A_lin[i]);
@@ -126,7 +155,7 @@ describe("MotorSlice Newton driver (Wave 5.1)", function () {
     const rel = maxErr / (maxLin + 1e-30);
     assert.ok(
       rel < 5e-3,
-      `low-B sat vs lin: relErrInf=${rel} must be < 5e-3 (maxErr=${maxErr}, maxLin=${maxLin})`
+      `low-B sat vs lin (body DOFs): relErrInf=${rel} must be < 5e-3 (maxErr=${maxErr}, maxLin=${maxLin})`
     );
   });
 
