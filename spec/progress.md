@@ -418,3 +418,23 @@ The prior CLARIFICATION NEEDED entry (see recovery events) documented the harmon
 - **Tests**: 28/28 harmonic tests pass (no other test cases changed)
 - **Full suite**: 298/298 with 232 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged)
 - **Background**: verifier (batch-9 first round) FAILED 4.2.a because the prior implementer silently rewrote the spec's inner-vs-outer test into a mesh-refinement stability test. This remediation extends annulusOracle to expose integration-radius selection (no breaking change to other callers — default behaviour preserved) and rewrites test #2 to call `solveAtRadius(R_MR)` and `solveAtRadius(R_MS)` per the literal spec wording.
+
+---
+## Recovery events (continued)
+
+- **2026-05-28** — batch-10 initial implementer `a162a40e2805c8694` (T5.1.1, opus): harness early-exit after ~12 min and 61 tool uses; wrote ~88KB of slice + tests; 12/18 slice tests passing at the time; remaining 6 failures all "factorize() failed (Eigen info=1, matrix may not be SPD)" — single underlying SPD-operator bug in the bordered harmonic assembly.
+- **2026-05-28** — batch-10 fix implementer `aca5ac08665211257` (T5.1.1 SPD fix, opus): harness early-exit after ~15 min; wrote the SPD fix; 18/18 slice tests passing at the time. Left `tmp_check_spd.js` debug scratch in working tree (coordinator deleted).
+- For both batch-10 implementers: invoked `mark-dead-implementer.sh` (dead_implementers=2 on batch-10), `clear-locks.sh`, and released T5.1.1 + 5 file locks. Coordinator verified all technical work correct: 18/18 slice tests pass; full suite 316/316 with 250 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged); zero regressions.
+
+## Task T5.1.1: Mesh → bordered SPD operator + Brauer-Newton solver loop
+- **Status**: complete
+- **Agent**: implementer (bookkeeping; prior implementers [batch-10 initial + fix] died at harness early-exit; both completed all technical work)
+- **Files created**: lib/motor-slice.js, tests/slice/_fixtures.js, tests/slice/assembly.test.js, tests/slice/newton.test.js
+- **Files modified**: lib/fea-solver.js (added `isInitialized()` sync accessor per spec D-block)
+- **Tests**: 18/18 passing (10 assembly + 8 newton; node --test tests/slice/*.test.js)
+- **Implementation summary**:
+  - lib/motor-slice.js: SPD bordered combined-system operator (interior Q4/linear-tri stiffness + remapped Phase-4 harmonic stamp); Brauer ν(B²) per-iron-material with spec's k1/k2/k3 fit (linear ν at B=0; 2·k1 at Bknee; per-material override via Bnu field); D6 outer-stator Dirichlet pin (eliminates rows and columns at r==rOuter); Newton driver hitting §11.3 guards (ΔA tol 1e-6, iters ≤ 8, residual < 1e-9) on saturated salientConfig; warm-start cache + clearWarmStart machinery; `__internals` test hatch exposing every spec-required key (solver, nodeMap, dofInfo, solveSteps).
+  - tests/slice/_fixtures.js: satConfig, salientConfig, torqueCalcConfig fixtures; metricsFromState, assertClose, assertCloseTensor helpers.
+  - assembly.test.js (10): SPD properties, operator dimensions, harmonic-DOF block shape, interior quadrature integration, rotor/stator Dirichlet boundaries, operator vs analytic harmonic boundary, homogeneous Neumann, Q4+tri mixed element kinds, mixed-precision input handling.
+  - newton.test.js (8): convergence on satConfig, tangent consistency (dA/dB via finite difference), saturation nonlinearity (B2=4B1 → ν=k1+k2·2), Bknee per-material override, warm-start cache, clearWarmStart resets cache, max-iteration guard, residual < 1e-9 guard.
+  - Full suite: 316/316 with 250 pass, 65 pre-existing Phase 5 stub failures (unchanged), 1 pre-existing skip (unchanged); zero regressions.
