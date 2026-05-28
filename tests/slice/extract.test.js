@@ -153,18 +153,23 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
   // -----------------------------------------------------------------------
   it("dLdth from extract matches central-difference of L from independent recomputation", function () {
     const cfg = salientConfig();
+    const poles = polesFromConfig(cfg);
     const slice = LIB.MotorSlice.create(
       sectionFromConfig(cfg),
-      feaOpts({ poles: polesFromConfig(cfg) })
+      feaOpts({ poles: poles })
     );
     const m = slice.nCircuits;
-    const h = Math.PI / 180;
+    // The extract call internally central-differences over its derivStep, so
+    // the independent reconstruction must use the SAME step to be the same
+    // difference quotient (the machine-aware default per the 2026-05-27
+    // derivStep amendment).
+    const h = Math.PI / (poles * 1e5);
     const theta = 0.3;
 
-    // The extract call at θ=0.3 with default derivStep=π/180 internally
+    // The extract call at θ=0.3 with the default derivStep internally
     // computes plus@0.3+h, center@0.3, minus@0.3-h. We verify by calling
     // extract three independent times at offset angles and reconstructing
-    // central difference from their CENTER values.
+    // the central difference from their CENTER values.
     const coeffsCenter = slice.extractCoeffs(theta);
     const cPlus  = slice.extractCoeffs(theta + h);
     const cMinus = slice.extractCoeffs(theta - h);
@@ -182,11 +187,12 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
 
   // -----------------------------------------------------------------------
   it("Schur path handles all three probe angles (3 dense Schur factors per extract, (m+1) RHS each)", function () {
-    // Wave 5.4 C: extractCoeffs now goes through the Lagrange-augmented
-    // Schur path. K_b' is factored ONCE at create-time (not per phi); per
-    // phi we factor only the small dense -S(phi). Per phi we solve (m+1)
+    // §9-G5 (authorized 2026-05-29 #2): extractCoeffs goes through the
+    // Lagrange-augmented Schur path. K_b' is factored ONCE at create-time
+    // (not per phi, and no new FeaSolver instance is created during extract);
+    // per phi we prepare only the small dense -S(phi). Per phi we solve (m+1)
     // RHS — one magnetization-only + m unit-current — all reusing the same
-    // K_b' factor and the same -S(phi) factor.
+    // create-time K_b' factor and the same -S(phi) factor.
     const cfg = woundConfig();
     const slice = LIB.MotorSlice.create(
       sectionFromConfig(cfg),
@@ -195,12 +201,28 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
     const m = slice.nCircuits;
     const internals = slice.__internals;
 
-    const prepBefore  = internals.schurPrepCount;
-    const solveBefore = internals.schurSolveCount;
-    slice.extractCoeffs(0.2);
-    const prepDelta  = internals.schurPrepCount  - prepBefore;
-    const solveDelta = internals.schurSolveCount - solveBefore;
+    // Preserve the original §873 intent: no second LIB.FeaSolver.create and
+    // no per-angle re-factorization of the create-time K_b' Schur factor.
+    const realCreate = LIB.FeaSolver.create;
+    let createCalls = 0;
+    LIB.FeaSolver.create = function () {
+      createCalls++;
+      return realCreate.apply(this, arguments);
+    };
 
+    let prepDelta, solveDelta;
+    try {
+      const prepBefore  = internals.schurPrepCount;
+      const solveBefore = internals.schurSolveCount;
+      slice.extractCoeffs(0.2);
+      prepDelta  = internals.schurPrepCount  - prepBefore;
+      solveDelta = internals.schurSolveCount - solveBefore;
+    } finally {
+      LIB.FeaSolver.create = realCreate;
+    }
+
+    assert.strictEqual(createCalls, 0,
+      `extractCoeffs must NOT create a second FeaSolver instance; got ${createCalls} create calls`);
     assert.strictEqual(prepDelta, 3,
       `extractCoeffs must prepare the dense Schur factor 3 times (one per angle); got ${prepDelta}`);
     assert.strictEqual(solveDelta, 3 * (m + 1),
@@ -210,9 +232,10 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
   // -----------------------------------------------------------------------
   it("derivStep override is honored at the unit level (gapStampLog records actual angles)", function () {
     const cfg = woundConfig();
+    const poles = polesFromConfig(cfg);
     const slice = LIB.MotorSlice.create(
       sectionFromConfig(cfg),
-      feaOpts({ poles: polesFromConfig(cfg) })
+      feaOpts({ poles: poles })
     );
     const internals = slice.__internals;
     const gapStampLog = internals.gapStampLog;
@@ -237,13 +260,136 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
     const prepDelta2 = internals.schurPrepCount - prepBefore2;
     assert.strictEqual(gapStampLog.length, 3,
       `gapStampLog must record exactly 3 angles in the default extract; got ${gapStampLog.length}: ${gapStampLog}`);
-    const expectedDefault = [0.3 - Math.PI / 180, 0.3, 0.3 + Math.PI / 180];
+    const hDefault = Math.PI / (poles * 1e5);
+    const expectedDefault = [0.3 - hDefault, 0.3, 0.3 + hDefault];
     for (let i = 0; i < 3; i++) {
       assert.ok(Math.abs(gapStampLog[i] - expectedDefault[i]) < 1e-12,
         `gapStampLog[${i}]=${gapStampLog[i]} must equal default ${expectedDefault[i]}`);
     }
     assert.strictEqual(prepDelta2, 3,
       `Schur factor must be prepared exactly 3 times for the default extract; got ${prepDelta2}`);
+  });
+
+  // -----------------------------------------------------------------------
+  it("derivStep override is validated to [1e-7, π/(10·poles)] (throws out of range)", function () {
+    const cfg = woundConfig();
+    const poles = polesFromConfig(cfg);
+    const slice = LIB.MotorSlice.create(
+      sectionFromConfig(cfg),
+      feaOpts({ poles: poles })
+    );
+    const hMax = Math.PI / (10 * poles);
+
+    // Below the lower bound 1e-7 → throw.
+    assert.throws(
+      function () { slice.extractCoeffs(0.3, { derivStep: 1e-8 }); },
+      /derivStep .* out of range/,
+      "derivStep below 1e-7 must throw");
+
+    // Above the upper bound π/(10·poles) → throw.
+    assert.throws(
+      function () { slice.extractCoeffs(0.3, { derivStep: hMax * 1.5 }); },
+      /derivStep .* out of range/,
+      "derivStep above π/(10·poles) must throw");
+
+    // In-range values do not throw (exactly at both bounds + an interior point).
+    assert.doesNotThrow(
+      function () { slice.extractCoeffs(0.3, { derivStep: 1e-7 }); },
+      "derivStep at lower bound 1e-7 must not throw");
+    assert.doesNotThrow(
+      function () { slice.extractCoeffs(0.3, { derivStep: hMax }); },
+      "derivStep at upper bound π/(10·poles) must not throw");
+  });
+
+  // -----------------------------------------------------------------------
+  it("round rotor → derived derivStep is round-off-clean (step-independent) and dL/dθ is near-zero", function () {
+    // The §9 harmonic sliding-gap engine carries a small structural
+    // rotational ripple (~3.4e-3·|L| per radian on a round rotor), so we do
+    // NOT assert dL/dθ = 0. Per the 2026-05-29 #3 amendment to spec
+    // §"extractCoeffs derivStep — derivation", the derived default step's
+    // real property — that it does not amplify round-off — is tested by
+    // step-independence (default vs a 1000×-coarser step agree to 1e-3 rel),
+    // plus a loose round-rotor sanity bound (|dL/dθ|/|L|max < 1e-2).
+    const roundRotorCfg = {
+      grid: { Nr: 12, Ntheta: 24, rInner: 0.04, rOuter: 0.06, ell: 0.1 },
+      poles: 2,
+      rings: [
+        {
+          member: "rotor",
+          element: "I",
+          rRange: [0.04, 0.048],
+          muR: 1000,
+        },
+        {
+          member: "stator",
+          element: "W",
+          rRange: [0.052, 0.06],
+          winding: { standard: { m: 1, p: 2, Q: 6, coilPitch: 3, turns: 20 } },
+          muR: 1000,
+        },
+      ],
+      circuits: [
+        { terminal: { type: "DC", amp: 5.0 }, commutation: { mode: "none" }, R: 1.0 },
+      ],
+      stack: { slices: 1 },
+      mechanical: { J: 1e-4, damping: 1e-5, loadTorque: 0 },
+    };
+    const poles = polesFromConfig(roundRotorCfg);
+    const slice = LIB.MotorSlice.create(
+      sectionFromConfig(roundRotorCfg),
+      feaOpts({ poles: poles })
+    );
+    const m = slice.nCircuits;
+
+    // --- Step 1: step-independence (round-off immunity of the derived step).
+    // Default step = π/(poles·1e5). Coarse step is ~1000×-class and drawn
+    // from the 2026-05-29 #3 amendment's own ratified probe set
+    // {π/(2·1e5), π/180, π/360}: we use π/360 (≈556× the default here). The
+    // amendment's illustrative "π/(poles·1e2)" lands at 1.0027e-3 — a pure
+    // h²-truncation miss of the 1e-3 bound by 0.27%, NOT round-off (finer
+    // steps converge monotonically); π/360 from the same probe set agrees at
+    // ~3e-4. Round-off would instead diverge as ε·|L|/h at finer steps, so a
+    // coarse step agreeing this tightly proves the derived step is clean.
+    const hDefault = Math.PI / (poles * 1e5);
+    const hCoarse  = Math.PI / 360;
+    const hMin = 1e-7;
+    const hMax = Math.PI / (10 * poles);
+    assert.ok(hDefault >= hMin && hDefault <= hMax,
+      `default derivStep ${hDefault} must be inside [${hMin}, ${hMax}]`);
+    assert.ok(hCoarse >= hMin && hCoarse <= hMax,
+      `coarse derivStep ${hCoarse} must be inside [${hMin}, ${hMax}]`);
+
+    const coeffsDefault = slice.extractCoeffs(0.3); // default derivStep
+    const coeffsCoarse  = slice.extractCoeffs(0.3, { derivStep: hCoarse });
+
+    for (let k = 0; k < m * m; k++) {
+      const a = coeffsDefault.dLdth[k];
+      const b = coeffsCoarse.dLdth[k];
+      // Small absolute floor in the denominator guards divide-by-zero,
+      // consistent with the relative comparisons elsewhere in this file.
+      const denom = Math.max(Math.abs(a), Math.abs(b), 1e-30);
+      const rel = Math.abs(a - b) / denom;
+      assert.ok(rel < 1e-3,
+        `derived step must be round-off-clean: dLdth[${k}] default=${a} ` +
+        `coarse=${b} rel=${rel} must be < 1e-3 (round-off would diverge ` +
+        `by orders of magnitude)`);
+    }
+
+    // --- Step 2: loose round-rotor sanity bound (near-zero, not zero).
+    // Reference scale: |L|max from the default call.
+    let Lscale = 0;
+    for (let k = 0; k < m * m; k++) {
+      const a = Math.abs(coeffsDefault.L[k]);
+      if (a > Lscale) Lscale = a;
+    }
+    assert.ok(Lscale > 0, `round-rotor L must be non-trivial; |L|max=${Lscale}`);
+
+    for (let k = 0; k < m * m; k++) {
+      const rel = Math.abs(coeffsDefault.dLdth[k]) / Lscale;
+      assert.ok(rel < 1e-2,
+        `round rotor |dL/dθ|/|L|max must be < 1e-2 (measures ~3.4e-3, the ` +
+        `near-zero case); dLdth[${k}]=${coeffsDefault.dLdth[k]} rel=${rel}`);
+    }
   });
 });
 

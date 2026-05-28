@@ -1018,10 +1018,36 @@ on values outside that range (too-small steps amplify round-off;
 too-large steps lose smoothness assumption). The override-validation
 test in `tests/slice/extract.test.js` is updated to cover both bounds.
 
-**Acceptance:** `dL/dθ` computed at `derivStep = π/(poles·1e5)` agrees
-with the analytic round-rotor `dL/dθ = 0` (identically zero for a round
-rotor) to within `1e-12` (machine-epsilon * |L|), demonstrating that
-the chosen step does not lose precision to round-off.
+**Acceptance (amended 2026-05-29 #3 — step-independence, not round-rotor-zero).**
+The original acceptance asked round-rotor `dL/dθ` to agree with the
+analytic `0` to within `1e-12·|L|`. That premise — that `L(θ+h)` and
+`L(θ−h)` are bit-identical up to round-off for a round rotor — is **false
+for this engine**, and the user-ratified investigation (coordinator probe,
+2026-05-29) quantified why: the §9 harmonic sliding-gap coupling does not
+realize bit-exact rotational invariance, so the FEM-realized round-rotor
+`L(θ)` carries a real, structural ~`3.4e-3·|L|` per-radian ripple that is
+**neither round-off nor a resolution artifact** — it is step-independent
+(`dL/dθ ≈ 8.78e-9` at `h ∈ {π/(2·1e5), π/180, π/360}`), mesh-refine
+independent (3.33–3.38e-3 across refine 0.5→4), and does NOT shrink with
+harmonic count `K` (erratic across K=18..80; `|L|` destabilizes 10× at
+K=36/72). More harmonics make it worse, not better.
+
+The derived-step amendment's actual intent — *that the machine-aware
+default step does not lose precision to round-off* — is tested directly by
+**step-independence**, which the engine DOES satisfy:
+
+> The `dL/dθ` returned by `extractCoeffs(0.3)` at the derived default
+> `derivStep = π/(poles·1e5)` must agree with the `dL/dθ` obtained at a
+> 1000×-coarser step (e.g. `derivStep = π/(poles·1e2)`, still inside the
+> validated `[1e-7, π/(10·poles)]` band) to within `1e-3` relative. If the
+> default step were amplifying round-off, the two would diverge by orders
+> of magnitude (round-off in a central difference scales as `ε·|L|/h`); their
+> agreement to 1e-3 demonstrates the derived step is round-off-clean.
+
+Plus a loose round-rotor **sanity** bound confirming the round case is the
+near-zero case: round-rotor `|dL/dθ|/|L|max < 1e-2` (it measures ~3.4e-3;
+a salient reference measures ~2.9e-2). This sanity bound documents the
+known harmonic-gap interface ripple without pretending it is round-off.
 
 ## Constraint-matrix handling for per-feature mesh (added 2026-05-28)
 
