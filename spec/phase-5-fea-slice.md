@@ -1410,3 +1410,44 @@ remains UNIMPLEMENTED — implement it in this same pass:**
 `lib/motor-stack.js` stays byte-identical over the frozen set (D2 rename
 only); this amendment touches `lib/motor-slice.js` `extractCoeffs` and
 `tests/slice/extract.test.js` only.
+
+## Amendments (2026-05-29 #4) — round-rotor reframe REVERTED; harmonic-gap correctness defects tracked as honest failing signals
+
+The 2026-05-29 #3 Acceptance reframe (step-independence + a loose `<1e-2`
+round-rotor sanity bound) is **superseded**. On review (user directive,
+2026-05-29) it was judged to excuse a real engine defect as design intent:
+it loosened a correctness tripwire into a tolerance that accommodates the
+artifact. That is reverted.
+
+**Reinstated correctness requirement.** A geometrically round iron rotor
+has a rotationally-invariant air gap ⇒ its inductances are rotor-angle
+independent ⇒ analytic `dL/dθ = 0` exactly. `tests/slice/extract.test.js`
+reinstates the original 2026-05-27 correctness gate (round-rotor
+`|dL/dθ|/|L|max < 1e-12`). The §9 harmonic sliding-gap engine currently
+**fails** this at ~`3.4e-3` — a spurious reluctance-torque ripple that is
+step-independent, mesh-refine independent, and does NOT shrink with harmonic
+count `K` (K-sweep erratic; `|L|` destabilises 10× at K=36/72, indicating an
+ill-conditioned harmonic block — leading hypothesis: broken cos-k/sin-k
+isotropy in the discrete DtN coupling, consistent with the noted k=0
+null-space + surfaceFlux ε-regularization). This is a **real correctness
+defect**, not a floor; the test is an **intentional, honest FAILING signal**
+that tracks it and must NOT be loosened to green the suite. The bound is
+recalibrated to the achievable floor only once the coupling is fixed. The
+step-independence check (derived `derivStep` does not amplify round-off)
+remains a separate, legitimately-passing test.
+
+**Second, more severe symptom (surfaced by Phase 6 / T6.1.1, 2026-05-29):**
+the `pmsm` fixture produces an **all-NaN field solve** — `extractCoeffs(0)`
+→ `L`/`lambdaPm` all NaN; `solve(0, zeros)` → `torque`/`fluxLinkages`/`field`
+all NaN; refine-independent. A wound-DC control config steps cleanly through
+the identical code path, so the defect is specific to the `pmsm` solve
+(magnet-bearing, 8-pole), not the runtime/stepping path. This is almost
+certainly the same subsystem (harmonic-gap / slice solve) as the round-rotor
+ripple, at greater severity. It must be **root-caused, not designed around**
+(no hand-injection of `gap.phi` to dodge it).
+
+**Disposition (per user directive):** these two harmonic-gap correctness
+defects are real and tracked; the corresponding tests fail honestly. Per the
+directive, the broader pipeline is NOT halted/reverted for them beyond
+reinstating the honest tests — the root-cause + fix of the harmonic-gap
+coupling is tracked work (see `spec/progress.md`).

@@ -302,14 +302,22 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
   });
 
   // -----------------------------------------------------------------------
-  it("round rotor → derived derivStep is round-off-clean (step-independent) and dL/dθ is near-zero", function () {
-    // The §9 harmonic sliding-gap engine carries a small structural
-    // rotational ripple (~3.4e-3·|L| per radian on a round rotor), so we do
-    // NOT assert dL/dθ = 0. Per the 2026-05-29 #3 amendment to spec
-    // §"extractCoeffs derivStep — derivation", the derived default step's
-    // real property — that it does not amplify round-off — is tested by
-    // step-independence (default vs a 1000×-coarser step agree to 1e-3 rel),
-    // plus a loose round-rotor sanity bound (|dL/dθ|/|L|max < 1e-2).
+  it("round rotor → dL/dθ ≈ 0 (correctness) AND derived derivStep is round-off-clean", function () {
+    // CORRECTNESS REQUIREMENT (spec 2026-05-29 #4, reinstating the original
+    // 2026-05-27 intent): a geometrically round iron rotor has a
+    // rotationally-invariant air gap, so its self/mutual inductances are
+    // rotor-angle-independent and analytic dL/dθ = 0 exactly. The §9
+    // harmonic sliding-gap engine currently VIOLATES this — it fabricates a
+    // ~3.4e-3·|L| per-radian round-rotor ripple (a spurious reluctance
+    // torque) that is step-independent and does NOT shrink with mesh or
+    // harmonic refinement (K-sweep erratic; |L| destabilises 10× at K=36/72).
+    // That is a real harmonic-gap coupling/conditioning defect (leading
+    // hypothesis: broken cos-k/sin-k isotropy in the discrete DtN block),
+    // NOT design intent. Step 2 below is the HONEST FAILING SIGNAL that
+    // tracks this defect; it is expected RED until the coupling is fixed,
+    // at which point the bound is recalibrated to the achievable floor.
+    // Step 1 (step-independence) is a separate, legitimately-passing check
+    // that the derived default derivStep does not amplify round-off.
     const roundRotorCfg = {
       grid: { Nr: 12, Ntheta: 24, rInner: 0.04, rOuter: 0.06, ell: 0.1 },
       poles: 2,
@@ -375,8 +383,14 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
         `by orders of magnitude)`);
     }
 
-    // --- Step 2: loose round-rotor sanity bound (near-zero, not zero).
-    // Reference scale: |L|max from the default call.
+    // --- Step 2: round-rotor dL/dθ = 0 CORRECTNESS gate (honest failing
+    // signal for the harmonic-gap defect — see header). A round rotor must
+    // produce zero reluctance variation; we require it to within 1e-12·|L|
+    // (the original 2026-05-27 spec bound). The engine currently measures
+    // ~3.4e-3, so this assertion FAILS by design until the coupling defect
+    // is fixed. Do NOT loosen this to make the suite green — that masks the
+    // bug. Recalibrate the bound to the achievable floor once the
+    // harmonic-gap coupling is corrected.
     let Lscale = 0;
     for (let k = 0; k < m * m; k++) {
       const a = Math.abs(coeffsDefault.L[k]);
@@ -386,9 +400,11 @@ describe("MotorSlice extractCoeffs (Wave 5.3)", function () {
 
     for (let k = 0; k < m * m; k++) {
       const rel = Math.abs(coeffsDefault.dLdth[k]) / Lscale;
-      assert.ok(rel < 1e-2,
-        `round rotor |dL/dθ|/|L|max must be < 1e-2 (measures ~3.4e-3, the ` +
-        `near-zero case); dLdth[${k}]=${coeffsDefault.dLdth[k]} rel=${rel}`);
+      assert.ok(rel < 1e-12,
+        `round rotor dL/dθ must be 0 to within 1e-12·|L| (correctness — a round ` +
+        `rotor has no reluctance variation); dLdth[${k}]=${coeffsDefault.dLdth[k]} ` +
+        `rel=${rel}. A nonzero value is a harmonic-gap coupling defect (spurious ` +
+        `reluctance torque), NOT something to loosen away.`);
     }
   });
 });
