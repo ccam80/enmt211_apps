@@ -30,18 +30,8 @@ test("expands to Phase-2 sections with matching circuit count", { timeout: TIMEO
   }
 });
 
-// DEFERRED (user decision 2026-05-25): a true synchronous machine does not self-start
-// because its field is CURRENT-regulated (exciter/AVR). The excitation model has only
-// voltage/open/short terminal kinds — no current source — so the field can only be a
-// DC VOLTAGE source, which at standstill is continuously excited by the rotating
-// stator field (slip=1, sustained) and acts as an induction damper -> real line-start
-// async torque (verified 1.44 N.m at fine dt; NOT a timestep/measurement artifact).
-// The machine therefore line-starts. This assertion is deferred pending a
-// current-source ("field regulator") terminal kind in the excitation layer; see
-// spec/progress.md "INDUCTION/WFS RESOLUTION". The machine's SYNCHRONOUS behaviour is
-// still validated by the static sin(delta) torque-angle test below.
 test("does not self-start from rest on AC-none",
-  { timeout: TIMEOUT, skip: "excitation model has no current-source (field-regulator) terminal; the voltage-fed field line-starts — deferred per user, see progress.md" },
+  { timeout: TIMEOUT },
   function () {
     const { runtime } = build("wound-field-synchronous");
     const state = runFromRest(runtime, 150);

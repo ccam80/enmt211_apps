@@ -61,7 +61,7 @@ test("reluctance torque is proportional to i^2 below the iron knee", { timeout: 
   // Linear-regime law — evaluate on the ceiling-disabled (linear) stack, the
   // same linear-operating-point methodology crossCheck uses.
   const { expanded } = build("switched-reluctance");
-  const stackLin = LIB.MotorStack.create(expanded, { ceiling: { enabled: false } });
+  const stackLin = LIB.MotorStack.create(expanded, { saturation: { enabled: false } });
   const theta = 0.3;
   const t1 = stackLin.solve(theta, new Float64Array([8, 0, 0])).torque;
   const t2 = stackLin.solve(theta, new Float64Array([16, 0, 0])).torque;
@@ -86,5 +86,5 @@ test("Maxwell vs co-energy within 5%", { timeout: TIMEOUT }, function () {
 });
 
 // (C) carve-out, not asserted here: the saturated aligned-vs-unaligned torque
-// differential is a Phase-9 acceptance; this file checks only the linear
+// differential is a saturated-cogging acceptance; this file checks only the linear
 // reluctance shape + i^2 law below the knee.

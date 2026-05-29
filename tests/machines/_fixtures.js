@@ -1,10 +1,10 @@
 "use strict";
 
 // =============================================================================
-//  Shared loader and measurement helpers for Phase-6 machine validation tests.
-//  Not a test file — no .test.js suffix. Required by Wave-6.3 test files.
+//  Shared loader and measurement helpers for machine validation tests.
+//  Not a test file — no .test.js suffix. Required by the machine test files.
 //
-//  Loads the Phase-5 pipeline loader (read-only), which installs window + all
+//  Loads the pipeline loader (read-only), which installs window + all
 //  engine/pipeline libs and exposes LIB, UnifiedMotor, assertClose, fitCos2.
 //  Requires all 15 machine fixtures so they register on UnifiedMotor.MACHINES.
 //  Exports the agnostic-pipeline drivers and analytic/cross-check helpers.
@@ -12,13 +12,23 @@
 
 const fs = require("fs");
 const path = require("path");
+const { before } = require("node:test");
 
-// Phase-5 pipeline loader — installs window + engine/pipeline libs.
+// Pipeline loader — installs window + engine/pipeline libs.
 const P = require("../pipeline/_fixtures.js");
 
 const LIB        = P.LIB;
 const UnifiedMotor = P.UnifiedMotor;
 const assertClose = P.assertClose;
+const initSolver = P.initSolver;
+
+// Every machine test builds a MotorStack/MotorSlice, which requires the WASM
+// FEA solver to be loaded. init() is async (dynamic import + WASM instantiate),
+// so it cannot be awaited at require-time; register it as the test runner's
+// root before-hook. This module is required at the top of every machine
+// *.test.js before any test() call, so the hook lands in that file's root
+// suite and resolves before its first test runs.
+before(async () => { await initSolver(); });
 // fitCos2 lived in tests/engine/_fixtures.js in a prior project attempt;
 // that whole tests/engine/ directory no longer exists. The function itself
 // lives in tests/_assert.js — import directly to drop the dead indirection.
@@ -170,7 +180,7 @@ function sweepLambdaPm(stack, thetas, k) {
 //    OR  rel <= XC_TOL * max(|arkkio|, |coe|) + XC_FLOOR
 // ---------------------------------------------------------------------------
 function crossCheck(stack, theta, currents) {
-  var stackLin = LIB.MotorStack.create(stack.expanded, { ceiling: { enabled: false } });
+  var stackLin = LIB.MotorStack.create(stack.expanded, { saturation: { enabled: false } });
   var arkkio = stackLin.solve(theta, currents).torque;
   var coe    = stackLin.coenergyTorque(theta, currents).total;
   var rel    = Math.abs(arkkio - coe);
@@ -311,6 +321,7 @@ module.exports = {
   byId:         byId,
   MACHINE_IDS:  MACHINE_IDS,
   assertClose:  assertClose,
+  initSolver:   initSolver,
   fitCos2:      fitCos2,
   XC_TOL:       XC_TOL,
   XC_FLOOR:     XC_FLOOR,

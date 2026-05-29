@@ -56,7 +56,7 @@ test("reluctance torque is proportional to i^2 below the iron knee", { timeout: 
   // on the ceiling-disabled (linear) stack — the same linear-operating-point
   // methodology crossCheck uses for Maxwell-vs-co-energy.
   const { expanded } = build("vr-stepper");
-  const stackLin = LIB.MotorStack.create(expanded, { ceiling: { enabled: false } });
+  const stackLin = LIB.MotorStack.create(expanded, { saturation: { enabled: false } });
   const theta = 0.3;
   const t1 = stackLin.solve(theta, new Float64Array([8, 0, 0])).torque;
   const t2 = stackLin.solve(theta, new Float64Array([16, 0, 0])).torque;
