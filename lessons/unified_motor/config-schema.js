@@ -578,6 +578,58 @@
   }
 
   // ---------------------------------------------------------------------------
+  //  Rotor cage end-ring coupling.
+  //
+  //  A cage is N bars joined at both ends by two conducting end rings. With one
+  //  bar per slot (cageRouting), the bar currents i_k are the state and the FE
+  //  mutual matrix carries the (now clean, direct) bar↔stator and bar↔bar
+  //  magnetic coupling. The end rings add the ELECTRICAL coupling: eliminating
+  //  the ring node potentials (each ring a cycle graph of N nodes, segment
+  //  resistance R_e), the effective cage resistance matrix is
+  //      R_cage = R_b·I + 2·R_e·Λ⁺
+  //  where Λ is the cycle-graph Laplacian (circulant 2,−1,…,−1, singular on the
+  //  all-ones mode) and Λ⁺ its pseudo-inverse on the Σi=0 subspace; the factor 2
+  //  is the two rings (front+back) in series in each bar loop. A large
+  //  common-mode penalty enforces the KCL constraint Σ i_bar = 0 — the rings can
+  //  only redistribute current, there is no net axial rotor current (and a single
+  //  one-bar-per-slot bar has no in-plane return, so Σi=0 is required for FE
+  //  validity too).
+  // ---------------------------------------------------------------------------
+  function cycleLaplacianPinvGenerator(N) {
+    // Circulant generator g[d] (d = 0..N-1) of Λ⁺ for the N-node cycle graph:
+    // Λ⁺ = Σ_{j=1}^{N-1} (1/μ_j)·v_j v_jᵀ, μ_j = 2−2cos(2πj/N); g[d] is its IDFT.
+    const g = new Float64Array(N);
+    for (let d = 0; d < N; d++) {
+      let s = 0;
+      for (let j = 1; j < N; j++) {
+        const mu = 2 - 2 * Math.cos((2 * Math.PI * j) / N);
+        s += Math.cos((2 * Math.PI * j * d) / N) / mu;
+      }
+      g[d] = s / N;
+    }
+    return g;
+  }
+
+  function buildCageRcoupling(m, circuits, cage) {
+    // Full m×m resistance matrix: per-circuit R on the diagonal for every
+    // circuit, with the cage block [s0, s0+N) overwritten by the end-ring-coupled
+    // circulant R_cage + the Σi=0 common-mode penalty.
+    const R = new Float64Array(m * m);
+    for (let k = 0; k < m; k++) R[k * m + k] = circuits[k].R;
+    if (!cage) return R;
+    const s0 = cage.startIndex, N = cage.bars, Re = cage.Re, Rb = cage.Rb;
+    const g = cycleLaplacianPinvGenerator(N);
+    const penalty = 1e6 * Math.max(Rb, 1e-9); // common-mode resistance ⇒ i_common≈0
+    for (let a = 0; a < N; a++) {
+      for (let b = 0; b < N; b++) {
+        const d = (((a - b) % N) + N) % N;
+        R[(s0 + a) * m + (s0 + b)] =
+          (a === b ? Rb : 0) + 2 * Re * g[d] + penalty / N;
+      }
+    }
+    return R;
+  }
+
   //  expand(config) → expanded
   // ---------------------------------------------------------------------------
   function expand(config) {
@@ -606,6 +658,7 @@
     // Build the base feature list with global circuit indexing
     const baseFeatures = [];
     let circuitBase = 0;
+    let cageInfo = null;
 
     for (let ri = 0; ri < rings.length; ri++) {
       const ring = rings[ri];
@@ -621,6 +674,19 @@
         const ringFeatures = buildWoundFeatures(ring, circuitBase, false);
         for (const f of ringFeatures) baseFeatures.push(f);
         const routing = resolveWinding(ring);
+        if (el === "K" && ring.cage) {
+          // Record the cage descriptor for end-ring-coupled R assembly below.
+          // startIndex is the global index of this cage's first bar circuit
+          // (BEFORE the circuitBase increment); ringRadius from the bar ring
+          // geometry; ringAreaRatio = end-ring cross-section / bar cross-section.
+          const rr = ring.rRange || ring.slotRRange;
+          cageInfo = {
+            startIndex: circuitBase,
+            bars: ring.cage.bars,
+            ringRadius: rr ? 0.5 * (rr[0] + rr[1]) : null,
+            ringAreaRatio: ring.cage.ringAreaRatio != null ? ring.cage.ringAreaRatio : 1.0,
+          };
+        }
         circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;
       } else if (el === "C") {
         const ringFeatures = buildWoundFeatures(ring, circuitBase, true);
@@ -631,6 +697,21 @@
     }
 
     const nCircuits = circuitBase;
+
+    // End-ring-coupled cage resistance (off-diagonal). Geometry-derived end-ring
+    // segment resistance R_e = R_b·(segment arc / bar length)/ringAreaRatio,
+    // segment arc = 2π·R_ring/N. Null when there is no cage (diagonal-R path).
+    let Rcoupling = null;
+    let cage = null;
+    if (cageInfo && cageInfo.ringRadius != null && config.grid && config.grid.ell) {
+      const N = cageInfo.bars;
+      const Rb = config.circuits[cageInfo.startIndex].R;
+      const ell = config.grid.ell;
+      const Lseg = (2 * Math.PI * cageInfo.ringRadius) / N;
+      const Re = (Rb * (Lseg / ell)) / cageInfo.ringAreaRatio;
+      cage = { startIndex: cageInfo.startIndex, bars: N, Rb: Rb, Re: Re };
+      Rcoupling = buildCageRcoupling(nCircuits, config.circuits, cage);
+    }
 
     // Build per-slice sections, applying fluxSource sign flips to M rings
     const slices = [];
@@ -662,6 +743,8 @@
       nCircuits,
       circuits: config.circuits.slice(),
       slices,
+      Rcoupling,
+      cage,
     };
   }
 
