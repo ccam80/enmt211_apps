@@ -18,7 +18,7 @@
         member: "rotor",
         element: "W",
         rRange: ROTOR_SURFACE_R,
-        winding: { standard: { m: 1, p: 2, Q: 24, coilPitch: 6, turns: 15 } },
+        winding: { standard: { m: 1, p: 4, Q: 24, coilPitch: 6, turns: 15 } },
         slotRRange: ROTOR_SURFACE_R,
         slotFraction: 0.55,
         ironRRange: ROTOR_YOKE_R,
