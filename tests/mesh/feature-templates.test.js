@@ -620,11 +620,13 @@ describe("W conductors carry circuit and turns", () => {
     }
     assert.ok(conductorCount > 0, "should have conductor elements");
 
-    // Per the 2026-05-28 Phase-2 amendment, turns[e] is the area-weighted share:
-    // turns[e] = feature.turns * area_e / A_feature, where A_feature is the
-    // total area of elements sharing the same srcId. Therefore Σ_{e : srcId[e]=k}
-    // turns[e] == feature.turns (when all features sharing circuit k have the
-    // same feature.turns value, which is the case in this fixture).
+    // turns[e] is the area-weighted PER-SLOT share: turns[e] = feature.turns *
+    // area_e / A_slot, where A_slot is the area of ONE conductor feature (slot
+    // wedge). Each slot's turns therefore sum to its feature.turns, and a circuit
+    // with N_slot such slots sums to Σ feature.turns over those slots. (Normalising
+    // per-circuit instead — the reverted 2026-05-28 amendment — divided each slot's
+    // turns by the slots-per-phase, collapsing distributed-winding ampere-turns and
+    // the magnetizing inductance by that factor.)
     const turnsSumPerSrc = new Map();
     const areaSumPerSrc  = new Map();
     for (let e = 0; e < Ne; e++) {
@@ -646,25 +648,25 @@ describe("W conductors carry circuit and turns", () => {
       areaSumPerSrc.set(sid,  (areaSumPerSrc.get(sid)  || 0) + a);
     }
 
-    // For each circuit, expected total turns is the matching feature.turns.
-    // (In this fixture each circuit has one feature, but the assertion is
-    // written to handle the general case where multiple same-turns features
-    // share a circuit.)
+    // For each circuit, the per-slot shares each sum to that slot's feature.turns,
+    // so the circuit total is the sum of feature.turns over all its slots.
     for (const [sid, turnsSum] of turnsSumPerSrc) {
-      // Find any feature with this circuit
-      const feat = conductorFeatures.find(f => f.circuit === sid);
-      assert.ok(feat !== undefined,
+      const feats = conductorFeatures.filter(f => f.circuit === sid);
+      assert.ok(feats.length > 0,
         `srcId ${sid} has no matching conductor feature in section`);
-      assert.ok(Math.abs(turnsSum - feat.turns) < 1e-9 * Math.abs(feat.turns + 1),
-        `srcId ${sid}: Σ turns[e] = ${turnsSum} should equal feature.turns = ${feat.turns} ` +
-        `(area-weighted share sums to feature turns)`);
+      const expectedTurns = feats.reduce((acc, f) => acc + f.turns, 0);
+      assert.ok(Math.abs(turnsSum - expectedTurns) < 1e-9 * (Math.abs(expectedTurns) + 1),
+        `srcId ${sid}: Σ turns[e] = ${turnsSum} should equal Σ feature.turns over its slots = ${expectedTurns} ` +
+        `(per-slot area-weighted shares each sum to that slot's feature.turns)`);
     }
 
     // Additionally: turns[e] / area_e must be the same constant across all
     // elements sharing one srcId (uniform Jz density).
     for (const [sid, Atot] of areaSumPerSrc) {
-      const feat = conductorFeatures.find(f => f.circuit === sid);
-      const expectedDensity = feat.turns / Atot;
+      const feats = conductorFeatures.filter(f => f.circuit === sid);
+      const feat = feats[0];
+      // per-slot uniform Jz: turns/area = feature.turns / A_slot, A_slot = Atot/N_slot
+      const expectedDensity = (feat.turns * feats.length) / Atot;
       for (let e = 0; e < Ne; e++) {
         if (stator.srcId[e] !== sid) continue;
         const n0 = stator.elems[4*e], n1 = stator.elems[4*e+1];
