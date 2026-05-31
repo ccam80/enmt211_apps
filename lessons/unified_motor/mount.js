@@ -35,6 +35,18 @@
   if (!Array.isArray(UM.TOOLS))           UM.TOOLS           = [];
   if (!Array.isArray(UM.HEADER_CONTROLS)) UM.HEADER_CONTROLS = [];
   if (UM.RENDER3D === undefined)          UM.RENDER3D        = null;
+  if (UM.CROSS_SECTION_2D === undefined)  UM.CROSS_SECTION_2D = null;
+
+  // Field-viz overlay state, shared by the 2-D and 3-D renderers (D3). Six
+  // independent toggles; flux-lines on by default, everything else opt-in.
+  if (!UM.fieldViz) UM.fieldViz = {
+    fluxLines: true,
+    modulusB: false,
+    saturation: false,
+    magnetization: false,
+    currentDensity: false,
+    gapLoop: false,
+  };
 
   UM.registerPanel = function (entry) {
     UM.PANELS.push(entry);
@@ -50,6 +62,10 @@
 
   UM.registerRender3D = function (entry) {
     UM.RENDER3D = entry;
+  };
+
+  UM.registerCrossSection2D = function (entry) {
+    UM.CROSS_SECTION_2D = entry;
   };
 
   // ---------------------------------------------------------------------------
@@ -137,247 +153,6 @@
       });
     }
     return registry;
-  }
-
-  // ---------------------------------------------------------------------------
-  //  Feature geometry helpers — colour + drawing of machine structural regions
-  //  Dispatches only on feature.kind and feature.member — no machine identity.
-  // ---------------------------------------------------------------------------
-
-  // Colours by feature kind.
-  const KIND_COLORS = {
-    iron:      "#607080",   // steel grey
-    conductor: "#b87333",   // copper (base; tinted by current sign at draw time)
-    magnet:    "#c0392b",   // red (base; sign determines red vs blue)
-  };
-
-  // Return fill colour for a feature given the live current for its circuit.
-  function featureColor(feature, currents) {
-    if (feature.kind === "iron") {
-      return feature.member === "rotor" ? "#4a6070" : "#607080";
-    }
-    if (feature.kind === "magnet") {
-      return feature.Mr >= 0 ? "#c0392b" : "#2980b9";
-    }
-    if (feature.kind === "conductor") {
-      const i = (currents && feature.circuit < currents.length)
-        ? currents[feature.circuit] : 0;
-      const sign = feature.sign != null ? feature.sign : 1;
-      const net = i * sign;
-      if (net > 1e-6)  return "#e67e22";  // orange-copper, current flowing in
-      if (net < -1e-6) return "#2471a3";  // blue, current flowing out
-      return "#7f8c8d";                   // grey, near zero
-    }
-    return "#8a93a3";
-  }
-
-  // Draw a filled annular sector on a 2D canvas (cx,cy = centre px, scale = m→px).
-  // thetaLo..thetaHi is the angular span (radians, CCW from +x, y-up).
-  // Canvas y is flipped: py = cy - y_world * scale.
-  function fillSector2D(ctx2, cx, cy, r0px, r1px, thLo, thHi, color, alpha) {
-    const dth = thHi - thLo;
-    if (dth <= 0 || r1px <= r0px) return;
-
-    // Clamp to at most 2π to avoid degenerate full-ring sectors painted twice.
-    const thEnd = (dth >= 2 * Math.PI - 1e-9) ? thLo + 2 * Math.PI : thHi;
-    const fullRing = dth >= 2 * Math.PI - 1e-9;
-
-    ctx2.save();
-    ctx2.globalAlpha = alpha != null ? alpha : 1;
-    ctx2.fillStyle = color;
-    ctx2.beginPath();
-    if (fullRing) {
-      // Two concentric circles (annulus).
-      ctx2.arc(cx, cy, r1px, 0, 2 * Math.PI, false);
-      ctx2.arc(cx, cy, r0px, 0, 2 * Math.PI, true);
-    } else {
-      // Arc path: outer arc CCW, inner arc CW.
-      // Canvas y-flip: angle maps as θ_canvas = -θ_world (CW on screen = CCW in math).
-      ctx2.arc(cx, cy, r0px, -thLo, -thEnd, true);   // inner arc (reversed)
-      ctx2.arc(cx, cy, r1px, -thEnd, -thLo, false);  // outer arc
-    }
-    ctx2.closePath();
-    ctx2.fill();
-    ctx2.restore();
-  }
-
-  // Draw machine structural features as filled annular sectors on a 2D canvas.
-  // features = expanded.slices[k].section.features
-  // thetaR   = live rotor angle (radians) — added to rotor-member thetaRanges
-  // currents = Float64Array of per-circuit current values (for conductor tint)
-  function drawFeatureSectors2D(ctx2, features, cx, cy, scale, thetaR, currents) {
-    const TWO_PI = 2 * Math.PI;
-    for (const f of features) {
-      const r0px = f.rRange[0] * scale;
-      const r1px = f.rRange[1] * scale;
-      const color = featureColor(f, currents);
-
-      let thLo, thHi;
-      if (!f.thetaRange || (f.thetaRange[1] - f.thetaRange[0]) >= TWO_PI - 1e-9) {
-        // Full ring (e.g. back-iron).
-        thLo = 0;
-        thHi = TWO_PI;
-      } else {
-        thLo = f.thetaRange[0];
-        thHi = f.thetaRange[1];
-        if (f.member === "rotor") {
-          thLo += thetaR;
-          thHi += thetaR;
-        }
-      }
-      fillSector2D(ctx2, cx, cy, r0px, r1px, thLo, thHi, color, 0.85);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  //  3D viewport geometry helpers
-  // ---------------------------------------------------------------------------
-
-  // Sample K points around a ring at radius r in the z=planeZ plane.
-  function ringPoints(r, planeZ, K) {
-    K = K || 64;
-    const pts = new Array(K);
-    for (let i = 0; i < K; i++) {
-      const a = (i / K) * 2 * Math.PI;
-      pts[i] = { x: r * Math.cos(a), y: r * Math.sin(a), z: planeZ };
-    }
-    return pts;
-  }
-
-  // Draw a projected ring outline.
-  function drawRing3D(ctx, L3, r, planeZ, color, lineWidth, K) {
-    const pts = ringPoints(r, planeZ, K || 64);
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth || 1.5;
-    ctx.lineCap = "round";
-    let started = false;
-    let prevBehind = true;
-    ctx.beginPath();
-    for (let i = 0; i <= pts.length; i++) {
-      const p = pts[i % pts.length];
-      const sp = L3.project(p);
-      if (sp.behind) { prevBehind = true; continue; }
-      if (!started || prevBehind) { ctx.moveTo(sp.px, sp.py); started = true; }
-      else                        { ctx.lineTo(sp.px, sp.py); }
-      prevBehind = false;
-    }
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // Draw a filled annular sector in 3D by sampling its boundary polygon and
-  // projecting each vertex through L3.  Arc is sampled at arcSteps points.
-  function fillSector3D(ctx, L3, r0, r1, thLo, thHi, planeZ, color, alpha, arcSteps) {
-    arcSteps = arcSteps || 16;
-    const dth = thHi - thLo;
-    if (dth <= 0 || r1 <= r0) return;
-    const fullRing = dth >= 2 * Math.PI - 1e-9;
-
-    // Build polygon points: outer arc forward, inner arc backward.
-    const pts = [];
-    const steps = fullRing ? arcSteps : Math.max(4, Math.round(arcSteps * dth / (2 * Math.PI)));
-    for (let s = 0; s <= steps; s++) {
-      const a = fullRing ? (s / steps) * 2 * Math.PI : thLo + (s / steps) * dth;
-      pts.push({ x: r1 * Math.cos(a), y: r1 * Math.sin(a), z: planeZ });
-    }
-    if (!fullRing) {
-      for (let s = steps; s >= 0; s--) {
-        const a = thLo + (s / steps) * dth;
-        pts.push({ x: r0 * Math.cos(a), y: r0 * Math.sin(a), z: planeZ });
-      }
-    } else {
-      // For full ring, project a filled disc minus hole — use two separate paths.
-      ctx.save();
-      ctx.globalAlpha = alpha != null ? alpha : 0.85;
-      ctx.fillStyle = color;
-      // Outer circle
-      const outerPts = pts.map(p => L3.project(p));
-      const visOuter = outerPts.filter(p => !p.behind);
-      if (visOuter.length < 3) { ctx.restore(); return; }
-      ctx.beginPath();
-      let first = true;
-      for (const sp of outerPts) {
-        if (sp.behind) { first = true; continue; }
-        if (first) { ctx.moveTo(sp.px, sp.py); first = false; }
-        else        { ctx.lineTo(sp.px, sp.py); }
-      }
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-      return;
-    }
-
-    // Project all polygon points.
-    const projected = pts.map(p => L3.project(p));
-    const visible = projected.filter(p => !p.behind);
-    if (visible.length < 3) return;
-
-    ctx.save();
-    ctx.globalAlpha = alpha != null ? alpha : 0.85;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    let first = true;
-    for (const sp of projected) {
-      if (sp.behind) { first = true; continue; }
-      if (first) { ctx.moveTo(sp.px, sp.py); first = false; }
-      else        { ctx.lineTo(sp.px, sp.py); }
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  // Draw machine structural features as filled 3D projected sectors.
-  function drawFeatureSectors3D(ctx, L3, features, planeZ, thetaR, currents) {
-    const TWO_PI = 2 * Math.PI;
-    for (const f of features) {
-      const r0 = f.rRange[0];
-      const r1 = f.rRange[1];
-      const color = featureColor(f, currents);
-
-      let thLo, thHi;
-      if (!f.thetaRange || (f.thetaRange[1] - f.thetaRange[0]) >= TWO_PI - 1e-9) {
-        thLo = 0;
-        thHi = TWO_PI;
-      } else {
-        thLo = f.thetaRange[0];
-        thHi = f.thetaRange[1];
-        if (f.member === "rotor") {
-          thLo += thetaR;
-          thHi += thetaR;
-        }
-      }
-      fillSector3D(ctx, L3, r0, r1, thLo, thHi, planeZ, color, 0.82, 24);
-    }
-  }
-
-  // Draw radial conductor lines for a wound ring (slot conductors projected in 3D).
-  function drawSlotConductors3D(ctx, L3, ring, thetaR, planeZ, current, color) {
-    const rInner = ring.rRange[0];
-    const rOuter = ring.rRange[1];
-    const nSlots = ring.winding && ring.winding.standard ? ring.winding.standard.Q : 6;
-    ctx.save();
-    ctx.lineWidth = 2.5;
-    ctx.lineCap = "round";
-    for (let q = 0; q < nSlots; q++) {
-      const a = (ring.member === "rotor" ? thetaR : 0) + (q / nSlots) * 2 * Math.PI;
-      const goColor    = (q % 2 === 0) ? color : "rgba(80,80,80,0.7)";
-      const innerPt = { x: rInner * Math.cos(a), y: rInner * Math.sin(a), z: planeZ };
-      const outerPt = { x: rOuter * Math.cos(a), y: rOuter * Math.sin(a), z: planeZ };
-      const pi = L3.project(innerPt);
-      const po = L3.project(outerPt);
-      if (pi.behind && po.behind) continue;
-      ctx.strokeStyle = goColor;
-      ctx.beginPath();
-      if (!pi.behind) ctx.moveTo(pi.px, pi.py);
-      if (!po.behind) {
-        if (pi.behind) ctx.moveTo(po.px, po.py);
-        else           ctx.lineTo(po.px, po.py);
-      }
-      ctx.stroke();
-    }
-    ctx.restore();
   }
 
   // ---------------------------------------------------------------------------
@@ -601,16 +376,13 @@
     for (const d of sliderDefs) applyDrive(d.key, d.value);
 
     // -----------------------------------------------------------------------
-    //  5. Orbit-camera tool state + smoothed magScale for gap-field viz
+    //  5. Orbit-camera tool state
     // -----------------------------------------------------------------------
     let orbitYaw   = 0.4;
     let orbitPitch = 0.35;
     const ORBIT_DIST = 0.25;
 
     let orbitDrag = null;
-
-    // Smoothed magScale for the 3D gap-field overlay.
-    let smoothedMagScale = 1;
 
     // -----------------------------------------------------------------------
     //  8. requestRebuild — re-expands config and rebuilds runtime
@@ -804,129 +576,20 @@
       LIB.Plot.drawLine(ctx2, 0, 0, W, H, yMin, yMax, tMin, tNow, pts, color, 2);
     }
 
-    // Draw machine geometry + gap-field overlay on a 2D cross-section canvas.
-    // features: the expanded slice feature list.
-    // field:    { Br, Bt } from lastSolve.perSliceField[k] (may be null before first solve).
-    // grid:     sliceGrid from runtime.stack.sliceGrid(k).
-    // thetaR:   live rotor angle.
-    // currents: state.i Float64Array.
-    // label:    canvas label string.
-    function drawCrossSection(canvas, features, field, grid, thetaR, currents, label) {
+    // Fill a 2-D cross-section canvas with the panel background and a centred
+    // label. Used when no 2-D renderer is registered on the seam.
+    function paint2DPlaceholder(canvas, label) {
       const { W, H } = fitCanvas(canvas);
       if (W <= 0 || H <= 0) return;
       const ctx2 = canvas.getContext("2d");
       ctx2.clearRect(0, 0, W, H);
-      ctx2.fillStyle = "#0d1013";
+      ctx2.fillStyle = LIB.Util.getVar ? LIB.Util.getVar("--panel") || "#1b1f25" : "#1b1f25";
       ctx2.fillRect(0, 0, W, H);
-
-      // Always need grid to establish scale.  Without it show a placeholder.
-      if (!grid) {
-        ctx2.fillStyle = "var(--muted,#8a93a3)";
-        ctx2.font = "11px ui-sans-serif";
-        ctx2.textAlign = "center";
-        ctx2.textBaseline = "middle";
-        ctx2.fillText(label || "cross-section", W / 2, H / 2);
-        return;
-      }
-
-      // Direct 2D flat mapping: world x → canvas, world y → canvas (y flipped).
-      const pad   = 10;
-      const R     = grid.rOuter;
-      const scale = Math.min((W - 2 * pad) / (2 * R), (H - 2 * pad) / (2 * R));
-      const cx    = W / 2;
-      const cy    = H / 2;
-
-      // Draw structural geometry (iron / conductor / magnet) as filled sectors.
-      if (features && features.length > 0) {
-        drawFeatureSectors2D(ctx2, features, cx, cy, scale, thetaR, currents);
-      }
-
-      // Overlay gap-field heatmap as a translucent layer (drawn only when field available).
-      if (field) {
-        const Nr     = grid.Nr;
-        const Ntheta = grid.Ntheta;
-        const r      = grid.r;
-        const rInner = grid.rInner;
-        const rOuter = grid.rOuter;
-        const Br     = field.Br;
-        const Bt     = field.Bt;
-        const dTheta = 2 * Math.PI / Ntheta;
-
-        // Smoothed magScale per canvas.
-        let maxB = 0;
-        for (let k = 0; k < Nr * Ntheta; k++) {
-          const bMag = Math.sqrt(Br[k] * Br[k] + Bt[k] * Bt[k]);
-          if (bMag > maxB) maxB = bMag;
-        }
-        if (!canvas._magScale || canvas._magScale < maxB) {
-          canvas._magScale = maxB > 0 ? maxB : 1;
-        } else {
-          canvas._magScale = canvas._magScale * 0.98 + maxB * 0.02;
-        }
-        const magScale = canvas._magScale > 0 ? canvas._magScale : 1;
-
-        // Radial cell boundaries.
-        const rLo = new Float64Array(Nr);
-        const rHi = new Float64Array(Nr);
-        for (let i = 0; i < Nr; i++) {
-          rLo[i] = (i === 0)      ? rInner : 0.5 * (r[i - 1] + r[i]);
-          rHi[i] = (i === Nr - 1) ? rOuter : 0.5 * (r[i] + r[i + 1]);
-        }
-
-        // Draw field heatmap cells with reduced alpha so geometry shows through.
-        ctx2.save();
-        ctx2.globalAlpha = 0.55;
-        for (let i = 0; i < Nr; i++) {
-          const r0 = rLo[i] * scale;
-          const r1 = rHi[i] * scale;
-          for (let j = 0; j < Ntheta; j++) {
-            const idx  = i * Ntheta + j;
-            const bMag = Math.sqrt(Br[idx] * Br[idx] + Bt[idx] * Bt[idx]);
-            const t    = Math.max(0, Math.min(1, bMag / magScale));
-            const thLo = j * dTheta;
-            const thHi = (j + 1) * dTheta;
-            ctx2.fillStyle = LIB.Util.lerpColor("#0d1013", "#ffd54a", t);
-            ctx2.beginPath();
-            ctx2.moveTo(cx + r0 * Math.cos(thLo), cy - r0 * Math.sin(thLo));
-            ctx2.lineTo(cx + r1 * Math.cos(thLo), cy - r1 * Math.sin(thLo));
-            ctx2.lineTo(cx + r1 * Math.cos(thHi), cy - r1 * Math.sin(thHi));
-            ctx2.lineTo(cx + r0 * Math.cos(thHi), cy - r0 * Math.sin(thHi));
-            ctx2.closePath();
-            ctx2.fill();
-          }
-        }
-        ctx2.restore();
-      }
-
-      // Ring outlines: stator bore (rOuter) and rotor outer (grid.rInner = gap inner).
-      ctx2.save();
-      ctx2.strokeStyle = "rgba(180,200,220,0.5)";
-      ctx2.lineWidth = 1.2;
-      ctx2.beginPath();
-      ctx2.arc(cx, cy, grid.rOuter * scale, 0, Math.PI * 2);
-      ctx2.stroke();
-      ctx2.beginPath();
-      ctx2.arc(cx, cy, grid.rInner * scale, 0, Math.PI * 2);
-      ctx2.stroke();
-      ctx2.restore();
-
-      // Rotor angle marker.
-      const markerR = grid.rInner * scale * 0.75;
-      ctx2.save();
-      ctx2.strokeStyle = "#ffd54a";
-      ctx2.lineWidth = 1.5;
-      ctx2.beginPath();
-      ctx2.moveTo(cx, cy);
-      ctx2.lineTo(cx + markerR * Math.cos(thetaR), cy - markerR * Math.sin(thetaR));
-      ctx2.stroke();
-      ctx2.restore();
-
-      // Label
       ctx2.fillStyle = "rgba(138,147,163,0.8)";
-      ctx2.font = "10px ui-sans-serif";
-      ctx2.textAlign = "left";
-      ctx2.textBaseline = "top";
-      ctx2.fillText(label || "cross-section", 4, 4);
+      ctx2.font = "11px ui-sans-serif";
+      ctx2.textAlign = "center";
+      ctx2.textBaseline = "middle";
+      ctx2.fillText(label || "no 2-D renderer", W / 2, H / 2);
     }
 
     function frame(now) {
@@ -972,118 +635,23 @@
         const rctx = { runtime: runtime, config: config, expanded: expanded, W: W3, H: H3 };
         const mountCtx = buildCtx();
 
+        // render3d.js always registers the 3-D rig before the first frame (its
+        // <script> tag loads before runTabs), so RENDER3D is the only 3-D path.
         if (UM.RENDER3D) {
-          // Phase 9 or registered renderer takes over the entire viewport draw.
           UM.RENDER3D.paint(mountCtx, L3, rctx);
-        } else {
-          // Built-in rig: machine structural geometry + gap-field heatmap overlay.
-          const st     = runtime.state;
-          const solved = runtime.lastSolve;
-          const rOuter = expanded.grid.rOuter;
-          const rInner = expanded.grid.rInner;
-
-          // Update smoothed magScale from the latest field data.
-          if (solved) {
-            let maxB = 0;
-            for (let k = 0; k < expanded.slices.length; k++) {
-              const sf = solved.perSliceField[k];
-              if (!sf) continue;
-              const Br = sf.Br, Bt = sf.Bt;
-              for (let n = 0; n < Br.length; n++) {
-                const bm = Math.sqrt(Br[n] * Br[n] + Bt[n] * Bt[n]);
-                if (bm > maxB) maxB = bm;
-              }
-            }
-            if (maxB > smoothedMagScale) {
-              smoothedMagScale = maxB;
-            } else {
-              smoothedMagScale = smoothedMagScale * 0.98 + maxB * 0.02;
-            }
-            if (smoothedMagScale < 1e-9) smoothedMagScale = 1e-9;
-          }
-
-          // Draw machine geometry (filled structural regions) for each slice —
-          // done before the field heatmap overlay so geometry is clearly visible.
-          for (let k = 0; k < expanded.slices.length; k++) {
-            const planeZ   = expanded.slices[k].offset || 0;
-            const features = expanded.slices[k].section.features;
-            drawFeatureSectors3D(ctx3, L3, features, planeZ, st.theta, st.i);
-          }
-
-          // Stator bore outline (rOuter ring) in each slice plane.
-          for (let k = 0; k < expanded.slices.length; k++) {
-            const planeZ = expanded.slices[k].offset || 0;
-            drawRing3D(ctx3, L3, rOuter, planeZ, "rgba(180,200,220,0.5)", 1.5, 64);
-          }
-
-          // Rotor outer surface (rInner ring) in each slice plane.
-          for (let k = 0; k < expanded.slices.length; k++) {
-            const planeZ = expanded.slices[k].offset || 0;
-            drawRing3D(ctx3, L3, rInner, planeZ, "rgba(255,213,74,0.4)", 1.2, 48);
-          }
-
-          // Slot conductor lines for wound rings (W/C/K) as a wireframe overlay.
-          const i0 = runtime.state.i.length > 0 ? runtime.state.i[0] : 0;
-          for (const ring of config.rings) {
-            if (ring.element !== "W" && ring.element !== "C" && ring.element !== "K") continue;
-            for (let k = 0; k < expanded.slices.length; k++) {
-              const planeZ = expanded.slices[k].offset || 0;
-              drawSlotConductors3D(ctx3, L3, ring, st.theta, planeZ, i0, "#4ea1ff");
-            }
-          }
-
-          // Rotor angle indicator: a line from centre along the rotor angle.
-          const markerLen = rInner * 0.85;
-          const originW = { x: 0, y: 0, z: 0 };
-          const tipW    = {
-            x: markerLen * Math.cos(st.theta),
-            y: markerLen * Math.sin(st.theta),
-            z: 0,
-          };
-          const op = L3.project(originW);
-          const tp = L3.project(tipW);
-          if (!op.behind && !tp.behind) {
-            ctx3.strokeStyle = "#ffd54a";
-            ctx3.lineWidth   = 2;
-            ctx3.lineCap     = "round";
-            ctx3.beginPath();
-            ctx3.moveTo(op.px, op.py);
-            ctx3.lineTo(tp.px, tp.py);
-            ctx3.stroke();
-          }
-
-          // Placeholder ring if no solve yet.
-          if (!solved) {
-            drawRing3D(ctx3, L3, (rInner + rOuter) * 0.5, 0, "rgba(138,147,163,0.5)", 1.5, 48);
-          }
         }
       }
 
-      // Cross-section views — both always render slice 0 geometry + field.
-      // For multi-slice configs, canvas B shows slice 1; for single-slice it
-      // shows the same geometry from a different perspective (field + theta marker).
-      const solved    = runtime.lastSolve;
-      const thetaRCS  = runtime.state.theta;
-      const currents  = runtime.state.i;
-
-      // Slice 0 — both canvases always have a valid grid + features.
-      const sliceGrid0  = expanded.slices.length > 0 ? runtime.stack.sliceGrid(0) : null;
-      const features0   = expanded.slices.length > 0 ? expanded.slices[0].section.features : null;
-      const field0      = solved && solved.perSliceField.length > 0 ? solved.perSliceField[0] : null;
-
-      drawCrossSection(canvas2DA, features0, field0, sliceGrid0, thetaRCS, currents,
-        "slice 0 — geometry + field");
-
-      // Canvas B: slice 1 if multi-slice, else slice 0 again (distinct label).
-      const hasSlice1  = expanded.slices.length > 1;
-      const sliceGrid1 = hasSlice1 ? runtime.stack.sliceGrid(1) : sliceGrid0;
-      const features1  = hasSlice1 ? expanded.slices[1].section.features : features0;
-      const field1     = hasSlice1
-        ? (solved && solved.perSliceField.length > 1 ? solved.perSliceField[1] : null)
-        : field0;
-
-      drawCrossSection(canvas2DB, features1, field1, sliceGrid1, thetaRCS, currents,
-        hasSlice1 ? "slice 1 — geometry + field" : "slice 0 — rotor angle θ");
+      // Cross-section views — dispatched through the 2-D-render seam. The
+      // registrant (cross-section-render.js) decides which slice/view goes in
+      // which canvas. When no renderer is registered, paint a placeholder.
+      if (UM.CROSS_SECTION_2D) {
+        const dummyRctx = { runtime: runtime, config: config, expanded: expanded };
+        UM.CROSS_SECTION_2D.paint(buildCtx(), [canvas2DA, canvas2DB], dummyRctx);
+      } else {
+        paint2DPlaceholder(canvas2DA, "no 2-D renderer");
+        paint2DPlaceholder(canvas2DB, "no 2-D renderer");
+      }
 
       // Plots
       drawPlot(plotTorque,  history.torque,  "τ (Nm)",    "#ffd54a", v => v.toFixed(4));
