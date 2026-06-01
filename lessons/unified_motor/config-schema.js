@@ -270,7 +270,7 @@
     return features;
   }
 
-  function buildWoundFeatures(ring, circuitBase, includeTeeth) {
+  function buildWoundFeatures(ring, circuitBase, teethMode) {
     const features = [];
     const member = ring.member;
     const muR = ring.muR != null ? ring.muR : 1000;
@@ -309,10 +309,17 @@
       Bknee: BkneeWound,
     });
 
-    // Concentrated coil ("C") also emits salient tooth iron features (one per slot)
-    if (includeTeeth) {
+    // Iron teeth between the conductor slots/bars.
+    //  - "concentrated" ("C"): salient teeth centred ON each slot (the coil wraps a
+    //    tooth), spanning the full ring rRange.
+    //  - "distributed" ("W"/"K"): teeth fill the INTER-slot complement of the slot
+    //    band (slotRRange), so gap-crossing magnetizing flux reaches the back-iron
+    //    through iron teeth instead of a phantom non-magnetic slot gap. Without
+    //    these the whole slotRRange band is conductors + air (zero iron in the
+    //    radial flux path), which makes the magnetizing inductance gap/μ-blind.
+    const slotTheta = routing.slotTheta;
+    if (teethMode === "concentrated") {
       const spanFraction = ring.spanFraction != null ? ring.spanFraction : 0.5;
-      const slotTheta = routing.slotTheta;
       for (let s = 0; s < nSlots; s++) {
         const centre = slotTheta[s];
         const h = spanFraction * (Math.PI / nSlots);
@@ -324,6 +331,25 @@
           muR,
           Bknee: BkneeWound,
         });
+      }
+    } else if (teethMode === "distributed") {
+      // Conductor slot arc = angularWidth (centred on slotTheta[s]); the tooth is
+      // the remaining pitch, centred at the inter-slot midpoint, spanning the slot
+      // band radially. Conductor arc and tooth arc tile the pitch exactly.
+      const pitch = TWO_PI / nSlots;
+      const hTooth = 0.5 * Math.max(0, pitch - angularWidth);
+      if (hTooth > 0) {
+        for (let s = 0; s < nSlots; s++) {
+          const centre = slotTheta[s] + 0.5 * pitch;
+          features.push({
+            kind: "iron",
+            member,
+            rRange: slotRRange,
+            thetaRange: [centre - hTooth, centre + hTooth],
+            muR,
+            Bknee: BkneeWound,
+          });
+        }
       }
     }
 
@@ -671,7 +697,7 @@
         const ringFeatures = buildMagnetFeatures(ring);
         for (const f of ringFeatures) baseFeatures.push(f);
       } else if (el === "W" || el === "K") {
-        const ringFeatures = buildWoundFeatures(ring, circuitBase, false);
+        const ringFeatures = buildWoundFeatures(ring, circuitBase, "distributed");
         for (const f of ringFeatures) baseFeatures.push(f);
         const routing = resolveWinding(ring);
         if (el === "K" && ring.cage) {
@@ -689,7 +715,7 @@
         }
         circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;
       } else if (el === "C") {
-        const ringFeatures = buildWoundFeatures(ring, circuitBase, true);
+        const ringFeatures = buildWoundFeatures(ring, circuitBase, "concentrated");
         for (const f of ringFeatures) baseFeatures.push(f);
         const routing = resolveWinding(ring);
         circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;
@@ -781,12 +807,12 @@
           }
         }
       } else if (el === "W" || el === "K") {
-        const ringFeatures = buildWoundFeatures(ring, circuitBase, false);
+        const ringFeatures = buildWoundFeatures(ring, circuitBase, "distributed");
         for (const f of ringFeatures) features.push(f);
         const routing = resolveWinding(ring);
         circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;
       } else if (el === "C") {
-        const ringFeatures = buildWoundFeatures(ring, circuitBase, true);
+        const ringFeatures = buildWoundFeatures(ring, circuitBase, "concentrated");
         for (const f of ringFeatures) features.push(f);
         const routing = resolveWinding(ring);
         circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;

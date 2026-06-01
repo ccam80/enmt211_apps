@@ -132,6 +132,12 @@ function build(id) {
   var expanded = UnifiedMotor.ConfigSchema.expand(config);
   var opts = {};
   if (process.env.SPARSE_HARMONICS) opts.kList = deriveKList(id, expanded);
+  // SCHUR_NEWTON gate: Schur-condense the saturated Newton inner solve. Exact
+  // reduction of the same tangent, so the suite must reproduce the full-K
+  // baseline pass/fail set (within solver tolerances).
+  if (process.env.SCHUR_NEWTON) opts.schur = true;
+  // GAP_METHOD=mortar → real-space FE air-gap band coupling instead of harmonic.
+  if (process.env.GAP_METHOD) opts.gapMethod = process.env.GAP_METHOD;
   var stack    = LIB.MotorStack.create(expanded, opts);
   var runtime  = LIB.MotorRun.create(expanded, opts);
   return { config: config, expanded: expanded, stack: stack, runtime: runtime };
