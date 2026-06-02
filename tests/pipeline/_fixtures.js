@@ -24,10 +24,9 @@ require("../../lib/excitation.js");
 // Phase-4 module
 require("../../lib/motor-circuit.js");
 
-// Phase-2/4/5 mesh + harmonic + FEA modules
+// Phase-2/5 mesh + air-gap + FEA modules
 require("../../lib/motor-mesh.js");
 require("../../lib/motor-mesh-view.js");
-require("../../lib/airgap-harmonic.js");
 require("../../lib/airgap-mortar.js");
 
 // Point fea-solver at the absolute mjs path BEFORE requiring it.

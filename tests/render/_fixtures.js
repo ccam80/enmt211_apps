@@ -21,7 +21,7 @@ require("../../lib/excitation.js");
 require("../../lib/motor-circuit.js");
 require("../../lib/motor-mesh.js");
 require("../../lib/motor-mesh-view.js");
-require("../../lib/airgap-harmonic.js");
+require("../../lib/airgap-mortar.js");
 
 // gap-eval.js is created in Wave 6.2. Wave-6.1 tests run before it exists, so
 // the require is guarded — the render code guards LIB.GapEval the same way.

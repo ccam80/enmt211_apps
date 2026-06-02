@@ -19,7 +19,7 @@ require("../../lib/excitation.js");
 require("../../lib/motor-circuit.js");
 require("../../lib/motor-mesh.js");
 require("../../lib/motor-mesh-view.js");
-require("../../lib/airgap-harmonic.js");
+require("../../lib/airgap-mortar.js");
 
 // Point fea-solver at the absolute mjs path BEFORE requiring it.
 process.env.FEA_SOLVER_MJS_PATH = path.resolve(__dirname, "../../lib/solver.mjs");

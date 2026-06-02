@@ -17,10 +17,6 @@ const { before } = require("node:test");
 // Pipeline loader — installs window + engine/pipeline libs.
 const P = require("../pipeline/_fixtures.js");
 
-// HarmonicSet (sparse-basis derivation) — not part of the pipeline loader; load
-// it onto the shared window.LIB so the SPARSE_HARMONICS gate harness can use it.
-require(path.join(__dirname, "..", "..", "lib", "harmonic-set.js"));
-
 const LIB        = P.LIB;
 const UnifiedMotor = P.UnifiedMotor;
 const assertClose = P.assertClose;
@@ -104,42 +100,11 @@ const XC_FLOOR = 1e-6;
 //
 //  Expands the config schema, creates the MotorStack and MotorRun runtime.
 // ---------------------------------------------------------------------------
-// Gate harness: when SPARSE_HARMONICS is set, build every machine with the
-// geometry-derived sparse harmonic basis (LIB.HarmonicSet) instead of the dense
-// K=3·max(slots,poles) truncation, so the full machine suite becomes the
-// definitive accuracy gate for the sparse basis vs the full-K baseline. The
-// derived kList is cached per machine id (the derivation does ~nCircuits FE
-// solves). opts.kList threads through to both the static stack and the runtime.
-var _kListCache = {};
-function deriveKList(id, expanded) {
-  if (_kListCache[id] !== undefined) return _kListCache[id];
-  var HS = global.window.LIB.HarmonicSet;
-  var full = LIB.MotorStack.create(expanded);
-  var cfg = byId[id].config, slots = [];
-  for (var i = 0; i < cfg.rings.length; i++) {
-    var r = cfg.rings[i];
-    if (r.winding && r.winding.standard) slots.push(r.winding.standard.Q);
-    if (r.cage) slots.push(r.cage.bars);
-    if (r.teeth && r.teeth > 1) slots.push(r.teeth);
-  }
-  var res = HS.derive(HS.probeFromStack(full, slots), { epsilon: 0.01, angles: [0, 0.041] });
-  _kListCache[id] = res.kList;
-  return res.kList;
-}
-
 function build(id) {
   var config   = byId[id].config;
   var expanded = UnifiedMotor.ConfigSchema.expand(config);
-  var opts = {};
-  if (process.env.SPARSE_HARMONICS) opts.kList = deriveKList(id, expanded);
-  // SCHUR_NEWTON gate: Schur-condense the saturated Newton inner solve. Exact
-  // reduction of the same tangent, so the suite must reproduce the full-K
-  // baseline pass/fail set (within solver tolerances).
-  if (process.env.SCHUR_NEWTON) opts.schur = true;
-  // GAP_METHOD=mortar → real-space FE air-gap band coupling instead of harmonic.
-  if (process.env.GAP_METHOD) opts.gapMethod = process.env.GAP_METHOD;
-  var stack    = LIB.MotorStack.create(expanded, opts);
-  var runtime  = LIB.MotorRun.create(expanded, opts);
+  var stack    = LIB.MotorStack.create(expanded);
+  var runtime  = LIB.MotorRun.create(expanded);
   return { config: config, expanded: expanded, stack: stack, runtime: runtime };
 }
 
