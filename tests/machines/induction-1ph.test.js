@@ -70,10 +70,14 @@ test("capacitor-shifted auxiliary gives starting torque; main winding alone does
   const Tboth = settledStandstillTorque(build("induction-1ph").runtime);
   assert.ok(Math.abs(Tboth) > 1e-5, "cap-start standstill torque with aux too small: " + Tboth);
 
-  // Open the auxiliary circuit (index 4) → main winding alone:
+  // Open the auxiliary circuit → main winding alone. The circuits array is
+  // [28 cage bars (0..27), main (28), aux (29)], so the auxiliary is the LAST
+  // circuit. (Previously hard-coded index 4 — a cage bar — which left the aux
+  // energized; the now-physical cage made that mis-index visible.)
   const origConfig = byId["induction-1ph"].config;
+  const auxIndex = origConfig.circuits.length - 1;
   const clonedCircuits = origConfig.circuits.map(function (c, idx) {
-    if (idx === 4) {
+    if (idx === auxIndex) {
       return { terminal: { type: "OPEN" }, commutation: c.commutation, R: c.R };
     }
     return c;

@@ -20,6 +20,10 @@
         member: "rotor",
         element: "K",
         rRange: ROTOR_BAR_R,
+        // Bar resistance R_b is GEOMETRY-DERIVED by config-schema (ρ_Al·ell/A_bar
+        // ≈ 6.0e-5 Ω here); the R: 0.03 on the SHORT bar circuits below is a
+        // vestigial placeholder, overridden by the derived value. (cage.rho or
+        // cage.Rb override the default aluminium derivation.)
         cage: { bars: 28 },
         slotRRange: ROTOR_BAR_R,
         slotFraction: 0.45,

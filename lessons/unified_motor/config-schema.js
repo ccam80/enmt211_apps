@@ -706,11 +706,35 @@
           // (BEFORE the circuitBase increment); ringRadius from the bar ring
           // geometry; ringAreaRatio = end-ring cross-section / bar cross-section.
           const rr = ring.rRange || ring.slotRRange;
+          // Geometry-derived cage BAR resistance R_b = ρ·ell/A_bar. A real cast
+          // cage bar is a conductor of axial length ell and cross-section
+          //   A_bar = (radial slot height)·(bar arc),  bar arc = slotFraction·2π·r_m/N.
+          // ρ defaults to aluminium (cast-cage standard, ~20°C). Override per ring
+          // via cage.rho (resistivity, Ω·m) or cage.Rb (explicit Ω). Falls back to
+          // the circuit R only if the slot geometry / ell is unavailable.
+          // (The former fixed R=0.03 Ω was ~1000× too large → rotor τ=L/R ~1000×
+          // too short [0.12 ms vs ~50-200 ms physical] → no slip torque, and the
+          // rotor dynamics fell below one timestep. See cage-induction investigation.)
+          const slotR = ring.slotRRange || ring.rRange;
+          const ellAxial = (config.grid && config.grid.ell) || null;
+          let RbDerived = null;
+          if (ring.cage.Rb != null) {
+            RbDerived = ring.cage.Rb;
+          } else if (slotR && ellAxial) {
+            const rMean = 0.5 * (slotR[0] + slotR[1]);
+            const radialH = slotR[1] - slotR[0];
+            const slotFrac = ring.slotFraction != null ? ring.slotFraction : 0.5;
+            const arcW = slotFrac * (2 * Math.PI * rMean) / ring.cage.bars;
+            const Abar = radialH * arcW;
+            const rho = ring.cage.rho != null ? ring.cage.rho : 2.8e-8; // Ω·m, Al
+            if (Abar > 0) RbDerived = (rho * ellAxial) / Abar;
+          }
           cageInfo = {
             startIndex: circuitBase,
             bars: ring.cage.bars,
             ringRadius: rr ? 0.5 * (rr[0] + rr[1]) : null,
             ringAreaRatio: ring.cage.ringAreaRatio != null ? ring.cage.ringAreaRatio : 1.0,
+            Rb: RbDerived,
           };
         }
         circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;
@@ -731,7 +755,9 @@
     let cage = null;
     if (cageInfo && cageInfo.ringRadius != null && config.grid && config.grid.ell) {
       const N = cageInfo.bars;
-      const Rb = config.circuits[cageInfo.startIndex].R;
+      // Geometry-derived bar resistance (computed at cage capture); fall back to
+      // the placeholder circuit R only if geometry/ell were unavailable.
+      const Rb = (cageInfo.Rb != null) ? cageInfo.Rb : config.circuits[cageInfo.startIndex].R;
       const ell = config.grid.ell;
       const Lseg = (2 * Math.PI * cageInfo.ringRadius) / N;
       const Re = (Rb * (Lseg / ell)) / cageInfo.ringAreaRatio;
