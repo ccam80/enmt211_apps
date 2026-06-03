@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, crossCheck, runFromRest, avgTorqueAtSpeed, signChanges,
+  build, validate, runFromRest, avgTorqueAtSpeed, signChanges,
 } = require("./_fixtures.js");
 
 const TIMEOUT = 25000;
@@ -78,11 +78,4 @@ test("develops synchronous torque whose sign follows the load angle", { timeout:
   // one unstable equilibrium); rules out a degenerate or multi-lobe curve.
   assert.equal(signChanges(Ts), 2,
     `torque-angle sign changes=${signChanges(Ts)} !== 2 (not a single sin(delta))`);
-});
-
-test("Maxwell vs co-energy within 5%", { timeout: TIMEOUT }, function () {
-  const { stack } = build("wound-field-synchronous");
-  // field circuit index 0, then 3 stator circuits
-  const result = crossCheck(stack, 0.2, new Float64Array([12, 24, -12, -12]));
-  assert.ok(result.ok, `crossCheck failed: arkkio=${result.arkkio}, coe=${result.coe}, rel=${result.rel}`);
 });

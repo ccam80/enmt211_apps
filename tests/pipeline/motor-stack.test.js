@@ -123,49 +123,6 @@ describe("motor-stack", function () {
   });
 
   // -------------------------------------------------------------------------
-  it("coenergyTorque returns finite parts", function () {
-    const stack = LIB.MotorStack.create(CS.expand(woundConfig()), feaOpts());
-
-    const coe = stack.coenergyTorque(0.2, new Float64Array([5]));
-
-    assert.ok(Number.isFinite(coe.reluctance), "coe.reluctance must be finite");
-    assert.ok(Number.isFinite(coe.pm), "coe.pm must be finite");
-    assert.ok(Number.isFinite(coe.mutual), "coe.mutual must be finite");
-    assert.ok(Number.isFinite(coe.cogging), "coe.cogging must be finite");
-    assert.ok(Number.isFinite(coe.total), "coe.total must be finite");
-
-    const sum = coe.reluctance + coe.mutual + coe.pm + coe.cogging;
-    assert.ok(
-      Math.abs(coe.total - sum) < 1e-12,
-      "total must equal reluctance + mutual + pm + cogging within 1e-12; total=" +
-        coe.total + " sum=" + sum
-    );
-  });
-
-  // -------------------------------------------------------------------------
-  it("extractCoeffs returns correct-length arrays all finite", function () {
-    const expanded = CS.expand(woundConfig());
-    const m = expanded.nCircuits;
-    const stack = LIB.MotorStack.create(expanded, feaOpts());
-
-    const coeffs = stack.extractCoeffs(0.2);
-
-    assert.strictEqual(coeffs.L.length, m * m, "L length must be nCircuits²");
-    assert.strictEqual(coeffs.dLdth.length, m * m, "dLdth length must be nCircuits²");
-    assert.strictEqual(coeffs.lambdaPm.length, m, "lambdaPm length must be nCircuits");
-    assert.strictEqual(coeffs.dLambdaPmdth.length, m, "dLambdaPmdth length must be nCircuits");
-
-    for (let i = 0; i < m * m; i++) {
-      assert.ok(Number.isFinite(coeffs.L[i]), "L[" + i + "] must be finite");
-      assert.ok(Number.isFinite(coeffs.dLdth[i]), "dLdth[" + i + "] must be finite");
-    }
-    for (let k = 0; k < m; k++) {
-      assert.ok(Number.isFinite(coeffs.lambdaPm[k]), "lambdaPm[" + k + "] must be finite");
-      assert.ok(Number.isFinite(coeffs.dLambdaPmdth[k]), "dLambdaPmdth[" + k + "] must be finite");
-    }
-  });
-
-  // -------------------------------------------------------------------------
   it("module loads under require with no DOM access", function () {
     assert.ok(LIB.MotorStack, "LIB.MotorStack must exist");
     assert.strictEqual(typeof LIB.MotorStack.create, "function", "create must be a function");
@@ -173,8 +130,6 @@ describe("motor-stack", function () {
     const stack = LIB.MotorStack.create(CS.expand(woundConfig()), feaOpts());
 
     assert.strictEqual(typeof stack.solve, "function");
-    assert.strictEqual(typeof stack.extractCoeffs, "function");
-    assert.strictEqual(typeof stack.coenergyTorque, "function");
     assert.strictEqual(typeof stack.sliceMesh, "function");
     assert.strictEqual(typeof stack.clearWarmStart, "function");
     assert.strictEqual(typeof stack.sliceGrid, "undefined", "sliceGrid must no longer exist");

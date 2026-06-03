@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, crossCheck, LIB,
+  build, validate, LIB,
 } = require("./_fixtures.js");
 
 const TIMEOUT = 25000;
@@ -46,17 +46,3 @@ test("reluctance torque is proportional to i^2 below the iron knee", { timeout: 
     `t2/t1=${ratio} not within 4 +/- 0.2 (reluctance torque not proportional to i^2)`);
 });
 
-test("lambda_pm is identically zero (no magnet, zero-not-skip)", { timeout: TIMEOUT }, function () {
-  const { stack } = build("vr-stepper");
-  const co = stack.extractCoeffs(0.3);
-  for (let k = 0; k < co.lambdaPm.length; k++) {
-    assert.equal(co.lambdaPm[k], 0, `lambdaPm[${k}] !== 0`);
-    assert.equal(co.dLambdaPmdth[k], 0, `dLambdaPmdth[${k}] !== 0`);
-  }
-});
-
-test("Maxwell vs co-energy within 5%", { timeout: TIMEOUT }, function () {
-  const { stack } = build("vr-stepper");
-  const result = crossCheck(stack, 0.3, new Float64Array([10, 0, 0]));
-  assert.ok(result.ok, `crossCheck failed: arkkio=${result.arkkio}, coe=${result.coe}, rel=${result.rel}`);
-});

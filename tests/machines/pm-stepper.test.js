@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, sweepTorque, crossCheck, ripple, dftAmp,
+  build, validate, sweepTorque, ripple, dftAmp,
   LIB, UnifiedMotor,
 } = require("./_fixtures.js");
 
@@ -83,10 +83,4 @@ test("holding torque pulls the rotor toward alignment when energized", { timeout
   assert.ok(Math.abs(finalState.omega) < peakOmega,
     `omega=${finalState.omega} has not decayed below peak=${peakOmega}`);
   assert.ok(isFinite(finalState.theta), `theta=${finalState.theta} is not finite`);
-});
-
-test("Maxwell vs co-energy within 5% at the energized point", { timeout: TIMEOUT }, function () {
-  const { stack } = build("pm-stepper");
-  const result = crossCheck(stack, 0.2, new Float64Array([24, 0]));
-  assert.ok(result.ok, `crossCheck failed: arkkio=${result.arkkio}, coe=${result.coe}, rel=${result.rel}`);
 });

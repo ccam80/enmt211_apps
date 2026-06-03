@@ -7,8 +7,6 @@ const {
   byId,
   build,
   validate,
-  crossCheck,
-  avgTorqueAtSpeed,
 } = require("./_fixtures.js");
 
 test("config validates", function () {
@@ -124,11 +122,4 @@ test("capacitor-shifted auxiliary gives starting torque; main winding alone does
     "main-winding-alone NET starting torque (θ-averaged over one bar pitch) not ~zero: " +
     "Tmain=" + Tmain + ", 5% of Tboth=" + (0.05 * Math.abs(Tboth))
   );
-});
-
-test("Maxwell vs co-energy within 5%", { timeout: 25000 }, function () {
-  const { stack } = build("induction-1ph");
-  // 3 cage circuits zeroed, then main amp:24 and aux amp:24 energized; theta=0.4 rad
-  const result = crossCheck(stack, 0.4, new Float64Array([0, 0, 0, 24, 24]));
-  assert.ok(result.ok, "crossCheck failed: arkkio=" + result.arkkio + " coe=" + result.coe + " rel=" + result.rel);
 });

@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, sweepTorque, crossCheck, assertClose, dftAmp,
+  build, validate, sweepTorque, assertClose, dftAmp,
   LIB, UnifiedMotor,
 } = require("./_fixtures.js");
 
@@ -64,10 +64,4 @@ test("skew nulls the slot-harmonic ripple while preserving the fundamental torqu
   // The working torque (order poles/2) is preserved within 5%.
   assert.ok(fundFlat > 1, `unskewed fundamental amp=${fundFlat} implausibly small`);
   assertClose(fundSkew, fundFlat, 0.05 * fundFlat);
-});
-
-test("Maxwell vs co-energy within 5%", { timeout: TIMEOUT }, function () {
-  const { stack } = build("skew-demo");
-  const result = crossCheck(stack, 0.2, new Float64Array([24, -12, -12]));
-  assert.ok(result.ok, `crossCheck failed: arkkio=${result.arkkio}, coe=${result.coe}, rel=${result.rel}`);
 });

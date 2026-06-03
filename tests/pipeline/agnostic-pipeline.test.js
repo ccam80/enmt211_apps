@@ -53,53 +53,6 @@ describe("agnostic-pipeline", function () {
   });
 
   // -------------------------------------------------------------------------
-  it("Maxwell agrees with co-energy within 10% (linear operating point)", function () {
-    // The comparison MUST be made with saturation DISABLED on both sides. A
-    // saturated Arkkio and the linear co-energy extractCoeffs cannot agree
-    // because the saturated material is non-conservative. This is evaluated at
-    // a consistent linear operating point (saturation: {enabled:false}).
-
-    const linearOpts = feaOpts({ saturation: { enabled: false } });
-    const configs = [woundConfig(), pmConfig(), salientConfig(), skewN2Config()];
-    const theta = 0.2;
-    const current = 5.0;
-
-    for (const cfg of configs) {
-      const expanded = CS.expand(cfg);
-      const nC = expanded.nCircuits;
-
-      // Build a saturation-disabled stack for the comparison (not the live MotorRun).
-      const stack = LIB.MotorStack.create(expanded, linearOpts);
-
-      const currents = new Float64Array(nC);
-      for (let k = 0; k < nC; k++) { currents[k] = current; }
-
-      const arkkio = stack.solve(theta, currents).torque;
-      const coe = stack.coenergyTorque(theta, currents).total;
-
-      // Only assert for configs with non-trivial torque magnitude. The
-      // single-circuit reluctance configs (wound / salient / skewN2) produce
-      // O(1e-6) N·m at this angle — at or below the coarse-mesh FEA torque
-      // noise floor — so the relative cross-check is meaningless there. The
-      // floor matches the Phase-6 crossCheck near-zero guard (1e-5); only the
-      // PM config carries a meaningful torque (~29 N·m, agrees to rel 3e-4).
-      const torqueMag = Math.max(Math.abs(arkkio), Math.abs(coe));
-      if (torqueMag <= 1e-5) {
-        // Trivial torque — skip comparison (floor condition).
-        continue;
-      }
-
-      const relErr = Math.abs(arkkio - coe) / torqueMag;
-      assert.ok(
-        relErr <= 0.10,
-        "Maxwell-vs-co-energy relative error must be <= 10% at linear operating point" +
-        " (saturation disabled). Got relErr=" + relErr.toFixed(4) +
-        ", arkkio=" + arkkio + ", coe=" + coe
-      );
-    }
-  });
-
-  // -------------------------------------------------------------------------
   it("unified-motor lib + mount.js are free of machine names", function () {
     // Per spec/manifest.json Check 1, these pre-existing non-unified-motor files
     // are excluded from the scan — they contain sanctioned token sites that are

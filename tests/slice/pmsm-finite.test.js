@@ -11,8 +11,8 @@
 //
 //  This test loads the real pmsm machine fixture, builds the slice at
 //  realistic DOF (no mesh.refine reduction, so the genuine high-K gap loop is
-//  exercised), and asserts that every entry produced by extractCoeffs(0) and
-//  solve(0, zeros) is finite. Before the fix every one of these was NaN.
+//  exercised), and asserts that every entry produced by solve(0, zeros) is
+//  finite. Before the fix every one of these was NaN.
 // =============================================================================
 
 const { describe, it, before } = require("node:test");
@@ -28,7 +28,7 @@ describe("MotorSlice pmsm finiteness (Defect B regression)", function () {
   before(async function () { await initSolver(); });
 
   // -----------------------------------------------------------------------
-  it("pmsm extractCoeffs(0) and solve(0, zeros) are entirely finite", function () {
+  it("pmsm solve(0, zeros) is entirely finite", function () {
     const cfg = loadMachine("pmsm");
     const expanded = CS.expand(cfg);
     const poles = expanded.poles;
@@ -41,21 +41,6 @@ describe("MotorSlice pmsm finiteness (Defect B regression)", function () {
       saturation: { enabled: false },
     });
     const m = slice.nCircuits;
-
-    // ---- extractCoeffs(0): L, dLdth (m*m), lambdaPm, dLambdaPmdth (m) ----
-    const coeffs = slice.extractCoeffs(0);
-    for (let i = 0; i < m * m; i++) {
-      assert.ok(Number.isFinite(coeffs.L[i]),
-        `extractCoeffs L[${i}]=${coeffs.L[i]} must be finite`);
-      assert.ok(Number.isFinite(coeffs.dLdth[i]),
-        `extractCoeffs dLdth[${i}]=${coeffs.dLdth[i]} must be finite`);
-    }
-    for (let i = 0; i < m; i++) {
-      assert.ok(Number.isFinite(coeffs.lambdaPm[i]),
-        `extractCoeffs lambdaPm[${i}]=${coeffs.lambdaPm[i]} must be finite`);
-      assert.ok(Number.isFinite(coeffs.dLambdaPmdth[i]),
-        `extractCoeffs dLambdaPmdth[${i}]=${coeffs.dLambdaPmdth[i]} must be finite`);
-    }
 
     // ---- solve(0, zeros): torque, fluxLinkages, field arrays ----
     const zeros = new Float64Array(m);

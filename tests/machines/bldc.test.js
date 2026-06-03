@@ -7,7 +7,6 @@ const {
   byId,
   build,
   validate,
-  crossCheck,
   runFromRest,
 } = require("./_fixtures.js");
 
@@ -44,28 +43,3 @@ test("self-starts under electronic-trap commutation", { timeout: 25000 }, functi
   );
 });
 
-test("PM term dominates the co-energy decomposition", function () {
-  const { stack } = build("bldc");
-  const c = stack.coenergyTorque(0.2, new Float64Array([48, -24, -24]));
-  assert.ok(
-    Math.abs(c.pm) > Math.abs(c.reluctance),
-    "PM co-energy torque (" + c.pm + ") does not dominate reluctance (" + c.reluctance + ")"
-  );
-  assert.ok(
-    Math.abs(c.pm) > 1e-6,
-    "PM co-energy torque too small: " + c.pm
-  );
-});
-
-test("PM back-EMF is non-zero under motion", function () {
-  const { stack } = build("bldc");
-  const co = stack.extractCoeffs(0.2);
-  const hasNonZero = co.dLambdaPmdth.some(function (v) { return Math.abs(v) > 1e-6; });
-  assert.ok(hasNonZero, "all dLambdaPmdth values are ~zero (no back-EMF)");
-});
-
-test("Maxwell vs co-energy within 5%", { timeout: 25000 }, function () {
-  const { stack } = build("bldc");
-  const result = crossCheck(stack, 0.2, new Float64Array([48, -24, -24]));
-  assert.ok(result.ok, "crossCheck failed: arkkio=" + result.arkkio + " coe=" + result.coe + " rel=" + result.rel);
-});

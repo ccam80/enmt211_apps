@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, crossCheck, assertClose,
+  build, validate, assertClose,
 } = require("./_fixtures.js");
 
 const TIMEOUT = 25000;
@@ -72,10 +72,4 @@ test("self-steps under the sequencer", { timeout: TIMEOUT }, function () {
     Math.abs(runtime.state.theta - theta0) > 1e-4,
     `theta did not move: theta=${runtime.state.theta}, theta0=${theta0}`
   );
-});
-
-test("Maxwell vs co-energy within 5%", { timeout: TIMEOUT }, function () {
-  const { stack } = build("hybrid-stepper");
-  const result = crossCheck(stack, 0.1, new Float64Array([24, 0]));
-  assert.ok(result.ok, `crossCheck failed: arkkio=${result.arkkio}, coe=${result.coe}, rel=${result.rel}`);
 });

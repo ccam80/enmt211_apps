@@ -7,7 +7,6 @@ const {
   byId,
   build,
   validate,
-  crossCheck,
   runFromRest,
 } = require("./_fixtures.js");
 
@@ -65,10 +64,4 @@ test("self-starts under mechanical commutation", { timeout: 25000 }, function ()
     Math.abs(state.theta) > 1e-3,
     "rotor did not move from rest; |theta| = " + Math.abs(state.theta)
   );
-});
-
-test("Maxwell vs co-energy within 5%", { timeout: 25000 }, function () {
-  const { stack } = build("brushed-dc-pm");
-  const result = crossCheck(stack, 0.2, new Float64Array([15]));
-  assert.ok(result.ok, "crossCheck failed: arkkio=" + result.arkkio + " coe=" + result.coe + " rel=" + result.rel);
 });

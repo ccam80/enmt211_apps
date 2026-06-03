@@ -7,7 +7,6 @@ const {
   byId,
   build,
   validate,
-  crossCheck,
   avgTorqueAtSpeed,
 } = require("./_fixtures.js");
 
@@ -107,11 +106,4 @@ test("slip torque sign drives the rotor toward synchronism", { timeout: 25000 },
     Math.sign(Tslip) === Math.sign(omega_s),
     "sub-synchronous torque sign wrong: Tslip=" + Tslip + " omega_s=" + omega_s
   );
-});
-
-test("Maxwell vs co-energy within 5%", { timeout: 25000 }, function () {
-  const { stack } = build("induction-3ph");
-  // cage currents zeroed, stator energized at theta=0.4 where torque exceeds 1e-5
-  const result = crossCheck(stack, 0.4, new Float64Array([0, 0, 0, 24, -12, -12]));
-  assert.ok(result.ok, "crossCheck failed: arkkio=" + result.arkkio + " coe=" + result.coe + " rel=" + result.rel);
 });

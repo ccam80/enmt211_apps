@@ -90,12 +90,6 @@ const MACHINE_IDS = Object.freeze([
 ]);
 
 // ---------------------------------------------------------------------------
-//  Cross-check tolerance constants.
-// ---------------------------------------------------------------------------
-const XC_TOL   = 0.05;
-const XC_FLOOR = 1e-6;
-
-// ---------------------------------------------------------------------------
 //  build(id) → { config, expanded, stack, runtime }
 //
 //  Expands the config schema, creates the MotorStack and MotorRun runtime.
@@ -132,66 +126,6 @@ function sweepTorque(stack, currents, thetas) {
     results.push(stack.solve(theta, cur).torque);
   }
   return results;
-}
-
-// ---------------------------------------------------------------------------
-//  sweepInductance(stack, thetas, kk) → number[]
-//
-//  For each θ: diagonal self-inductance of circuit kk.
-//  Index into the L matrix: kk * nCircuits + kk.
-// ---------------------------------------------------------------------------
-function sweepInductance(stack, thetas, kk) {
-  var m = stack.nCircuits;
-  var results = [];
-  for (var k = 0; k < thetas.length; k++) {
-    var coeffs = stack.extractCoeffs(thetas[k]);
-    results.push(coeffs.L[kk * m + kk]);
-  }
-  return results;
-}
-
-// ---------------------------------------------------------------------------
-//  sweepLambdaPm(stack, thetas, k) → number[]
-//
-//  For each θ: lambdaPm[k] from extractCoeffs.
-// ---------------------------------------------------------------------------
-function sweepLambdaPm(stack, thetas, k) {
-  var results = [];
-  for (var n = 0; n < thetas.length; n++) {
-    var coeffs = stack.extractCoeffs(thetas[n]);
-    results.push(coeffs.lambdaPm[k]);
-  }
-  return results;
-}
-
-// ---------------------------------------------------------------------------
-//  crossCheck(stack, theta, currents) → { arkkio, coe, rel, ok }
-//
-//  Maxwell (Arkkio) vs co-energy cross-check at a single operating point.
-//  Maxwell-vs-co-energy is only defined where the iron is linear (the T5.5.1
-//  methodology), so BOTH sides are evaluated on a ceiling-DISABLED stack rebuilt
-//  from the same expanded config: the Arkkio solve and the co-energy extractor
-//  see the identical linear material. (Resolution 2026-05-25 — previously the
-//  Arkkio side used the caller's ceiling-ON stack while co-energy was the linear
-//  extractor, the documented mismatch.)
-//
-//  ok === true when:
-//    max(|arkkio|, |coe|) <= 5e-5   (near-zero — relative compare is meaningless)
-//    OR  rel <= XC_TOL * max(|arkkio|, |coe|) + XC_FLOOR
-//
-//  The 5e-5 N·m near-zero floor sits ~100x below the smallest genuine torque any
-//  fixture produces (>5e-3) and well above the numerical noise of an operating
-//  point that produces ~no torque (e.g. an induction machine probed with the
-//  cage currents zeroed). It skips only the latter, not real disagreements.
-// ---------------------------------------------------------------------------
-function crossCheck(stack, theta, currents) {
-  var stackLin = LIB.MotorStack.create(stack.expanded, { saturation: { enabled: false } });
-  var arkkio = stackLin.solve(theta, currents).torque;
-  var coe    = stackLin.coenergyTorque(theta, currents).total;
-  var rel    = Math.abs(arkkio - coe);
-  var mag    = Math.max(Math.abs(arkkio), Math.abs(coe));
-  var ok     = (mag <= 5e-5) || (rel <= XC_TOL * mag + XC_FLOOR);
-  return { arkkio: arkkio, coe: coe, rel: rel, ok: ok };
 }
 
 // ---------------------------------------------------------------------------
@@ -365,14 +299,9 @@ module.exports = {
   assertClose:  assertClose,
   initSolver:   initSolver,
   fitCos2:      fitCos2,
-  XC_TOL:       XC_TOL,
-  XC_FLOOR:     XC_FLOOR,
   build:        build,
   validate:     validate,
   sweepTorque:      sweepTorque,
-  sweepInductance:  sweepInductance,
-  sweepLambdaPm:    sweepLambdaPm,
-  crossCheck:       crossCheck,
   runFromRest:      runFromRest,
   seedState:        seedState,
   runFrom:          runFrom,

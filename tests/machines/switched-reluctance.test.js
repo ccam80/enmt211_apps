@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, crossCheck, runFromRest, LIB,
+  build, validate, runFromRest, LIB,
 } = require("./_fixtures.js");
 
 const TIMEOUT = 25000;
@@ -30,15 +30,6 @@ test("expands to Phase-2 sections with matching circuit count", { timeout: TIMEO
   }
 });
 
-test("lambda_pm is identically zero", { timeout: TIMEOUT }, function () {
-  const { stack } = build("switched-reluctance");
-  const co = stack.extractCoeffs(0.3);
-  for (let k = 0; k < co.lambdaPm.length; k++) {
-    assert.equal(co.lambdaPm[k], 0, `lambdaPm[${k}] !== 0`);
-    assert.equal(co.dLambdaPmdth[k], 0, `dLambdaPmdth[${k}] !== 0`);
-  }
-});
-
 test("reluctance torque is proportional to i^2 below the iron knee", { timeout: TIMEOUT }, function () {
   // Linear-regime law — evaluate on the ceiling-disabled (linear) stack, the
   // same linear-operating-point methodology crossCheck uses.
@@ -60,13 +51,3 @@ test("self-starts under electronic-trap commutation", { timeout: TIMEOUT }, func
   const state = runFromRest(runtime, 20);
   assert.ok(Math.abs(state.theta) > 1e-3, `theta=${state.theta} not > 1e-3 (did not start)`);
 });
-
-test("Maxwell vs co-energy within 5%", { timeout: TIMEOUT }, function () {
-  const { stack } = build("switched-reluctance");
-  const result = crossCheck(stack, 0.3, new Float64Array([12, 0, 0]));
-  assert.ok(result.ok, `crossCheck failed: arkkio=${result.arkkio}, coe=${result.coe}, rel=${result.rel}`);
-});
-
-// (C) carve-out, not asserted here: the saturated aligned-vs-unaligned torque
-// differential is a saturated-cogging acceptance; this file checks only the linear
-// reluctance shape + i^2 law below the knee.

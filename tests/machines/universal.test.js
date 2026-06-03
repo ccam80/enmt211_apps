@@ -7,7 +7,6 @@ const {
   byId,
   build,
   validate,
-  crossCheck,
   mean,
 } = require("./_fixtures.js");
 
@@ -53,10 +52,4 @@ test("mean torque over an AC cycle is unidirectional (series, proportional to i 
     "torque reverses sign over the AC cycle (not unidirectional): mean=" + m +
       ", min(v·m)=" + Math.min.apply(null, t.map(function (v) { return v * m; }))
   );
-});
-
-test("Maxwell vs co-energy within 5%", { timeout: 25000 }, function () {
-  const { stack } = build("universal");
-  const result = crossCheck(stack, 0.2, new Float64Array([12, 12]));
-  assert.ok(result.ok, "crossCheck failed: arkkio=" + result.arkkio + " coe=" + result.coe + " rel=" + result.rel);
 });

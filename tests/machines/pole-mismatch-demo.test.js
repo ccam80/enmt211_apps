@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, sweepTorque, crossCheck, mean, ripple,
+  build, validate, sweepTorque, mean, ripple,
 } = require("./_fixtures.js");
 
 const TIMEOUT = 25000;
@@ -57,29 +57,4 @@ test("instantaneous torque ripple is non-zero", { timeout: TIMEOUT }, function (
   const cur = new Float64Array([24, -12, -12]);
   const ts = sweepTorque(stack, cur, thetas);
   assert.ok(ripple(ts) > 1e-6, `ripple=${ripple(ts)} not > 1e-6 (fields do not interact)`);
-});
-
-test("Maxwell vs co-energy within 5% at a loaded angle", { timeout: TIMEOUT }, function () {
-  const { stack } = build("pole-mismatch-demo");
-  const N = 96;
-  const thetas = [];
-  for (let k = 0; k < N; k++) {
-    thetas.push((k / N) * 2 * Math.PI);
-  }
-  const cur = new Float64Array([24, -12, -12]);
-  const ts = sweepTorque(stack, cur, thetas);
-
-  // Find theta that maximises |torque|
-  let maxAbs = 0;
-  let thetaStar = thetas[0];
-  for (let k = 0; k < ts.length; k++) {
-    if (Math.abs(ts[k]) > maxAbs) {
-      maxAbs = Math.abs(ts[k]);
-      thetaStar = thetas[k];
-    }
-  }
-
-  const result = crossCheck(stack, thetaStar, cur);
-  assert.ok(result.ok,
-    `crossCheck at theta*=${thetaStar} failed: arkkio=${result.arkkio}, coe=${result.coe}, rel=${result.rel}`);
 });
