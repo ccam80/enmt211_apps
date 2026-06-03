@@ -37,18 +37,32 @@ const MACHINE = process.argv[2] || 'pmsm';
 
   // ---------- instrumentation ----------
   const T = {};
+  let PHASE = 'other';   // attribution bucket for the event-driven analyze/setPattern
   function wrap(obj, name, label) {
     if (!obj || typeof obj[name] !== 'function') { out.push(`  (skip ${label || name}: not a function)`); return; }
     const key = label || name; const orig = obj[name].bind(obj); T[key] = { n: 0, t: 0n };
     obj[name] = function () { const a = NS(); const r = orig.apply(null, arguments); T[key].t += NS() - a; T[key].n++; return r; };
   }
-  ['coupledAssemble', 'coupledThetaPreEval', 'coupledThetaPostDiff', 'coupledSolveAgainst',
+  // analyze/setPattern fire INSIDE prepareSolve on band-crossings; attribute them
+  // to whichever phase (preEval vs assemble) is running so we can strip them.
+  function wrapPhased(obj, name, label) {
+    const orig = obj[name].bind(obj);
+    for (const ph of ['@pre', '@asm', '@other']) T[label + ph] = { n: 0, t: 0n };
+    obj[name] = function () { const a = NS(); const r = orig.apply(null, arguments); const k = label + (PHASE === 'pre' ? '@pre' : PHASE === 'asm' ? '@asm' : '@other'); T[k].t += NS() - a; T[k].n++; return r; };
+  }
+  function wrapPhaseMarker(obj, name, phaseName) {
+    const orig = obj[name].bind(obj); const key = name; T[key] = { n: 0, t: 0n };
+    obj[name] = function () { const prev = PHASE; PHASE = phaseName; const a = NS(); const r = orig.apply(null, arguments); T[key].t += NS() - a; T[key].n++; PHASE = prev; return r; };
+  }
+  wrapPhaseMarker(slice, 'coupledThetaPreEval', 'pre');
+  wrapPhaseMarker(slice, 'coupledAssembleNoFactor', 'asm');
+  ['coupledFactorize', 'coupledThetaPostDiff', 'coupledSolveAgainst',
    'coupledDTdAInto', 'coupledUnitRhsInto', 'coupledFluxInto', 'buildFieldBundle'].forEach(n => wrap(slice, n));
   wrap(intl.solverSat, 'setValues', 'solver.setValues');
   wrap(intl.solverSat, 'factorize', 'solver.factorize');
   wrap(intl.solverSat, 'solveInto', 'solver.solveInto');
-  wrap(intl.solverSat, 'analyze', 'solver.analyze');
-  wrap(intl.solverSat, 'setPattern', 'solver.setPattern');
+  wrapPhased(intl.solverSat, 'analyze', 'solver.analyze');
+  wrapPhased(intl.solverSat, 'setPattern', 'solver.setPattern');
   wrap(intl._gap, 'torque', 'gap.torque');
   wrap(intl._gap, 'torqueGrad', 'gap.torqueGrad');
   wrap(intl._gap, 'stampInto', 'gap.stampInto');
@@ -71,23 +85,26 @@ const MACHINE = process.argv[2] || 'pmsm';
   const ms = (k) => Number(T[k] ? T[k].t : 0n) / 1e6;
   const row = (k) => { const r = T[k]; if (!r) return; out.push(`  ${k.padEnd(22)} n=${String(r.n).padStart(5)} (${(r.n / totalIters).toFixed(2)}/it)  total=${ms(k).toFixed(0).padStart(5)}ms  per-call=${(ms(k) / Math.max(1, r.n)).toFixed(3)}ms`); };
 
-  out.push('PUBLIC BORDER METHODS (per Newton iter):');
-  ['coupledAssemble', 'coupledThetaPreEval', 'coupledThetaPostDiff', 'coupledSolveAgainst', 'coupledDTdAInto', 'coupledUnitRhsInto', 'coupledFluxInto', 'buildFieldBundle'].forEach(row);
+  const PUB = ['coupledThetaPreEval', 'coupledAssembleNoFactor', 'coupledFactorize', 'coupledThetaPostDiff',
+               'coupledSolveAgainst', 'coupledDTdAInto', 'coupledUnitRhsInto', 'coupledFluxInto', 'buildFieldBundle'];
+  out.push('PUBLIC SLICE METHODS (per Newton iter):');
+  PUB.forEach(row);
   out.push('');
-  out.push('PRIMITIVES (shared; gap.torque spans assemble+postDiff+bundle):');
-  ['solver.factorize', 'solver.analyze', 'solver.setPattern', 'solver.setValues', 'solver.solveInto', 'gap.torque', 'gap.torqueGrad', 'gap.stampInto', 'gap.projectInto'].forEach(row);
+  out.push('PRIMITIVES (nested inside the above — not additive):');
+  ['solver.factorize', 'solver.setValues', 'solver.solveInto',
+   'solver.analyze@pre', 'solver.analyze@asm', 'solver.analyze@other',
+   'solver.setPattern@pre', 'solver.setPattern@asm',
+   'gap.torque', 'gap.torqueGrad', 'gap.stampInto', 'gap.projectInto'].forEach(row);
   out.push('');
-  // coupledAssemble internal decomposition: it calls setValues + factorize + 1 gap.torque;
-  // the remainder is prepareSolve + buildInto (recover+ν, tangent triplets, residual) + gapNodal.
-  const asmTotal = ms('coupledAssemble');
-  const fac = ms('solver.factorize'), setv = ms('solver.setValues');
-  const torquePerCall = ms('gap.torque') / Math.max(1, T['gap.torque'].n);
-  const torqueInAsm = torquePerCall * T['coupledAssemble'].n;
-  out.push('coupledAssemble INTERNAL split:');
-  out.push(`  factorize        ${fac.toFixed(0)}ms (${(100 * fac / asmTotal).toFixed(0)}%)`);
-  out.push(`  setValues        ${setv.toFixed(0)}ms (${(100 * setv / asmTotal).toFixed(0)}%)`);
-  out.push(`  gap.torque (×1)  ${torqueInAsm.toFixed(0)}ms (${(100 * torqueInAsm / asmTotal).toFixed(0)}%)`);
-  out.push(`  assemble-work    ${(asmTotal - fac - setv - torqueInAsm).toFixed(0)}ms (${(100 * (asmTotal - fac - setv - torqueInAsm) / asmTotal).toFixed(0)}%)  ← prepareSolve + buildInto(recover+ν, tangent triplets, residual) + gapNodal`);
+  const evt = ms('solver.analyze@pre') + ms('solver.analyze@asm') + ms('solver.analyze@other') + ms('solver.setPattern@pre') + ms('solver.setPattern@asm');
+  const pubSum = PUB.reduce((s, k) => s + ms(k), 0);
+  const inlineSchur = wallMs - pubSum;   // residual/convergence + D-fill + the C·A⁻¹·B DOT PRODUCTS + denseSolve + back-sub + overhead
+  out.push('CADENCE / WHERE-THE-TIME-IS:');
+  out.push(`  per-band-crossing (analyze+setPattern, ${T['solver.analyze@pre'].n + T['solver.analyze@asm'].n + T['solver.analyze@other'].n} fires): ${evt.toFixed(0)}ms (${(100 * evt / wallMs).toFixed(0)}%)`);
+  out.push(`  factorize (deferred; ${T['solver.factorize'].n} fires = non-final iters): ${ms('solver.factorize').toFixed(0)}ms (${(100 * ms('solver.factorize') / wallMs).toFixed(0)}%)`);
+  out.push(`  back-solves (coupledSolveAgainst): ${ms('coupledSolveAgainst').toFixed(0)}ms (${(100 * ms('coupledSolveAgainst') / wallMs).toFixed(0)}%)`);
+  out.push(`  Σ public slice methods: ${pubSum.toFixed(0)}ms`);
+  out.push(`  INLINE solveCoupled (Schur DOTS + back-sub + denseSolve + residual + overhead): ${inlineSchur.toFixed(0)}ms (${(100 * inlineSchur / wallMs).toFixed(0)}%)  ← was the ~380ms sparse-uRHS target`);
 
   fs.writeFileSync('spec/profile-coupled.out', out.join('\n') + '\n');
 })().catch(e => fs.writeFileSync('spec/profile-coupled.out', 'FATAL ' + e.stack + '\n'));
