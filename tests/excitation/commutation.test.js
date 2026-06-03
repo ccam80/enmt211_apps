@@ -84,34 +84,29 @@ test("electronic-trap conducting set matches 6-step table", () => {
   assert.deepStrictEqual(conds[2], { kind: "voltage", V: -amp });
 });
 
-test("mechanical chops DC into a square keyed to rotor", () => {
+test("mechanical mode supplies DC ungated at every rotor angle", () => {
+  // Mechanical commutation is modeled spatially in the slice (brush/commutator
+  // current-sheet); the excitation layer supplies the raw terminal ungated, so
+  // the rotor angle must NOT change V. A scalar gate reappearing here would
+  // double-count against the spatial map.
   const terminal = { type: "DC", amp: 12 };
   const commutation = { mode: "mechanical", poles: 2, conductionAngle: Math.PI };
-
-  // theta=0.1: base=0.1; sectorGate(0.1, π): a=0.1 ∈ [0,π) → +1 → V:+12
-  const condPos = evalTerminal({ terminal, commutation }, { t: 0, theta: 0.1, stepIndex: 0 });
-  assertClose(condPos.V, 12, 1e-12, "DC mechanical +12 at theta=0.1");
-  assert.strictEqual(condPos.kind, "voltage");
-
-  // theta=π+0.1: base=π+0.1; sectorGate(π+0.1, π): a=π+0.1 ∈ [π,2π) → −1 → V:−12
-  const condNeg = evalTerminal({ terminal, commutation }, { t: 0, theta: Math.PI + 0.1, stepIndex: 0 });
-  assertClose(condNeg.V, -12, 1e-12, "DC mechanical -12 at theta=π+0.1");
-  assert.strictEqual(condNeg.kind, "voltage");
-
-  // theta=π: sectorGate(π, π): a=π ∈ [π,2π) → −1
-  const condAtPi = evalTerminal({ terminal, commutation }, { t: 0, theta: Math.PI, stepIndex: 0 });
-  assertClose(condAtPi.V, -12, 1e-12, "DC mechanical sign at theta=π");
+  for (const theta of [0.1, Math.PI, Math.PI + 0.1, 2 * Math.PI - 0.3]) {
+    const cond = evalTerminal({ terminal, commutation }, { t: 0, theta, stepIndex: 0 });
+    assert.strictEqual(cond.kind, "voltage");
+    assertClose(cond.V, 12, 1e-12, "DC mechanical ungated +12 at theta=" + theta);
+  }
 });
 
-test("mechanical commutates AC (universal motor) — both phases present", () => {
-  // ctx: t=0, theta=3π/2.
-  // base=(2/2)·(3π/2)=3π/2; sectorGate(3π/2,π): a=3π/2 ∈ [π,2π) → −1
-  // raw=supplyValue(AC,t=0)=10·cos(0)=10; result.V=−1·10=−10
+test("mechanical mode supplies AC ungated (rotor-angle-independent)", () => {
+  // Ungated raw AC: V = amp·cos(2π·freq·t + phaseOffset), independent of theta.
   const terminal = { type: "AC", amp: 10, freq: 1, phaseOffset: 0 };
   const commutation = { mode: "mechanical", poles: 2, conductionAngle: Math.PI };
-  const result = evalTerminal({ terminal, commutation }, { t: 0, theta: 3 * Math.PI / 2, stepIndex: 0 });
-  assertClose(result.V, -10, 1e-9, "mechanical AC universal motor V=-10");
-  assert.strictEqual(result.kind, "voltage");
+  for (const theta of [0.3, Math.PI / 2, 3 * Math.PI / 2]) {
+    const cond = evalTerminal({ terminal, commutation }, { t: 0, theta, stepIndex: 0 });
+    assert.strictEqual(cond.kind, "voltage");
+    assertClose(cond.V, 10, 1e-9, "mechanical AC ungated V=10 at theta=" + theta);
+  }
 });
 
 test("sequencer advances energized phase by step index", () => {

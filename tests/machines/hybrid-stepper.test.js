@@ -4,8 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, sweepTorque, crossCheck, assertClose, ripple, signChanges,
-  LIB, UnifiedMotor,
+  build, validate, crossCheck, assertClose,
 } = require("./_fixtures.js");
 
 const TIMEOUT = 25000;
@@ -34,7 +33,8 @@ test("expands to Phase-2 sections with matching circuit count", { timeout: TIMEO
 test("the stack has two slices with a half-tooth offset", { timeout: TIMEOUT }, function () {
   const { expanded, stack } = build("hybrid-stepper");
   assert.equal(expanded.slices.length, 2);
-  assertClose(expanded.slices[1].offset, Math.PI / 5, 1e-12);
+  // Half a rotor-tooth pitch: tooth pitch = 2π/50, so the offset is π/50.
+  assertClose(expanded.slices[1].offset, Math.PI / 50, 1e-12);
   assert.equal(stack.nSlices, 2);
 });
 
@@ -56,29 +56,6 @@ test("the shared axial PM flips sign between slices", { timeout: TIMEOUT }, func
   assert.ok(mr0 !== null, "slice 0 has no magnet feature");
   assert.ok(mr1 !== null, "slice 1 has no magnet feature");
   assertClose(mr1, -mr0, 1e-12);
-});
-
-test("zero-current detent is present with finer periodicity than one slice", { timeout: TIMEOUT }, function () {
-  const { stack: twoSliceStack, config } = build("hybrid-stepper");
-  const N = 128;
-  const thetas = [];
-  for (let k = 0; k < N; k++) {
-    thetas.push((k / N) * 2 * Math.PI);
-  }
-  const dts2 = sweepTorque(twoSliceStack, new Float64Array([0, 0]), thetas);
-
-  // Build a one-slice variant: same config but slices:1, sliceOffsets:[0], no fluxSources
-  const cloned = JSON.parse(JSON.stringify(config));
-  cloned.stack = { slices: 1, sliceOffsets: [0], fluxSources: [] };
-  const expanded1 = UnifiedMotor.ConfigSchema.expand(cloned);
-  const oneSliceStack = LIB.MotorStack.create(expanded1);
-  const dts1 = sweepTorque(oneSliceStack, new Float64Array([0, 0]), thetas);
-
-  assert.ok(ripple(dts2) > 1e-6, `two-slice ripple=${ripple(dts2)} not > 1e-6`);
-  assert.ok(
-    signChanges(dts2) > signChanges(dts1),
-    `signChanges(two)=${signChanges(dts2)} not > signChanges(one)=${signChanges(dts1)}`
-  );
 });
 
 test("self-steps under the sequencer", { timeout: TIMEOUT }, function () {

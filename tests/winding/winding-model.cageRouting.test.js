@@ -25,7 +25,7 @@ describe("cageRouting", () => {
       "nSlots must equal bars (28)");
   });
 
-  it("each bar circuit has exactly one coil spanning adjacent slots", () => {
+  it("each bar circuit is one slot with an end-ring return", () => {
     const routing = WM.cageRouting({ bars: 28 });
 
     assert.strictEqual(routing.phases.length, 28,
@@ -41,8 +41,9 @@ describe("cageRouting", () => {
       const coil = phase.branches[0].coils[0];
       assert.strictEqual(coil.slotGo, b,
         `bar ${b} go-slot must be ${b}`);
-      assert.strictEqual(coil.slotReturn, (b + 1) % 28,
-        `bar ${b} return-slot must be ${(b + 1) % 28}`);
+      // The bar returns through the shorting end-ring, so slotReturn is null.
+      assert.strictEqual(coil.slotReturn, null,
+        `bar ${b} return must be the end-ring (slotReturn null)`);
       assert.strictEqual(coil.turns, 1,
         `bar ${b} turns must be 1`);
     }
@@ -55,7 +56,7 @@ describe("cageRouting", () => {
       `validate must return ok:true; errors: ${result.errors.join(", ")}`);
   });
 
-  it("each bar circuit occupies exactly two slots with opposite signs", () => {
+  it("each bar circuit occupies exactly one slot (end-ring return)", () => {
     const routing = WM.cageRouting({ bars: 28 });
     const { nCircuits, nSlots, turns } = WM.ampereConductors(routing);
 
@@ -69,10 +70,12 @@ describe("cageRouting", () => {
           sumTurns += T;
         }
       }
-      assert.strictEqual(nonZeroSlots, 2,
-        `circuit ${c} must occupy exactly 2 slots (go + return)`);
-      assert.strictEqual(sumTurns, 0,
-        `circuit ${c}: go + return turns must sum to zero (KVL)`);
+      // Each bar drives one slot (+1); the return is the end-ring, so the
+      // per-slot turns sum to +1, not zero.
+      assert.strictEqual(nonZeroSlots, 1,
+        `circuit ${c} must occupy exactly 1 slot (bar + end-ring return)`);
+      assert.strictEqual(sumTurns, 1,
+        `circuit ${c}: the single bar carries +1 conductor`);
     }
   });
 

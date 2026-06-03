@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, sweepTorque, crossCheck, ripple, signChanges,
+  build, validate, sweepTorque, crossCheck, ripple, dftAmp,
   LIB, UnifiedMotor,
 } = require("./_fixtures.js");
 
@@ -31,26 +31,35 @@ test("expands to Phase-2 sections with matching circuit count", { timeout: TIMEO
   }
 });
 
-test("zero-current detent is present and periodic", { timeout: TIMEOUT }, function () {
+test("zero-current detent is a single high-order cogging harmonic with no net torque", { timeout: TIMEOUT }, function () {
   const { stack } = build("pm-stepper");
   const N = 128;
   const thetas = [];
   for (let k = 0; k < N; k++) thetas.push((k / N) * 2 * Math.PI);
   const dts = sweepTorque(stack, new Float64Array([0, 0]), thetas);
-  // Detent (zero-current cogging) is the magnet<->stator-slot interaction; its
-  // period is the slot-pole cogging order = LCM(Q=8 slots, poles=4) = 8 cogging
-  // cycles per mechanical revolution -> ~16 sign changes (DFT-verified 2026-05-25:
-  // order-8 dominant amp 0.78, plus an order-16 overtone). The original
-  // "magnets=4 -> 8 sign changes" assumed the wrong harmonic (order-4). Assert the
-  // detent is present and genuinely oscillatory at >= the magnet rate; the exact
-  // crossing count (~15-16) shifts with discrete sampling, so a >= bound is the
-  // robust, physically-honest check.
+
+  // Detent is the magnet<->stator-slot cogging: a single high spatial order
+  // (order 48 = 2·poles for this 24-pole / 12-slot machine) carrying NO net or
+  // low-order torque at zero current. A DFT isolates the cogging order from the
+  // high-frequency mesh ripple that a raw sign-change count cannot.
+  const COG_ORDER = 48;
   assert.ok(ripple(dts) > 1e-6, `ripple=${ripple(dts)} not > 1e-6 (no detent present)`);
-  // Bounded BOTH sides: >= 8 (oscillatory at >= the magnet rate) AND <= 16 (the
-  // order-8 slot-pole cogging gives 16 crossings; anything above that is spurious
-  // noise, not detent). Measured 15.
-  const sc = signChanges(dts);
-  assert.ok(sc >= 8 && sc <= 16, `signChanges=${sc} outside detent range [8,16]`);
+
+  let dom = 1, domAmp = 0;
+  for (let o = 1; o <= 64; o++) {
+    const a = dftAmp(dts, o);
+    if (a > domAmp) { domAmp = a; dom = o; }
+  }
+  assert.equal(dom, COG_ORDER,
+    `detent dominant order = ${dom}, expected cogging order ${COG_ORDER}`);
+
+  // Zero current ⇒ no net/low-order torque: every order below the cogging order
+  // is < 0.1% of the cogging amplitude.
+  const cog = dftAmp(dts, COG_ORDER);
+  for (let o = 1; o <= 12; o++) {
+    assert.ok(dftAmp(dts, o) < 1e-3 * cog,
+      `low order ${o} amp ${dftAmp(dts, o).toExponential(2)} not << cogging amp ${cog.toExponential(2)}`);
+  }
 });
 
 test("holding torque pulls the rotor toward alignment when energized", { timeout: TIMEOUT }, function () {

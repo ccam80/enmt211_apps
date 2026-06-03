@@ -176,8 +176,13 @@ function sweepLambdaPm(stack, thetas, k) {
 //  extractor, the documented mismatch.)
 //
 //  ok === true when:
-//    max(|arkkio|, |coe|) <= 1e-5   (near-zero — guard clause)
+//    max(|arkkio|, |coe|) <= 5e-5   (near-zero — relative compare is meaningless)
 //    OR  rel <= XC_TOL * max(|arkkio|, |coe|) + XC_FLOOR
+//
+//  The 5e-5 N·m near-zero floor sits ~100x below the smallest genuine torque any
+//  fixture produces (>5e-3) and well above the numerical noise of an operating
+//  point that produces ~no torque (e.g. an induction machine probed with the
+//  cage currents zeroed). It skips only the latter, not real disagreements.
 // ---------------------------------------------------------------------------
 function crossCheck(stack, theta, currents) {
   var stackLin = LIB.MotorStack.create(stack.expanded, { saturation: { enabled: false } });
@@ -185,7 +190,7 @@ function crossCheck(stack, theta, currents) {
   var coe    = stackLin.coenergyTorque(theta, currents).total;
   var rel    = Math.abs(arkkio - coe);
   var mag    = Math.max(Math.abs(arkkio), Math.abs(coe));
-  var ok     = (mag <= 1e-5) || (rel <= XC_TOL * mag + XC_FLOOR);
+  var ok     = (mag <= 5e-5) || (rel <= XC_TOL * mag + XC_FLOOR);
   return { arkkio: arkkio, coe: coe, rel: rel, ok: ok };
 }
 

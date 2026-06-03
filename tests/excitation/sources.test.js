@@ -146,26 +146,19 @@ test("CURRENT under sequencer imposes a constant current", () => {
   }
 });
 
-test("CURRENT under mechanical gates like DC", () => {
+test("CURRENT under mechanical is supplied ungated at every rotor angle", () => {
+  // Mechanical commutation is spatial (slice brush map); the excitation layer
+  // supplies the raw current ungated, so the rotor angle must not gate or flip it.
   const circuit = {
     terminal: { type: "CURRENT", amp: 12 },
     commutation: { mode: "mechanical", poles: 2, conductionAngle: 2 * Math.PI / 3 },
   };
-  // theta = π/6: base = (2/2)·π/6 = π/6; sectorGate(π/6, 2π/3): a=π/6 ∈ [0,2π/3) → g=+1
-  assert.deepStrictEqual(
-    evalTerminal(circuit, { t: 0, theta: Math.PI / 6, stepIndex: 0 }),
-    { kind: "current", I: 12 }
-  );
-  // theta = 5π/6: base = 5π/6; sectorGate(5π/6, 2π/3): a=5π/6 ∈ [2π/3,π) → g=0 → open
-  assert.deepStrictEqual(
-    evalTerminal(circuit, { t: 0, theta: 5 * Math.PI / 6, stepIndex: 0 }),
-    { kind: "open" }
-  );
-  // theta = 7π/6: base = 7π/6; sectorGate(7π/6, 2π/3): a=7π/6 ∈ [π, π+2π/3) → g=-1
-  assert.deepStrictEqual(
-    evalTerminal(circuit, { t: 0, theta: 7 * Math.PI / 6, stepIndex: 0 }),
-    { kind: "current", I: -12 }
-  );
+  for (const theta of [Math.PI / 6, 5 * Math.PI / 6, 7 * Math.PI / 6]) {
+    assert.deepStrictEqual(
+      evalTerminal(circuit, { t: 0, theta, stepIndex: 0 }),
+      { kind: "current", I: 12 }
+    );
+  }
 });
 
 test("evalDrive maps a mixed CURRENT + AC circuit set", () => {

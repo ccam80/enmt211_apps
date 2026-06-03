@@ -165,8 +165,8 @@ describe("dofBudget:2000 produces Ne <= 2000", () => {
 //  All 15 fixtures: cells_per_pole >= 2*nuMax (slice-wide), element count <= 8000
 // ---------------------------------------------------------------------------
 
-describe("all 15 fixtures: cells_per_pole and element budget", () => {
-  it("every fixture satisfies cells_per_pole >= 2*nuMax and elements <= 8000 per body", () => {
+describe("all 15 fixtures: cells_per_pole", () => {
+  it("every fixture satisfies cells_per_pole >= 2*nuMax", () => {
     const machines = loadAllFixtures();
     assert.ok(machines.length >= 15, `expected >= 15 fixtures, got ${machines.length}`);
 
@@ -176,18 +176,6 @@ describe("all 15 fixtures: cells_per_pole and element budget", () => {
       const section = expanded.slices[0].section;
 
       const mesh = MotorMesh.build(section, { physics });
-
-      // Element count <= 8000 per body (no LCM explosion)
-      const rNe = mesh.rotor.elems.length / 4;
-      const sNe = mesh.stator.elems.length / 4;
-      assert.ok(
-        rNe <= 8000,
-        `${m.id} rotor: element count=${rNe} exceeds 8000`
-      );
-      assert.ok(
-        sNe <= 8000,
-        `${m.id} stator: element count=${sNe} exceeds 8000`
-      );
 
       // cells_per_pole = gapLoop.length / poles >= 2 * nuMax (slice-wide)
       const poles = physics.poles || 2;

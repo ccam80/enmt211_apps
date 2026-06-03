@@ -38,8 +38,8 @@ describe("MotorSlice assembly + Brauer fit (Wave 5.1)", function () {
       layout.Nn_rotor_free + layout.Nn_stator_free + layout.nHarmonicDofs,
       "n must equal the sum of the three free-DOF counts"
     );
-    const K = slice.__internals.K;
-    assert.strictEqual(layout.nHarmonicDofs, 2 * (2 * K + 1));
+    // The gap coupling is stamped into the body DOFs — no harmonic DOFs.
+    assert.strictEqual(layout.nHarmonicDofs, 0);
   });
 
   // -----------------------------------------------------------------------
@@ -97,32 +97,6 @@ describe("MotorSlice assembly + Brauer fit (Wave 5.1)", function () {
         Math.abs(v - rev) < 1e-12 * Math.max(1, Math.abs(v)),
         `asymmetry at (${i},${j}): ${v} vs (${j},${i}): ${rev}`
       );
-    }
-  });
-
-  // -----------------------------------------------------------------------
-  it("combined pattern is φ-invariant", function () {
-    const cfg = pmConfig();
-    const slice = LIB.MotorSlice.create(
-      sectionFromConfig(cfg),
-      feaOpts({ poles: polesFromConfig(cfg) })
-    );
-    const t0 = slice.__internals.assembleCombinedTriplets(
-      sectionFromConfig(cfg), feaOpts(), 0
-    );
-    const t1 = slice.__internals.assembleCombinedTriplets(
-      sectionFromConfig(cfg), feaOpts(), 1.07
-    );
-    function patternKeys(tr) {
-      const s = new Set();
-      for (let t = 0; t < tr.I.length; t++) s.add(tr.I[t] + "," + tr.J[t]);
-      return s;
-    }
-    const k0 = patternKeys(t0);
-    const k1 = patternKeys(t1);
-    assert.strictEqual(k0.size, k1.size, "pattern sizes differ between φ=0 and φ=1.07");
-    for (const k of k0) {
-      assert.ok(k1.has(k), `key ${k} missing in φ=1.07 pattern`);
     }
   });
 

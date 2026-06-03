@@ -6,7 +6,7 @@
 //  The coupled field-circuit-motion Newton condenses the field block using
 //  three borders exposed by the slice. Each is verified here node-by-node
 //  against a central difference of the corresponding forward quantity:
-//    (a) ∂T/∂A      (coupledDTdAInto)        vs d/dA of coupledAssemble's torque
+//    (a) ∂T/∂A      (coupledDTdAInto)        vs d/dA of coupledAssembleNoFactor's torque
 //    (b) ∂R_field/∂i = −uRHS (coupledUnitRhsInto) vs d/di of coupledFieldResidual
 //    (c) ∂λ_k/∂A = ell·uRHS  (the flux-pickup factor is exactly ell)
 //  All three must agree to the FD truncation floor.
@@ -33,13 +33,13 @@ test("coupled-Newton slice borders match central differences (pmsm)", () => {
 
   // (a) ∂T/∂A
   const gT = new Float64Array(n);
-  slice.coupledAssemble(A, cur, th);
+  slice.coupledAssembleNoFactor(A, cur, th);
   slice.coupledDTdAInto(th, gT);
   const idxByG = Array.from({ length: n }, (_, i) => i).sort((a, b) => Math.abs(gT[b]) - Math.abs(gT[a]));
   let maxRelT = 0;
   for (const j of idxByG.slice(0, 8)) {
-    A[j] += eps; const Tp = slice.coupledAssemble(A, cur, th);
-    A[j] -= 2 * eps; const Tm = slice.coupledAssemble(A, cur, th);
+    A[j] += eps; const Tp = slice.coupledAssembleNoFactor(A, cur, th);
+    A[j] -= 2 * eps; const Tm = slice.coupledAssembleNoFactor(A, cur, th);
     A[j] += eps;
     const fd = (Tp - Tm) / (2 * eps);
     maxRelT = Math.max(maxRelT, Math.abs(gT[j] - fd) / (Math.abs(fd) + 1e-9));
@@ -47,7 +47,7 @@ test("coupled-Newton slice borders match central differences (pmsm)", () => {
   assert.ok(maxRelT < 1e-4, `∂T/∂A vs FD max rel ${maxRelT.toExponential(2)}`);
 
   // (b) ∂R_field/∂i_0 = −uRHS_0
-  slice.coupledAssemble(A, cur, th);
+  slice.coupledAssembleNoFactor(A, cur, th);
   const u0 = new Float64Array(n);
   slice.coupledUnitRhsInto(0, th, u0);
   const rP = new Float64Array(n), rM = new Float64Array(n);

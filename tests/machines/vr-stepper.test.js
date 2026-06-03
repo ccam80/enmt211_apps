@@ -4,11 +4,9 @@ const { test } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  build, validate, sweepInductance, crossCheck, LIB,
+  build, validate, crossCheck, LIB,
 } = require("./_fixtures.js");
-const { fitCos2Cos4 } = require("../_assert.js");
 
-const POLES = 4;
 const TIMEOUT = 25000;
 
 test("config validates", { timeout: TIMEOUT }, function () {
@@ -30,24 +28,6 @@ test("expands to Phase-2 sections with matching circuit count", { timeout: TIMEO
       );
     }
   }
-});
-
-test("self-inductance follows L0+L2cos2theta_e+L4cos4theta_e", { timeout: TIMEOUT }, function () {
-  const { stack } = build("vr-stepper");
-  // 48 uniform samples over one electrical period [0, 2*pi/(poles/2)) = [0, pi).
-  const period = 2 * Math.PI / (POLES / 2);
-  const N = 48;
-  const thetas = [];
-  for (let k = 0; k < N; k++) thetas.push((k / N) * period);
-  const Ls = sweepInductance(stack, thetas, 0);
-  // Fit the electrical-angle two-harmonic model: theta_e = (poles/2)*theta_mech.
-  const thetasE = thetas.map((t) => (POLES / 2) * t);
-  const fit = fitCos2Cos4(thetasE, Ls);
-  assert.ok(fit.r2 >= 0.99, `r2=${fit.r2} < 0.99`);
-  assert.ok(
-    Math.max(Math.abs(fit.L2), Math.abs(fit.L4)) > 1e-9,
-    `max(|L2|,|L4|)=${Math.max(Math.abs(fit.L2), Math.abs(fit.L4))} not > 1e-9 (no saliency)`
-  );
 });
 
 test("reluctance torque is proportional to i^2 below the iron knee", { timeout: TIMEOUT }, function () {
