@@ -32,6 +32,7 @@ process.env.FEA_SOLVER_MJS_PATH = path.resolve(__dirname, "../../lib/solver.mjs"
 require("../../lib/fea-solver.js");
 require("../../lib/motor-slice.js");
 require("../../lib/motor-stack.js");
+require("../../lib/bdf-integrator.js");   // motor-run's adaptive stepper needs LIB.BDF
 require("../../lib/motor-run.js");
 
 require("../../lessons/unified_motor/config-schema.js");
