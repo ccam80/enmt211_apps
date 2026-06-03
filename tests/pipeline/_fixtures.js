@@ -36,6 +36,7 @@ require("../../lib/motor-slice.js");
 
 // Phase-5 lib modules
 require("../../lib/motor-stack.js");
+require("../../lib/bdf-integrator.js");
 require("../../lib/motor-run.js");
 
 // Phase-5 app module (attaches window.UnifiedMotor.ConfigSchema)
