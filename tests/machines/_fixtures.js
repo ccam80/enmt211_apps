@@ -206,6 +206,43 @@ function runFromRest(runtime, steps, dt) {
 }
 
 // ---------------------------------------------------------------------------
+//  seedState(runtime, { theta, omega, i, t }) → state
+//
+//  Inject a captured operating point into the runtime's true state, so a test
+//  can exercise behaviour FROM a given speed / angle / current snapshot with a
+//  short sim, instead of an expensive spin-up from rest (which conflates the
+//  startup transient with the steady behaviour and is hypersensitive to small
+//  integrator drift). Use on a fresh build() runtime (empty coeff/warm-start
+//  cache ⇒ the first solve cold-starts from the seed). All fields optional; `i`
+//  may be shorter than nCircuits (trailing entries left as-is).
+// ---------------------------------------------------------------------------
+function seedState(runtime, seed) {
+  var st = runtime.state;
+  if (seed.theta != null) st.theta = seed.theta;
+  if (seed.omega != null) st.omega = seed.omega;
+  if (seed.t     != null) st.t     = seed.t;
+  if (seed.i != null) {
+    var n = Math.min(st.i.length, seed.i.length);
+    for (var k = 0; k < n; k++) st.i[k] = seed.i[k];
+  }
+  return st;
+}
+
+// ---------------------------------------------------------------------------
+//  runFrom(runtime, seed, steps, dt = 1/240) → state
+//
+//  seedState then step `steps` times — the captured-state analogue of
+//  runFromRest, for short targeted behavioural checks (hold-sync, torque sign
+//  from a given load angle, decel from speed, …).
+// ---------------------------------------------------------------------------
+function runFrom(runtime, seed, steps, dt) {
+  if (dt === undefined) dt = 1 / 240;
+  seedState(runtime, seed);
+  for (var k = 0; k < steps; k++) runtime.step(dt);
+  return runtime.state;
+}
+
+// ---------------------------------------------------------------------------
 //  avgTorqueAtSpeed(runtime, omega, cycles, freq, dt = 1/240) → number
 //
 //  Resets the runtime, pins the rotor at fixed omega after every step, and
@@ -332,6 +369,8 @@ module.exports = {
   sweepLambdaPm:    sweepLambdaPm,
   crossCheck:       crossCheck,
   runFromRest:      runFromRest,
+  seedState:        seedState,
+  runFrom:          runFrom,
   avgTorqueAtSpeed: avgTorqueAtSpeed,
   dftAmp:       dftAmp,
   signChanges:  signChanges,
