@@ -47,8 +47,11 @@ const MACHINE = process.argv[2] || 'pmsm';
   wrap(intl.solverSat, 'setValues', 'solver.setValues');
   wrap(intl.solverSat, 'factorize', 'solver.factorize');
   wrap(intl.solverSat, 'solveInto', 'solver.solveInto');
+  wrap(intl.solverSat, 'analyze', 'solver.analyze');
+  wrap(intl.solverSat, 'setPattern', 'solver.setPattern');
   wrap(intl._gap, 'torque', 'gap.torque');
   wrap(intl._gap, 'torqueGrad', 'gap.torqueGrad');
+  wrap(intl._gap, 'stampInto', 'gap.stampInto');
   wrap(intl._gap, 'projectInto', 'gap.projectInto');
 
   let subSteps = 0, totalIters = 0;
@@ -72,7 +75,7 @@ const MACHINE = process.argv[2] || 'pmsm';
   ['coupledAssemble', 'coupledThetaPreEval', 'coupledThetaPostDiff', 'coupledSolveAgainst', 'coupledDTdAInto', 'coupledUnitRhsInto', 'coupledFluxInto', 'buildFieldBundle'].forEach(row);
   out.push('');
   out.push('PRIMITIVES (shared; gap.torque spans assemble+postDiff+bundle):');
-  ['solver.factorize', 'solver.setValues', 'solver.solveInto', 'gap.torque', 'gap.torqueGrad', 'gap.projectInto'].forEach(row);
+  ['solver.factorize', 'solver.analyze', 'solver.setPattern', 'solver.setValues', 'solver.solveInto', 'gap.torque', 'gap.torqueGrad', 'gap.stampInto', 'gap.projectInto'].forEach(row);
   out.push('');
   // coupledAssemble internal decomposition: it calls setValues + factorize + 1 gap.torque;
   // the remainder is prepareSolve + buildInto (recover+ν, tangent triplets, residual) + gapNodal.
