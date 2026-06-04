@@ -53,19 +53,23 @@ test("torque is ~zero at synchronous speed vs the running slip torque", { timeou
   const poles = byId["induction-3ph"].config.poles;
   const omega_s = 2 * Math.PI * 50 / (poles / 2);
 
-  // Induction torque vanishes at TRUE synchronous speed (slip=0 → the stator field
-  // is stationary in the rotor frame → cage flux is DC → no induced cage current →
-  // no torque). The engine reproduces this exactly (verified: with the cage open
-  // the sync torque is ~0, and the stator-only cage flux is DC to within 2-5%).
+  // At TRUE synchronous speed (slip=0) the fundamental stator field is stationary in
+  // the rotor frame, so the ideal cage flux is DC and the torque is zero. THE ENGINE
+  // DOES NOT REPRODUCE THIS: at sync it holds a steady spurious cage current (~2.1 A)
+  // and a residual torque ~1.5e-2 N·m, comparable to the half-sync slip torque.
   //
-  // BUT the AC transformer/motional cancellation that zeroes it is numerically
-  // delicate and requires (a) enough timesteps per electrical cycle to resolve the
-  // 50 Hz dynamics and (b) a settle window so the startup transient is excluded.
-  // The default dt=1/240 (~5 steps/cycle, averaged from rest) leaves a pure
-  // TIMESTEP artifact ~90% of the slip torque; refining to 48 steps/cycle and
-  // settling drives T(sync) -> ~0. Measured convergence: T(sync) = 4.9e-3 (5 spc)
-  // -> 3.7e-4 (19 spc) -> 3.5e-5 (48 spc). This is a numerical resolution issue,
-  // NOT an engine/model limitation (first-principles analysis 2026-05-25).
+  // Measured 2026-06-04 — a REAL engine effect, not numerical:
+  //   • independent of timestep — T(sync) plateaus ~1.51e-2 across 24→192 steps/cycle
+  //     (the earlier "3.5e-5 at 48 spc / timestep artifact" claim does NOT reproduce);
+  //   • independent of settle time — the cage current persists/rises over a 48-cycle
+  //     settle ≫ cage L/R, so it is steady, not a decaying transient;
+  //   • independent of gap-ring density — doubling gap nodes 432→864 leaves maxCage
+  //     and T(sync) unchanged, so it is NOT the moving-band gap-coupling ripple.
+  // The driver is structural and mesh-independent — under investigation as physical
+  // stator-slot / cage-MMF space-harmonic parasitic current, compounded by an
+  // anomalously weak fundamental torque (Tslip ~1.6e-2 N·m is very low for this
+  // machine). See spec/correctness-sprint-2026-06-04.md (R2).
+  // This is a TRUE failing signal, left failing on purpose — do not loosen it.
   function settledTorque(runtime, omega) {
     const dt  = 1 / 2400;                 // 48 timesteps per 50 Hz electrical cycle
     const spc = Math.round((1 / 50) / dt);
