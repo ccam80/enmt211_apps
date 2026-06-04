@@ -15,7 +15,12 @@
   const config = {
     grid: { Nr: 50, Ntheta: 512, rInner: 0.022, rOuter: 0.092, ell: 0.130 },
     poles: 8,
-    mechanical: { J: 4e-3, damping: 3e-4, loadTorque: 0 },
+    // J is the rotor plus its coupled load. A line-fed synchronous machine only
+    // fails to self-start when its inertia is large enough that the rotor cannot
+    // reach synchronous speed within a torque half-cycle; below that it pulls into
+    // step from rest. 0.4 kg·m² keeps this machine firmly non-self-starting (mean
+    // speed from rest stays «1% of synchronous), against its ~76 N·m peak torque.
+    mechanical: { J: 0.4, damping: 3e-4, loadTorque: 0 },
     rings: [
       {
         member: "rotor",

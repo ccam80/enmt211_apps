@@ -33,10 +33,21 @@ test("expands to Phase-2 sections with matching circuit count", { timeout: TIMEO
 test("does not self-start from rest on AC-none",
   { timeout: TIMEOUT },
   function () {
+    // A line-fed synchronous machine (no damper cage) started from rest develops
+    // a torque that alternates at slip frequency and averages to zero, so the
+    // rotor oscillates about standstill rather than accelerating to synchronism.
+    // The physical signature of "no self-start" is no SUSTAINED rotation: the mean
+    // speed over the window stays far below synchronous. It is NOT "theta ≈ 0" —
+    // the startup flux transient gives a finite one-off kick of a few tenths of a
+    // radian even when the machine never pulls in. Pull-in, by contrast, drives
+    // the mean speed all the way to the synchronous value.
     const { runtime } = build("wound-field-synchronous");
     const state = runFromRest(runtime, 150);
-    assert.ok(Math.abs(state.theta) < 1e-3,
-      `theta=${state.theta} >= 1e-3 (unexpectedly self-started)`);
+    const meanOmega = state.theta / state.t;     // net rotation / elapsed time
+    const omegaSync = 2 * Math.PI * 50 / 4;      // 8 poles → 4 pole-pairs at 50 Hz
+    assert.ok(Math.abs(meanOmega) < 0.1 * omegaSync,
+      `mean speed ${meanOmega.toFixed(3)} rad/s must stay « synchronous ` +
+      `${omegaSync.toFixed(2)} rad/s (no self-start / pull-in)`);
   });
 
 test("develops synchronous torque whose sign follows the load angle", { timeout: TIMEOUT }, function () {

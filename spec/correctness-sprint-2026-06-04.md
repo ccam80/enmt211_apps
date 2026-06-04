@@ -26,8 +26,8 @@ FEA API); the live app is the only product; no historical-narrative comments.
 | R1/R6 root-cause investigation | **Done** | doc + below |
 | Co-energy / dL-dθ deletion + motor-run rewire | **Done** | committed `aec6762` |
 | R2 — induction torque ≠ 0 at sync speed | **Open** | untouched |
-| R3 — wound-field self-start (line-fed) | **Open** | untouched |
-| R5 — salient deltaNorm convergence bookkeeping | **Done** (uncommitted) | `motor-slice.js` |
+| R3 — wound-field self-start (line-fed) | **Done** (uncommitted) | fixture J + test reframe |
+| R5 — salient deltaNorm convergence bookkeeping | **Done** | committed `f927d12` |
 | Test-suite profiling & sim decomposition (long sims → short seeded per-behaviour sims) | **Open (after R2/R3/R5)** | Next §4 |
 
 ## Real-signal R-codes — current state
@@ -41,8 +41,22 @@ FEA API); the live app is the only product; no historical-narrative comments.
   shortcut … 10–40% accuracy"). Deleted all 15 crosschecks + the validator.
 - **R2** induction sync-speed torque — open. Motional-EMF cancellation not closing
   (Ts≈0.015 vs target 7e-4).
-- **R3** wound-field self-start — open. Excitation lacks a current-source field, so
-  a line-fed synchronous machine self-starts when it shouldn't.
+- **R3** wound-field self-start — root cause confirmed (probes); **engine is
+  correct**, resolution pending user. Field current is correctly pinned at 12 A
+  (CURRENT terminal — the old "no current-source field" note was stale). Dynamic
+  torque matches independent static solves to 4 sig-figs (no torque bug). A
+  J-sweep shows pull-in vanishes as inertia rises (meanΩ 78.9→2.3→0.75→0.08 for
+  J=4e-3→4e-2→4e-1→4.0) — so no rectification / no spurious net torque; θ→49 is
+  genuine **low-inertia synchronous pull-in**. The fixture is incoherent: Tmax≈76
+  N·m vs J=4e-3 → rotor reaches sync within one torque half-cycle, so it
+  physically self-starts. The `|θ|<1e-3` bound is also unphysical — even at J=4.0
+  (no pull-in) θ=0.052 from the startup transient. Fix is fixture+test design
+  (raise J to a coherent non-self-starting machine; assert "no sustained rotation"
+  meanΩ≈0), NOT an engine change and NOT loosen-to-pass.
+  **Resolved** (uncommitted): fixture J 4e-3→0.4 (rotor + coupled load, firmly
+  non-self-starting against ~76 N·m); test now asserts meanΩ=θ/t « synchronous
+  (78.5 rad/s) instead of |θ|<1e-3. No engine change. wound-field 4/4,
+  agnostic-pipeline 3/3.
 - **R5** newton deltaNorm — root cause confirmed (probe). `solveStaticRotor`
   converges salient/refine0.5/i=10 to residual 7e-13 in **1 iter from cold start**
   (A_prev=0, no harmonic DOFs — nHarm=0, so not null-space). `deltaNorm =
