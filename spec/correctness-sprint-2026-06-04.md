@@ -24,10 +24,10 @@ FEA API); the live app is the only product; no historical-narrative comments.
 | Test-debt purge (31-failure audit → fix/update/delete) | **Done** | committed `a47adee` |
 | Dead-code excision (coupledAssemble, linearSchurPrepare, schur counters, gapStampLog, defaultK) | **Done** | committed `a47adee` |
 | R1/R6 root-cause investigation | **Done** | doc + below |
-| Co-energy / dL-dθ deletion + motor-run rewire | **Done, uncommitted** | below |
+| Co-energy / dL-dθ deletion + motor-run rewire | **Done** | committed `aec6762` |
 | R2 — induction torque ≠ 0 at sync speed | **Open** | untouched |
 | R3 — wound-field self-start (line-fed) | **Open** | untouched |
-| R5 — salient deltaNorm convergence bookkeeping | **Open** | untouched |
+| R5 — salient deltaNorm convergence bookkeeping | **Done** (uncommitted) | `motor-slice.js` |
 | Test-suite profiling & sim decomposition (long sims → short seeded per-behaviour sims) | **Open (after R2/R3/R5)** | Next §4 |
 
 ## Real-signal R-codes — current state
@@ -43,9 +43,16 @@ FEA API); the live app is the only product; no historical-narrative comments.
   (Ts≈0.015 vs target 7e-4).
 - **R3** wound-field self-start — open. Excitation lacks a current-source field, so
   a line-fed synchronous machine self-starts when it shouldn't.
-- **R5** newton deltaNorm — open. Field converges (residual <1e-9) but the
-  deltaNorm metric blows up at aMax≈0. Likely fix: derive `converged` from the
-  residual, not deltaNorm. The contained one.
+- **R5** newton deltaNorm — root cause confirmed (probe). `solveStaticRotor`
+  converges salient/refine0.5/i=10 to residual 7e-13 in **1 iter from cold start**
+  (A_prev=0, no harmonic DOFs — nHarm=0, so not null-space). `deltaNorm =
+  ‖αΔA‖∞/(‖A_prev‖∞+1e-30)`; with A_prev=0 the denominator hits the 1e-30 floor →
+  6.6e-5/1e-30 = 6.6e25. A divide-by-zero-iterate artifact, not divergence. The
+  internal `converged` IS set true from the residual but the return omits it.
+  **Fixed** (`motor-slice.js`, uncommitted): (a) `solveStaticRotor` now returns
+  `converged` (Newton + linear-bypass paths); (b) the step-norm denominator is
+  `max(‖A_prev‖∞, ‖A_new‖∞)+eps` (repo convention) so cold-start iter-1 reads ~1,
+  not 1e25. Newton suite 6/6, slice suite 35/35.
 - ~~R4~~ mesh ≤8000 budget — killed (arbitrary number); `cells_per_pole≥2·nuMax`
   kept and passes.
 
@@ -94,7 +101,7 @@ FEA API); the live app is the only product; no historical-narrative comments.
 ## Next
 
 1. ~~Confirm full-suite red set = {R2, R3, R5}.~~ **Done — confirmed.**
-2. Commit the co-energy deletion + motor-run rewire. **(awaiting go-ahead)**
+2. ~~Commit + push the co-energy deletion + motor-run rewire.~~ **Done — `aec6762`, pushed.**
 3. R5 (contained) → R2/R3 (excitation-model physics).
 4. **Test-suite profiling & sim decomposition.** Profile every test. For each
    long-running test, identify exactly which behaviour(s) it exercises, then
