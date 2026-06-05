@@ -7,7 +7,7 @@ const {
   byId,
   build,
   validate,
-  runFromRest,
+  runUntil,
 } = require("./_fixtures.js");
 
 test("config validates", function () {
@@ -31,13 +31,14 @@ test("expands to Phase-2 sections with matching circuit count", function () {
   }
 });
 
-test("self-starts under mechanical commutation", { timeout: 25000 }, function () {
+test("self-starts under mechanical commutation", function () {
   const { runtime } = build("brushed-dc-wound");
-  // Self-start only needs the rotor to leave rest (|theta| > 1e-3), reached well
-  // under 150 coarse steps; a longer free-spin only adds cost, not coverage.
-  const state = runFromRest(runtime, 150);
+  // Self-start = the rotor leaves rest (|theta| > 1e-3); the predicate trips in
+  // the first few steps, before the no-load rotor climbs to the costly high-ω
+  // regime. Stopping there adds no coverage.
+  const r = runUntil(runtime, (s) => Math.abs(s.theta) > 1e-3, { maxSteps: 60 });
   assert.ok(
-    Math.abs(state.theta) > 1e-3,
-    "rotor did not move from rest; |theta| = " + Math.abs(state.theta)
+    r.hit,
+    "rotor did not leave rest within " + r.steps + " steps; |theta| = " + Math.abs(r.state.theta)
   );
 });

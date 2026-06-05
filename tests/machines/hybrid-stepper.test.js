@@ -58,18 +58,20 @@ test("the shared axial PM flips sign between slices", { timeout: TIMEOUT }, func
   assertClose(mr1, -mr0, 1e-12);
 });
 
-test("self-steps under the sequencer", { timeout: TIMEOUT }, function () {
+test("self-steps under the sequencer", function () {
   const { runtime } = build("hybrid-stepper");
   runtime.reset();
   const theta0 = runtime.state.theta;
   runtime.commandStep(1);
-  // The commanded step swings the rotor far past 1e-4 within a few dozen steps;
-  // 40 keeps a wide margin while bounding the per-step cache misses (FIX 8 trim).
-  for (let k = 0; k < 40; k++) {
+  // The commanded step swings the rotor past 1e-4 within a few steps; stop as
+  // soon as it has moved rather than spinning on into the costly high-ω regime.
+  let moved = false;
+  for (let k = 0; k < 40 && !moved; k++) {
     runtime.step(1 / 240);
+    if (Math.abs(runtime.state.theta - theta0) > 1e-4) moved = true;
   }
   assert.ok(
-    Math.abs(runtime.state.theta - theta0) > 1e-4,
-    `theta did not move: theta=${runtime.state.theta}, theta0=${theta0}`
+    moved,
+    `theta did not move within 40 steps: theta=${runtime.state.theta}, theta0=${theta0}`
   );
 });

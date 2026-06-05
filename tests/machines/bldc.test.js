@@ -7,7 +7,7 @@ const {
   byId,
   build,
   validate,
-  runFromRest,
+  runUntil,
 } = require("./_fixtures.js");
 
 test("config validates", function () {
@@ -31,15 +31,15 @@ test("expands to Phase-2 sections with matching circuit count", function () {
   }
 });
 
-test("self-starts under electronic-trap commutation", { timeout: 25000 }, function () {
+test("self-starts under electronic-trap commutation", function () {
   const { runtime } = build("bldc");
-  // Self-start only needs the rotor to leave rest (|theta| > 1e-3), reached well
-  // under 150 coarse steps; a longer free-spin only lets the no-load rotor climb
-  // to a high ω where late-step solves are expensive without adding coverage.
-  const state = runFromRest(runtime, 150);
+  // Self-start = the rotor leaves rest (|theta| > 1e-3). The predicate trips in
+  // the first few steps; stopping there keeps the sim out of the high-ω regime
+  // where late-step solves cost seconds, with no loss of coverage.
+  const r = runUntil(runtime, (s) => Math.abs(s.theta) > 1e-3, { maxSteps: 60 });
   assert.ok(
-    Math.abs(state.theta) > 1e-3,
-    "rotor did not move from rest; |theta| = " + Math.abs(state.theta)
+    r.hit,
+    "rotor did not leave rest within " + r.steps + " steps; |theta| = " + Math.abs(r.state.theta)
   );
 });
 

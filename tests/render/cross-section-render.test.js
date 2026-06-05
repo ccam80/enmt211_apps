@@ -1,6 +1,6 @@
 "use strict";
 
-const { describe, it } = require("node:test");
+const { describe, it, before } = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const path = require("path");
@@ -39,6 +39,12 @@ async function makeRuntime(stepOnce) {
 }
 
 describe("cross-section-render 2-D seam", () => {
+  // The stepped pmsm runtime (mesh build + one solve) is the cost; build it once
+  // and share it across the paint tests, which only read it (the rotate test sets
+  // gap.phi explicitly, so a shared field bundle is fine).
+  let shared;
+  before(async () => { shared = await makeRuntime(true); });
+
   it("register() installs the 2-D seam", () => {
     UM.CROSS_SECTION_2D = null;
     CSR.register(UM);
@@ -73,7 +79,7 @@ describe("cross-section-render 2-D seam", () => {
   it("paint clears and draws the rotor + stator on each canvas", async () => {
     UM.fieldViz = { fluxLines: true, modulusB: false, saturation: false,
       magnetization: false, currentDensity: false, gapLoop: true };
-    const { cfg, expanded, runtime } = await makeRuntime(true);
+    const { cfg, expanded, runtime } = shared;
 
     const a = recordingCanvas(600, 600);
     const b = recordingCanvas(600, 600);
@@ -94,7 +100,7 @@ describe("cross-section-render 2-D seam", () => {
   it("paint dispatches each viz toggle (modulusB on, fluxLines off)", async () => {
     UM.fieldViz = { fluxLines: false, modulusB: true, saturation: false,
       magnetization: false, currentDensity: false, gapLoop: false };
-    const { cfg, expanded, runtime } = await makeRuntime(true);
+    const { cfg, expanded, runtime } = shared;
 
     const a = recordingCanvas(600, 600);
     const b = recordingCanvas(600, 600);
@@ -132,7 +138,7 @@ describe("cross-section-render 2-D seam", () => {
   it("paint rotates the rotor mesh by gap.phi", async () => {
     UM.fieldViz = { fluxLines: false, modulusB: false, saturation: false,
       magnetization: false, currentDensity: false, gapLoop: false };
-    const { cfg, expanded, runtime } = await makeRuntime(true);
+    const { cfg, expanded, runtime } = shared;
 
     function firstRotorVertex() {
       const a = recordingCanvas(600, 600);

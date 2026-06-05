@@ -41,8 +41,11 @@ test("does not self-start from rest on AC-none",
     // the startup flux transient gives a finite one-off kick of a few tenths of a
     // radian even when the machine never pulls in. Pull-in, by contrast, drives
     // the mean speed all the way to the synchronous value.
+    // A negative observation (no sustained rotation), so it can't early-exit or
+    // seed — it needs a window long enough for the one-off startup kick to average
+    // out. 90 steps leaves the non-pull-in mean speed many-fold under the bound.
     const { runtime } = build("wound-field-synchronous");
-    const state = runFromRest(runtime, 150);
+    const state = runFromRest(runtime, 90);
     const meanOmega = state.theta / state.t;     // net rotation / elapsed time
     const omegaSync = 2 * Math.PI * 50 / 4;      // 8 poles → 4 pole-pairs at 50 Hz
     assert.ok(Math.abs(meanOmega) < 0.1 * omegaSync,

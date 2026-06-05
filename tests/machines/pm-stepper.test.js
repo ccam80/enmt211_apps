@@ -62,25 +62,25 @@ test("zero-current detent is a single high-order cogging harmonic with no net to
   }
 });
 
-test("holding torque pulls the rotor toward alignment when energized", { timeout: TIMEOUT }, function () {
+test("holding torque pulls the rotor toward alignment when energized", function () {
   const { config } = build("pm-stepper");
   // Clone config and open-circuit phase 1 so only phase 0 is energized.
   const cloned = JSON.parse(JSON.stringify(config));
   cloned.circuits[1].terminal.type = "OPEN";
   const expanded = UnifiedMotor.ConfigSchema.expand(cloned);
   const runtime = LIB.MotorRun.create(expanded);
-  let peakOmega = 0;
   runtime.reset();
-  // 120 steps suffice for the energized phase to swing the rotor through its peak
-  // speed and begin decaying back toward alignment (FIX 8 trim from 400).
-  for (let k = 0; k < 120; k++) {
+  // The energized phase swings the rotor toward alignment: ω rises to a peak then
+  // decays as the restoring torque decelerates it. That rise-then-fall IS the
+  // pull-toward-alignment signature — stop at the first post-peak decrease rather
+  // than running a fixed step count.
+  let peakOmega = 0, dropped = false;
+  for (let k = 0; k < 120 && !dropped; k++) {
     runtime.step(1 / 240);
-    if (Math.abs(runtime.state.omega) > peakOmega) {
-      peakOmega = Math.abs(runtime.state.omega);
-    }
+    const w = Math.abs(runtime.state.omega);
+    if (w > peakOmega) peakOmega = w;
+    else if (peakOmega > 0 && w < peakOmega) dropped = true;
   }
-  const finalState = runtime.state;
-  assert.ok(Math.abs(finalState.omega) < peakOmega,
-    `omega=${finalState.omega} has not decayed below peak=${peakOmega}`);
-  assert.ok(isFinite(finalState.theta), `theta=${finalState.theta} is not finite`);
+  assert.ok(dropped, `omega did not rise to a peak and decay (peak=${peakOmega})`);
+  assert.ok(isFinite(runtime.state.theta), `theta=${runtime.state.theta} is not finite`);
 });

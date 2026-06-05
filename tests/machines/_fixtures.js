@@ -145,6 +145,29 @@ function runFromRest(runtime, steps, dt) {
 }
 
 // ---------------------------------------------------------------------------
+//  runUntil(runtime, predicate, { maxSteps = 60, dt = 1/240 }) → { state, steps, hit }
+//
+//  Reset, then step until predicate(state) is true (hit) or maxSteps is reached.
+//  For "did the behaviour occur" checks (self-start, rotor-turns, commanded
+//  step): the predicate trips in the first few steps, before a free-spinning
+//  rotor climbs to the high-ω regime where each coupled solve costs seconds —
+//  so this stops as soon as the behaviour is proven, adding no coverage by
+//  spinning on. `hit` is false if maxSteps elapsed without the predicate firing
+//  (a genuine no-start signal), so the cap is a real assertion bound, not a mask.
+// ---------------------------------------------------------------------------
+function runUntil(runtime, predicate, opts) {
+  opts = opts || {};
+  var dt = opts.dt != null ? opts.dt : 1 / 240;
+  var maxSteps = opts.maxSteps != null ? opts.maxSteps : 60;
+  runtime.reset();
+  for (var k = 0; k < maxSteps; k++) {
+    runtime.step(dt);
+    if (predicate(runtime.state)) return { state: runtime.state, steps: k + 1, hit: true };
+  }
+  return { state: runtime.state, steps: maxSteps, hit: false };
+}
+
+// ---------------------------------------------------------------------------
 //  seedState(runtime, { theta, omega, i, t }) → state
 //
 //  Inject a captured operating point into the runtime's true state, so a test
@@ -179,6 +202,96 @@ function runFrom(runtime, seed, steps, dt) {
   seedState(runtime, seed);
   for (var k = 0; k < steps; k++) runtime.step(dt);
   return runtime.state;
+}
+
+// ---------------------------------------------------------------------------
+//  Settled-state snapshots — seed a periodic-orbit operating point captured
+//  once from a spin-up, so a settled-property test runs a short measurement
+//  window instead of a long settle. The snapshot (theta, omega, t, i) is a
+//  phase-consistent point on the steady orbit; seeding t restores the
+//  excitation phase so the prescribed currents resume coherently.
+//
+//  Default: load _snapshots/<key>.json and seed it. With SPINUP=1 in the env
+//  (or when the snapshot file is absent) spin up from rest, capture, and write
+//  the snapshot. Regeneration is OPT-IN: a model/integrator change that moves
+//  the orbit makes the seeded run FAIL — that failure is the alarm. Regenerate
+//  deliberately with SPINUP=1 after confirming the change is intended; the run
+//  never auto-refreshes on failure (which would silently absorb a regression).
+// ---------------------------------------------------------------------------
+const SNAP_DIR = path.join(__dirname, "_snapshots");
+
+function snapshotPath(key) {
+  return path.join(SNAP_DIR, key + ".json");
+}
+
+//  spinUpSnapshot(runtime, { omega, dt, settleCycles, freq }) → snapshot
+//
+//  Spin up from rest at pinned omega for settleCycles electrical periods, then
+//  capture (theta, omega, t, i) — a settled point on the steady orbit.
+function spinUpSnapshot(runtime, opts) {
+  var spc = Math.round((1 / opts.freq) / opts.dt);
+  runtime.reset();
+  runtime.state.omega = opts.omega;
+  for (var s = 0; s < opts.settleCycles * spc; s++) {
+    runtime.step(opts.dt);
+    runtime.state.omega = opts.omega;
+  }
+  return {
+    theta: runtime.state.theta,
+    omega: opts.omega,
+    t: runtime.state.t,
+    i: Array.from(runtime.state.i),
+  };
+}
+
+//  seedSnapshot(runtime, snap) → state
+//
+//  Seed a fresh runtime at the snapshot operating point (cold warm-start; the
+//  first step's stateDiverged() re-seeds the integrator from these fields).
+function seedSnapshot(runtime, snap) {
+  runtime.reset();
+  runtime.state.theta = snap.theta;
+  runtime.state.omega = snap.omega;
+  runtime.state.t = snap.t;
+  var i = runtime.state.i;
+  for (var k = 0; k < i.length; k++) {
+    i[k] = (k < snap.i.length && snap.i[k] != null) ? snap.i[k] : 0;
+  }
+  return runtime.state;
+}
+
+//  settledRuntime(runtime, key, spinupOpts) → state
+//
+//  Seed the runtime at a settled operating point. Generates the snapshot on
+//  SPINUP=1 or when the file is missing; otherwise loads it.
+function settledRuntime(runtime, key, spinupOpts) {
+  var p = snapshotPath(key);
+  var snap;
+  if (process.env.SPINUP || !fs.existsSync(p)) {
+    snap = spinUpSnapshot(runtime, spinupOpts);
+    if (!fs.existsSync(SNAP_DIR)) fs.mkdirSync(SNAP_DIR, { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(snap, null, 2) + "\n");
+  } else {
+    snap = JSON.parse(fs.readFileSync(p, "utf8"));
+  }
+  return seedSnapshot(runtime, snap);
+}
+
+//  avgTorqueWindow(runtime, { omega, dt, cycles, freq }) → number
+//
+//  Mean Arkkio torque over `cycles` electrical periods at pinned omega — the
+//  steady-torque measurement window (an integer number of pulsation periods,
+//  so the pulsating component averages out and the DC torque remains).
+function avgTorqueWindow(runtime, opts) {
+  var spc = Math.round((1 / opts.freq) / opts.dt);
+  var sum = 0, n = 0;
+  for (var s = 0; s < opts.cycles * spc; s++) {
+    runtime.step(opts.dt);
+    runtime.state.omega = opts.omega;
+    sum += runtime.lastSolve.torque;
+    n++;
+  }
+  return n > 0 ? sum / n : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +418,11 @@ module.exports = {
   runFromRest:      runFromRest,
   seedState:        seedState,
   runFrom:          runFrom,
+  runUntil:         runUntil,
+  spinUpSnapshot:   spinUpSnapshot,
+  seedSnapshot:     seedSnapshot,
+  settledRuntime:   settledRuntime,
+  avgTorqueWindow:  avgTorqueWindow,
   avgTorqueAtSpeed: avgTorqueAtSpeed,
   dftAmp:       dftAmp,
   signChanges:  signChanges,

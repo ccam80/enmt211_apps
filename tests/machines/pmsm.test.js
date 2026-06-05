@@ -10,7 +10,7 @@ const {
   MACHINE_IDS,
   build,
   validate,
-  runFromRest,
+  runUntil,
   readIndexHtml,
 } = require("./_fixtures.js");
 
@@ -52,14 +52,15 @@ test("registry is complete and index.html lists every fixture", function () {
   }
 });
 
-test("self-starts under electronic-sine commutation", { timeout: 25000 }, function () {
+test("self-starts under electronic-sine commutation", function () {
   const { runtime } = build("pmsm");
-  // Self-start only needs the rotor to leave rest (|theta| > 1e-3), reached well
-  // under 150 coarse steps; a longer free-spin only adds cost, not coverage.
-  const state = runFromRest(runtime, 150);
+  // Self-start = the rotor leaves rest (|theta| > 1e-3); the predicate trips in
+  // the first few steps, before the no-load rotor climbs to the costly high-ω
+  // regime. Stopping there adds no coverage.
+  const r = runUntil(runtime, (s) => Math.abs(s.theta) > 1e-3, { maxSteps: 60 });
   assert.ok(
-    Math.abs(state.theta) > 1e-3,
-    "rotor did not move from rest; |theta| = " + Math.abs(state.theta)
+    r.hit,
+    "rotor did not leave rest within " + r.steps + " steps; |theta| = " + Math.abs(r.state.theta)
   );
 });
 
