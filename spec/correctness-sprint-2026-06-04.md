@@ -25,7 +25,7 @@ FEA API); the live app is the only product; no historical-narrative comments.
 | Dead-code excision (coupledAssemble, linearSchurPrepare, schur counters, gapStampLog, defaultK) | **Done** | committed `a47adee` |
 | R1/R6 root-cause investigation | **Done** | doc + below |
 | Co-energy / dL-dθ deletion + motor-run rewire | **Done** | committed `aec6762` |
-| R2 — induction torque ≠ 0 at sync speed | **Open** | untouched |
+| R2 — induction torque ≠ 0 at sync speed | **Root-caused (fix pending approval)** | below |
 | R3 — wound-field self-start (line-fed) | **Done** | committed `c8a4176` |
 | R5 — salient deltaNorm convergence bookkeeping | **Done** | committed `f927d12` |
 | Test-suite profiling & sim decomposition (long sims → short seeded per-behaviour sims) | **Open (after R2/R3/R5)** | Next §4 |
@@ -118,6 +118,114 @@ FEA API); the live app is the only product; no historical-narrative comments.
   engine-correct vs torque-extraction defect, (3) and reconsider the test (compares
   sync torque to slip=0.5, which is past breakdown). Not resolvable by more dynamic
   probing.
+  **ROOT-CAUSED (2026-06-04, dedicated session) — supersedes the "un-settleable /
+  noise" reading above.** Diagnostic chain:
+  • Torque WAVEFORM: at sync the instantaneous torque is coherent + always-positive
+    (min +2.4e-3), DC + a clean 6th-harmonic (the 5th/7th 3-phase pulsation), NOT
+    noise. Off-sync the cycle-mean CONVERGES cleanly by ~20 cycles (so NOT leakage,
+    NOT un-settleable — earlier τ≈380cy was a misread; design τ is ~2.5-10cy).
+  • Cumulative-mean torque converges to the WRONG SIGN under slip: s=.05 → −8.6e-3,
+    s=.15 → −9.8e-3. Sub-sync MUST motor (positive); the engine's own sign test
+    (induction-3ph.test.js:109) expects positive. So R2 is a real wrong-sign defect.
+  • PRODUCT-LEVEL CONFIRMATION (free run from rest, no ω pinning): the machine does
+    NOT self-start toward +sync. After a startup-transient kick to ~130 rad/s it
+    steadily DECELERATES away from sync (130→91 over 3 s); instantaneous EM torque
+    oscillates around a NEGATIVE mean (~−1e-2) at sub-sync. The torque-slip
+    characteristic is INVERTED — sync is treated as an UNSTABLE point. Real induction
+    motors make sync a STABLE attractor. This is the bottom-line defect.
+  **RETRACTED over-claim (was "SMOKING GUN: Arkkio vs co-energy opposite sign →
+  Arkkio wrong").** The co-energy via FD of linearFluxLinkages is RIPPLE-CONTAMINATED:
+  λ carries the banding ripple (period 2π/432≈0.0145 rad); with h≪ripple the FD slope
+  is the ripple derivative, not the smooth dλ/dθ. When the true torque (~1e-2) is the
+  same order as the contamination, T_coe is h-DIVERGENT (bounces −1.8e-2↔+1.0e-1 over
+  h=1e-4..0.25) and meaningless. The wound-field CONTROL agreed only because its true
+  torque (~60 N·m) dwarfs the contamination. The instantaneous Arkkio ALSO flips sign
+  with θ, so the "unanimous opposite sign" was an artifact of the θ-window sampled.
+  Do NOT trust the co-energy-vs-Arkkio sign comparison in this small-torque regime.
+  **Reliably established:** induction torque-slip is INVERTED (real product defect);
+  RULED OUT as the cause: timestep, settle, gap density, saturation (linear ==
+  saturating Arkkio byte-identical), the torque() gap reconstruction (proven correct
+  on analytic harmonics, phi-invariant, k≤20), cage self-inductance sign (all +7e-6,
+  positive). **STILL OPEN:** whether the inversion is in the Arkkio torque-extraction
+  for the cage field OR in the induced cage-current phase — needs a RIPPLE-IMMUNE
+  independent torque (e.g. Lorentz J×B summed on the bars) to decide; co-energy FD
+  cannot. Also: line-109 sign test is a FALSE PASS (3-cycle-from-rest catches a
+  positive transient before the converged negative).
+  **CONSOLIDATED HONEST STATE (end of dedicated session) — supersedes the "INVERTED
+  / wrong-sign" framing, which was too strong.** The reliable fact is the
+  PRODUCT-LEVEL defect: the machine does not function as an induction motor (free run
+  does not accelerate to sync). But the *mechanism* is NOT cleanly pinned, and the
+  mean torque itself is not robustly converged: T_arkkio_mean(slip=.05) read −8.6e-3
+  (24spc/40cyc) vs +9.1e-3 (48spc/8cyc) — sign flips with measurement. The true
+  torque is TINY and buried under numerical artifacts of comparable/larger size, so
+  every dynamic torque measure I have is contaminated:
+  • energy-balance T_power = P_rcl/(s·ω_s) gave tiny POSITIVE values (1.6e-4, 1.2e-3,
+    6.4e-5 for s=.15,.05,.30) — but it used expanded.Rcoupling (penalty-laden) and the
+    cage common-mode |Σi|=0.3–0.6 A (NOT ~0), so it is penalty-contaminated and the
+    arithmetic doesn't close → not trustworthy.
+  • mean Arkkio (~1e-2) is ~10–100× the energy estimate and sign-unstable.
+  **NEW LEAD (unverified):** the cage common-mode current Σi_cage ≈ 0.3–0.6 A is NOT
+  ~0. KCL/FE validity require Σi=0 (single bars, no axial return); the penalty
+  (1e6·R_b ≈ 63 Ω on the common mode) is evidently too weak to enforce it against the
+  EMFs. A spurious net rotor current would make a spurious uniform-rotor field → a
+  candidate spurious-torque source. Worth checking whether the dynamics' Rof actually
+  carries the penalty and whether tightening it removes the spurious torque.
+  **What is solid:** real product defect; torque() reconstruction correct; ruled out
+  timestep/settle/gap-density/saturation/cage-self-L-sign. **What is NOT solid:** the
+  exact mechanism — true signal (~1e-3) ≪ numerical artifacts (~1e-2), so dynamic
+  probes are unreliable here. Next clean tool needed: a STATIC/phasor induction-torque
+  benchmark (impose a known rotating field + slip currents, compare Arkkio to analytic)
+  and/or instrument the Arkkio integrand spatially — a fresh focused effort, NOT more
+  dynamic probing. Two over-claims were made and retracted this session (the
+  un-settleable reading; the co-energy smoking gun) — treat single dynamic-probe
+  results here with suspicion.
+  **STATIC LORENTZ-BENCHMARK attempt (INCONCLUSIVE — a third tool that can't decide
+  it).** Built a J×B-on-rotor-bars torque (T=ell·Σ I_k·turns·(xc·Bx+yc·By)) as a
+  ripple-immune reference vs Arkkio. VALIDATED on wound-field round-iron (muR=1):
+  Lorentz==Arkkio to 7.3%, same sign — the Lorentz code is correct where the field
+  reaches the conductors. BUT for the slotted CAGE it gives Lorentz≈0 because B at
+  the slot-embedded bars is ≈0 (flux runs in the iron TEETH, not the slots — the
+  tangential force is on the teeth, not the conductor). Local J×B on slot conductors
+  is a KNOWN-INADEQUATE torque method for slotted machines; the muR=1 "fix" only makes
+  the machine barely magnetized (B~1e-4 T everywhere) → degenerate. So Lorentz≈0 is a
+  METHOD artifact, NOT proof Arkkio is wrong (the executor's auto-verdict "Arkkio is
+  WRONG" is over-claimed — discount it). One loose thread worth a look: at muR=1,
+  Arkkio read −0.45 N·m where the ~7e-4 T bar fields imply ~1e-3 — Arkkio may be
+  ~20× too large for the cage config, but that is NOT established. Net: conductor-J×B
+  is the wrong reference for a slotted cage; need a gap-side independent torque
+  (surface Maxwell-stress integrated from the BODY field, bypassing the mortar
+  gap-ring reconstruction) or an external-FE/analytic reference. **Bottom line after
+  the full dedicated session: R2 is a CONFIRMED real product defect (does not motor),
+  cause NARROWED (not timestep/settle/gap-density/saturation/torque()-reconstruction/
+  cage-self-L) but NOT cleanly pinned — every torque cross-check available in-engine
+  is contaminated or method-inadequate at this small-torque slotted-cage scale.
+  Honest recommendation: this needs an external/independent reference solution, not
+  more in-engine probing.
+  **ROOT CAUSE FOUND & FIXED (2026-06-05).** The mortar gap stamp loses the gap
+  coupling once the rotor passes one full revolution (φ ≥ 2π). `airgap-mortar.js`
+  `stampInto`: the zipper's start alignment `r0` wraps φ mod 2π (line ~129) and the
+  stator order uses `thS mod 2π`, but the merge-walk's angular comparator `rAng`
+  (line ~113) used the RAW unwrapped φ. For φ<2π they stay consistent; for φ≥2π, r0
+  wraps to a small angle so the stator pointer starts at the low-angle end while rAng
+  is still ~φ — `rNextA ≤ sNextA` is false across the whole ring, the rotor/stator
+  gap rings fail to triangulate together, and the gap coupling collapses → stator
+  flux drops ~7× → cage starved → ~0 torque, noisy sign. Localized by a flux-vs-θ
+  sweep (cage open, fixed balanced current): λ_stator flat 4.62 Wb for θ∈[0,2π), then
+  cliff to 0.658 Wb at θ=2π and stuck there for all larger θ — NOT 2π-periodic.
+  **Why induction-only / why every prior probe missed it:** synchronous machines are
+  tested STATICALLY (θ≈0.2) or oscillating near 0 (wound-field no-self-start), so they
+  never reach 2π; only the freely-spinning cage accumulates θ past 2π (≈24 rad after
+  an 8-cycle settle) — and every magnetization/mutual/cage-R probe used small θ.
+  Answers Q1 exactly: it DOES affect every spinning machine; test coverage hid it.
+  **Fix:** one line at the top of `stampInto` — `phi = ((phi % TWO_PI) + TWO_PI) %
+  TWO_PI;`. rPos uses cos/sin (already periodic) so the stamped geometry is unchanged;
+  only the angular comparator becomes consistent with r0/sAng. Verified: flux now flat
+  ~4.62 Wb across θ=0..100. Induction torque + full-suite verification running.
+  This supersedes ALL the dead-ends above (banding ripple, co-energy, Arkkio-wrong,
+  fixture params, saturation, cage R) — none were the cause; the small-torque regime
+  made every dynamic cross-check noise-dominated, and the real bug only bit past one
+  revolution. **This is a LIVE-APP bug** (every motor loses flux after 1 rev), not
+  just a test artifact.
 - **R3** wound-field self-start — root cause confirmed (probes); **engine is
   correct**, resolution pending user. Field current is correctly pinned at 12 A
   (CURRENT terminal — the old "no current-source field" note was stale). Dynamic
