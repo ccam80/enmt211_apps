@@ -138,6 +138,18 @@ void solve(int h, const double* b, double* x, int n) {
     Map<VectorXd>(x, n) = s.xsol;
 }
 
+// Multi-RHS solve: b and x are column-major n×ncols blocks (column j at
+// offset j*n). Eigen solves all columns against the single L factor with one
+// triangular-solve sweep per column over a streamed L — far cheaper than ncols
+// separate solve() calls (one allocation, one heap round-trip, L read once).
+// Bit-identical to looping solve() per column (same per-column algorithm).
+EMSCRIPTEN_KEEPALIVE
+void solveMulti(int h, const double* b, double* x, int n, int ncols) {
+    SolverSlot& s = *g_slots[h];
+    Map<const MatrixXd> B(b, n, ncols);
+    Map<MatrixXd>(x, n, ncols) = s.solver.solve(B);
+}
+
 EMSCRIPTEN_KEEPALIVE
 int factorNnz(int h) {
     SolverSlot& s = *g_slots[h];

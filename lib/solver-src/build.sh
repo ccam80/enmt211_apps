@@ -60,7 +60,7 @@ echo "Building wrapper.cpp ..."
   -sEXPORT_NAME=createSolver \
   -sSTACK_SIZE=67108864 \
   -sALLOW_MEMORY_GROWTH=1 \
-  -sEXPORTED_FUNCTIONS=_create,_destroy,_setPattern,_setValues,_analyze,_factorize,_solve,_factorNnz,_malloc,_free \
+  -sEXPORTED_FUNCTIONS=_create,_destroy,_setPattern,_setValues,_analyze,_factorize,_solve,_solveMulti,_factorNnz,_malloc,_free \
   -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAP32,HEAPF64,HEAPU8 \
   -sENVIRONMENT=web,node \
   "${SCRIPT_DIR}/wrapper.cpp" \
