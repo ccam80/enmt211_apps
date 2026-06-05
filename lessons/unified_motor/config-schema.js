@@ -790,6 +790,7 @@
         J: mech.J,
         damping: mech.damping != null ? mech.damping : 0,
         loadTorque: mech.loadTorque != null ? mech.loadTorque : 0,
+        frictionTorque: mech.frictionTorque != null ? mech.frictionTorque : 0,
       },
       label: config.label != null ? config.label : "",
       nCircuits,

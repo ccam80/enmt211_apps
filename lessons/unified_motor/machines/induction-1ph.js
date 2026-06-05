@@ -14,7 +14,7 @@
   const config = {
     grid: { Nr: 50, Ntheta: 512, rInner: 0.020, rOuter: 0.090, ell: 0.120 },
     poles: 4,
-    mechanical: { J: 2e-3, damping: 2e-4, loadTorque: 0 },
+    mechanical: { J: 2e-3, damping: 2e-4, loadTorque: 0, frictionTorque: 0.1 },
     rings: [
       {
         member: "rotor",
