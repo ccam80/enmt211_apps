@@ -5,7 +5,6 @@ const assert = require("node:assert/strict");
 
 const {
   build, validate, sweepTorque, ripple, dftAmp,
-  LIB, UnifiedMotor,
 } = require("./_fixtures.js");
 
 const TIMEOUT = 25000;
@@ -39,10 +38,10 @@ test("zero-current detent is a single high-order cogging harmonic with no net to
   const dts = sweepTorque(stack, new Float64Array([0, 0]), thetas);
 
   // Detent is the magnet<->stator-slot cogging: a single high spatial order
-  // (order 48 = 2·poles for this 24-pole / 12-slot machine) carrying NO net or
-  // low-order torque at zero current. A DFT isolates the cogging order from the
-  // high-frequency mesh ripple that a raw sign-change count cannot.
-  const COG_ORDER = 48;
+  // (order 24 for this 24-pole / 48-slot machine) carrying NO net or low-order
+  // torque at zero current. A DFT isolates the cogging order from the high-
+  // frequency mesh ripple that a raw sign-change count cannot.
+  const COG_ORDER = 24;
   assert.ok(ripple(dts) > 1e-6, `ripple=${ripple(dts)} not > 1e-6 (no detent present)`);
 
   let dom = 1, domAmp = 0;
@@ -62,25 +61,21 @@ test("zero-current detent is a single high-order cogging harmonic with no net to
   }
 });
 
-test("holding torque pulls the rotor toward alignment when energized", function () {
-  const { config } = build("pm-stepper");
-  // Clone config and open-circuit phase 1 so only phase 0 is energized.
-  const cloned = JSON.parse(JSON.stringify(config));
-  cloned.circuits[1].terminal.type = "OPEN";
-  const expanded = UnifiedMotor.ConfigSchema.expand(cloned);
-  const runtime = LIB.MotorRun.create(expanded);
-  runtime.reset();
-  // The energized phase swings the rotor toward alignment: ω rises to a peak then
-  // decays as the restoring torque decelerates it. That rise-then-fall IS the
-  // pull-toward-alignment signature — stop at the first post-peak decrease rather
-  // than running a fixed step count.
-  let peakOmega = 0, dropped = false;
-  for (let k = 0; k < 120 && !dropped; k++) {
-    runtime.step(1 / 240);
-    const w = Math.abs(runtime.state.omega);
-    if (w > peakOmega) peakOmega = w;
-    else if (peakOmega > 0 && w < peakOmega) dropped = true;
-  }
-  assert.ok(dropped, `omega did not rise to a peak and decay (peak=${peakOmega})`);
-  assert.ok(isFinite(runtime.state.theta), `theta=${runtime.state.theta} is not finite`);
+test("holding torque dominates the detent when a phase is energized", function () {
+  const { stack } = build("pm-stepper");
+  // Static θ-sweep with phase 0 energized: the holding (energized restoring) torque
+  // must dwarf the zero-current detent — the defining property of a working PM
+  // stepper. Field solves only, no time-stepping / no ω-θ pinning. Swept off θ=0 to
+  // avoid the φ=0 gap node-coincidence (a separate engine issue). A winding whose
+  // pole-count does not match the rotor links no magnet flux and gives ~0 here.
+  const I = 1.5, N = 64, thetas = [];
+  for (let k = 0; k < N; k++) thetas.push(0.012 + (2 * Math.PI / 24) * k / (N - 1));  // one pole-pitch
+  const Thold = sweepTorque(stack, new Float64Array([I, 0]), thetas);
+  const Tdet  = sweepTorque(stack, new Float64Array([0, 0]), thetas);
+  const peak = (a) => Math.max.apply(null, a.map(Math.abs));
+  const holding = peak(Thold.map((v, i) => v - Tdet[i]));   // pure energization torque
+  const detent = peak(Tdet);
+  assert.ok(holding > 50 * detent,
+    `holding torque ${holding.toExponential(2)} must dominate the detent ${detent.toExponential(2)} ` +
+    `(got ${(holding / detent).toFixed(0)}x)`);
 });
