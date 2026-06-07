@@ -65,11 +65,11 @@ test("holding torque dominates the detent when a phase is energized", function (
   const { stack } = build("pm-stepper");
   // Static θ-sweep with phase 0 energized: the holding (energized restoring) torque
   // must dwarf the zero-current detent — the defining property of a working PM
-  // stepper. Field solves only, no time-stepping / no ω-θ pinning. Swept off θ=0 to
-  // avoid the φ=0 gap node-coincidence (a separate engine issue). A winding whose
-  // pole-count does not match the rotor links no magnet flux and gives ~0 here.
-  const I = 1.5, N = 64, thetas = [];
-  for (let k = 0; k < N; k++) thetas.push(0.012 + (2 * Math.PI / 24) * k / (N - 1));  // one pole-pitch
+  // stepper. Field solves only, no time-stepping / no ω-θ pinning. Swept across one
+  // pole-pitch centred on θ=0, traversing the φ=0 gap node-coincidence. A winding
+  // whose pole-count does not match the rotor links no magnet flux and gives ~0 here.
+  const I = 1.5, N = 64, pitch = 2 * Math.PI / 24, thetas = [];
+  for (let k = 0; k < N; k++) thetas.push(-pitch / 2 + pitch * k / (N - 1));  // through θ=0
   const Thold = sweepTorque(stack, new Float64Array([I, 0]), thetas);
   const Tdet  = sweepTorque(stack, new Float64Array([0, 0]), thetas);
   const peak = (a) => Math.max.apply(null, a.map(Math.abs));

@@ -24,7 +24,13 @@ before(async () => { await F.initSolver(); });
 
 test("pmsm spins up cleanly under the monolithic coupled Newton", () => {
   const exp = CS.expand(F.byId["pmsm"].config);
-  const rt = LIB.MotorRun.create(exp);
+  // The bundle-vs-solve consistency check below (1e-6) asserts the field bundle
+  // post-processed from the converged coupled A reproduces an independent solve. That
+  // holds only when the tolerance chain is converged below it; the interactive default
+  // (bdfRtol 1e-3 ⇒ relTol = 0.1·bdfRtol = 1e-4) leaves a ~1e-4 torque residual that
+  // swamps the check. Tighten the top of the chain — relTol follows the same 0.1·
+  // relationship — so the consistency is genuine (gap ~6e-8), not trajectory luck.
+  const rt = LIB.MotorRun.create(exp, { bdfRtol: 1e-5 });
 
   const dt = 0.001, N = 5;
   let finite = true, maxIters = 0, maxAbsOmega = 0;

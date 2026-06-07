@@ -39,13 +39,12 @@ test("capacitor-shifted auxiliary self-starts; main winding alone does not", fun
   // static friction holds it at rest. Tested as the physical OUTCOME — released
   // from rest, does the rotor build sustained rotation? — not as a clamped-rotor
   // torque: pinning ω/θ each step lets the implicit solve evaluate at a freely
-  // drifted operating point, and at θ=0 parks it on the φ=0 gap node-coincidence
-  // singularity. Released from rest at a generic θ0 (never 0), the windings
-  // separate cleanly: cap-start breaks free toward sync; main-alone's sub-friction
-  // torque keeps it stuck (it jiggles within the stick band but accumulates no
-  // rotation). The hold needs the mechanical frictionTorque term — without it the
-  // unstable ω=0 equilibrium lets any tiny asymmetry run the rotor up.
-  const dt = 1 / 240, theta0 = 0.1;
+  // drifted operating point. Released from rest, the windings separate cleanly:
+  // cap-start breaks free toward sync; main-alone's sub-friction torque keeps it
+  // stuck (it jiggles within the stick band but accumulates no rotation). The hold
+  // needs the mechanical frictionTorque term — without it the unstable ω=0
+  // equilibrium lets any tiny asymmetry run the rotor up.
+  const dt = 1 / 240, theta0 = 0;
   const omegaSync = 2 * Math.PI * 50 / (byId["induction-1ph"].config.poles / 2);
 
   // Cap-start (main + cap-aux): rotating field → starting torque → the rotor leaves
