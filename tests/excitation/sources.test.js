@@ -81,21 +81,19 @@ test("PULSE dead sector is open, active sector is ±amp", () => {
   assert.deepStrictEqual(condDead, { kind: "open" });
 });
 
-test("STEP holds ±amp with no dead zone", () => {
-  const terminal = { type: "STEP", amp: 3, conductionAngle: Math.PI };
-  const commutation = { mode: "sequencer", stepAngleElec: Math.PI / 2 };
+test("STEP follows the commutation table sign, no dead zone for ±1 entries", () => {
+  const terminal = { type: "STEP", amp: 3 };
+  const commutation = { mode: "sequencer", pattern: [1, -1] };
 
-  // stepIndex=0: base = 0·π/2 = 0; sectorGate(0, π): a=0 ∈ [0,π) → +1 → V:3
-  const cond0 = evalTerminal({ terminal, commutation }, { t: 0, theta: 0, stepIndex: 0 });
+  // entry +1 → V:+3, entry −1 → V:−3, neither open.
+  const cond0 = evalTerminal({ terminal, commutation }, { stepIndex: 0 });
   assert.deepStrictEqual(cond0, { kind: "voltage", V: 3 });
 
-  // stepIndex=2: base = 2·π/2 = π; sectorGate(π, π): a=π ∈ [π, 2π) → -1 → V:-3
-  const cond2 = evalTerminal({ terminal, commutation }, { t: 0, theta: 0, stepIndex: 2 });
-  assert.deepStrictEqual(cond2, { kind: "voltage", V: -3 });
+  const cond1 = evalTerminal({ terminal, commutation }, { stepIndex: 1 });
+  assert.deepStrictEqual(cond1, { kind: "voltage", V: -3 });
 
-  // Verify neither is open
   assert.notStrictEqual(cond0.kind, "open");
-  assert.notStrictEqual(cond2.kind, "open");
+  assert.notStrictEqual(cond1.kind, "open");
 });
 
 test("STEP in mode:none at a dead-sector angle holds voltage, not open", () => {
@@ -133,17 +131,14 @@ test("CURRENT under electronic-sine is commutation-phase-independent", () => {
   }
 });
 
-test("CURRENT under sequencer imposes a constant current", () => {
+test("CURRENT under sequencer follows the commutation table", () => {
   const circuit = {
     terminal: { type: "CURRENT", amp: 12 },
-    commutation: { mode: "sequencer", stepAngleElec: Math.PI / 2 },
+    commutation: { mode: "sequencer", pattern: [1, 0, -1] },
   };
-  for (const ctx of [{ t: 0, theta: 0, stepIndex: 0 }, { t: 0, theta: 0, stepIndex: 2 }]) {
-    assert.deepStrictEqual(
-      evalTerminal(circuit, ctx),
-      { kind: "current", I: 12 }
-    );
-  }
+  assert.deepStrictEqual(evalTerminal(circuit, { stepIndex: 0 }), { kind: "current", I: 12 });
+  assert.deepStrictEqual(evalTerminal(circuit, { stepIndex: 1 }), { kind: "open" });
+  assert.deepStrictEqual(evalTerminal(circuit, { stepIndex: 2 }), { kind: "current", I: -12 });
 });
 
 test("CURRENT under mechanical is supplied ungated at every rotor angle", () => {
@@ -181,7 +176,7 @@ test("OPEN→open, SHORT→short regardless of mode", () => {
   const ctx = { t: 0.1, theta: 0.5, stepIndex: 1 };
 
   for (const mode of modes) {
-    const commutation = { mode, poles: 2, stepAngleElec: Math.PI / 2, conductionAngle: Math.PI };
+    const commutation = { mode, poles: 2, conductionAngle: Math.PI };
 
     const openCond = evalTerminal(
       { terminal: { type: "OPEN" }, commutation },

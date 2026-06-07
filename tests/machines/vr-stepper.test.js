@@ -46,3 +46,23 @@ test("reluctance torque is proportional to i^2 below the iron knee", { timeout: 
     `t2/t1=${ratio} not within 4 +/- 0.2 (reluctance torque not proportional to i^2)`);
 });
 
+test("self-steps under the commutation table", { timeout: 120000 }, function () {
+  // Genuine stepping: each commandStep advances the rotor by one full step in a
+  // single consistent direction and settles — NOT a twitch that rocks back. A
+  // weak "did it move at all" check passes on rocking; this asserts net advance.
+  const { runtime } = build("vr-stepper");
+  runtime.reset();
+  for (let s = 0; s < 60; s++) runtime.step(1 / 240);   // settle at rest first
+  const start = runtime.state.theta;
+  const N = 5, stepAngle = 2 * Math.PI / 24;             // 15° per step (24 steps/rev)
+  for (let cmd = 0; cmd < N; cmd++) {
+    runtime.commandStep(1);
+    for (let s = 0; s < 60; s++) runtime.step(1 / 240);
+  }
+  const net = Math.abs(runtime.state.theta - start);
+  assert.ok(net > 0.7 * N * stepAngle && net < 1.3 * N * stepAngle,
+    `net advance ${net.toFixed(4)} not within ±30% of ${(N * stepAngle).toFixed(4)} (N×15°)`);
+  assert.ok(Math.abs(runtime.state.omega) < 0.5,
+    `rotor not settled after stepping: omega=${runtime.state.omega.toFixed(3)}`);
+});
+

@@ -58,20 +58,27 @@ test("the shared axial PM flips sign between slices", { timeout: TIMEOUT }, func
   assertClose(mr1, -mr0, 1e-12);
 });
 
-test("self-steps under the sequencer", function () {
+test("self-steps under the commutation table", { timeout: 120000 }, function () {
+  // Genuine stepping: each commandStep must advance the rotor by one full step
+  // in a single consistent direction and settle. This currently FAILS — and is
+  // meant to: the 50-tooth rotor has no matching stator teeth to vernier against
+  // (a 16-slot distributed winding), so the energized field holds only at a
+  // coarse ~3-well/rev scale and commanded steps rock about it with net ≈ 0
+  // rather than advancing 1.8°. The fix is a toothed-stator-pole redesign; until
+  // then this asserts the real specification rather than masking it with a
+  // "did it twitch" check.
   const { runtime } = build("hybrid-stepper");
   runtime.reset();
-  const theta0 = runtime.state.theta;
-  runtime.commandStep(1);
-  // The commanded step swings the rotor past 1e-4 within a few steps; stop as
-  // soon as it has moved rather than spinning on into the costly high-ω regime.
-  let moved = false;
-  for (let k = 0; k < 40 && !moved; k++) {
-    runtime.step(1 / 240);
-    if (Math.abs(runtime.state.theta - theta0) > 1e-4) moved = true;
+  for (let s = 0; s < 60; s++) runtime.step(1 / 240);   // settle at rest first
+  const start = runtime.state.theta;
+  const N = 5, stepAngle = 2 * Math.PI / 200;            // 1.8° per step (200 steps/rev)
+  for (let cmd = 0; cmd < N; cmd++) {
+    runtime.commandStep(1);
+    for (let s = 0; s < 60; s++) runtime.step(1 / 240);
   }
-  assert.ok(
-    moved,
-    `theta did not move within 40 steps: theta=${runtime.state.theta}, theta0=${theta0}`
-  );
+  const net = Math.abs(runtime.state.theta - start);
+  assert.ok(net > 0.7 * N * stepAngle && net < 1.3 * N * stepAngle,
+    `net advance ${net.toFixed(4)} not within ±30% of ${(N * stepAngle).toFixed(4)} (N×1.8°) — hybrid does not fine-step`);
+  assert.ok(Math.abs(runtime.state.omega) < 0.5,
+    `rotor not settled after stepping: omega=${runtime.state.omega.toFixed(3)}`);
 });

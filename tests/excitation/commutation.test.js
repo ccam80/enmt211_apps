@@ -12,21 +12,14 @@ test("commutationPhase closed forms", () => {
   // (poles/2)·theta + loadAngle = (4/2)·1.0 + 0.2 = 2.2
   const phaseElecSine = commutationPhase(
     { mode: "electronic-sine", poles: 4, loadAngle: 0.2 },
-    { t: 0, theta: 1.0, stepIndex: 0 }
+    { theta: 1.0 }
   );
   assertClose(phaseElecSine, 2 * 1.0 + 0.2, 1e-15, "electronic-sine poles=4 theta=1");
 
-  // stepIndex·stepAngleElec = 3·(π/2) = 3π/2
-  const phaseSeq = commutationPhase(
-    { mode: "sequencer", stepAngleElec: Math.PI / 2 },
-    { t: 0, theta: 0, stepIndex: 3 }
-  );
-  assertClose(phaseSeq, 3 * Math.PI / 2, 1e-15, "sequencer stepIndex=3");
-
-  // none → 0 regardless of theta/t
+  // none → 0 regardless of theta
   const phaseNone = commutationPhase(
     { mode: "none" },
-    { t: 5, theta: 3.14, stepIndex: 7 }
+    { theta: 3.14 }
   );
   assertClose(phaseNone, 0, 1e-15, "none → 0");
 });
@@ -109,29 +102,15 @@ test("mechanical mode supplies AC ungated (rotor-angle-independent)", () => {
   }
 });
 
-test("sequencer advances energized phase by step index", () => {
+test("sequencer commutation table selects per-step energization", () => {
   const amp = 5;
-  // Two-phase bipolar STEP+sequencer: offsets 0 and −π/2, stepAngleElec=π/2, conductionAngle=π.
-  // Derived sign pattern per sectorGate(base + phaseOffset, π):
-  //   step 0: base=0;    A: gate(0,π)=+1 → +amp;  B: gate(−π/2,π)→3π/2∈[π,2π)→−1 → −amp
-  //   step 1: base=π/2;  A: gate(π/2,π)=+1 → +amp; B: gate(0,π)=+1 → +amp
-  //   step 2: base=π;    A: gate(π,π)→−1 → −amp;   B: gate(π/2,π)=+1 → +amp
-  //   step 3: base=3π/2; A: gate(3π/2,π)→−1→−amp;  B: gate(π,π)→−1 → −amp
-  const circuitA = {
-    terminal: { type: "STEP", amp, conductionAngle: Math.PI, phaseOffset: 0 },
-    commutation: { mode: "sequencer", stepAngleElec: Math.PI / 2 },
-  };
-  const circuitB = {
-    terminal: { type: "STEP", amp, conductionAngle: Math.PI, phaseOffset: -Math.PI / 2 },
-    commutation: { mode: "sequencer", stepAngleElec: Math.PI / 2 },
-  };
+  // Two-phase full-step table — the 4-state cycle the PM/hybrid steppers run.
+  const circuitA = { terminal: { type: "STEP", amp }, commutation: { mode: "sequencer", pattern: [1, 1, -1, -1] } };
+  const circuitB = { terminal: { type: "STEP", amp }, commutation: { mode: "sequencer", pattern: [-1, 1, 1, -1] } };
 
   const results = [0, 1, 2, 3].map(stepIndex => {
-    const ctx = { t: 0, theta: 0, stepIndex };
-    return {
-      a: evalTerminal(circuitA, ctx),
-      b: evalTerminal(circuitB, ctx),
-    };
+    const ctx = { stepIndex };
+    return { a: evalTerminal(circuitA, ctx), b: evalTerminal(circuitB, ctx) };
   });
 
   for (const { a, b } of results) {
@@ -139,13 +118,28 @@ test("sequencer advances energized phase by step index", () => {
     assert.strictEqual(b.kind, "voltage");
   }
 
-  const signs = results.map(({ a, b }) => [Math.sign(a.V), Math.sign(b.V)]);
-  assert.deepStrictEqual(signs[0], [1, -1],  "step 0 signs (+,−)");
-  assert.deepStrictEqual(signs[1], [1,  1],  "step 1 signs (+,+)");
-  assert.deepStrictEqual(signs[2], [-1, 1],  "step 2 signs (−,+)");
-  assert.deepStrictEqual(signs[3], [-1, -1], "step 3 signs (−,−)");
+  const v = results.map(({ a, b }) => [a.V, b.V]);
+  assert.deepStrictEqual(v[0], [amp, -amp], "step 0 (+,−)");
+  assert.deepStrictEqual(v[1], [amp, amp],  "step 1 (+,+)");
+  assert.deepStrictEqual(v[2], [-amp, amp], "step 2 (−,+)");
+  assert.deepStrictEqual(v[3], [-amp, -amp],"step 3 (−,−)");
 
-  // All 4 sign-pair patterns are distinct — completes a full bipolar 4-step cycle
-  const unique = new Set(signs.map(p => p.join(",")));
-  assert.strictEqual(unique.size, 4, "all 4 sign patterns are distinct");
+  // stepIndex wraps modulo the table length, including negative indices.
+  assert.deepStrictEqual(evalTerminal(circuitA, { stepIndex: 4 }), { kind: "voltage", V: amp },  "step 4 wraps to 0");
+  assert.deepStrictEqual(evalTerminal(circuitA, { stepIndex: -1 }), { kind: "voltage", V: -amp }, "step −1 wraps to 3");
+});
+
+test("sequencer table: a zero entry opens the winding; CURRENT scales by entry", () => {
+  const amp = 4;
+  const seq = { mode: "sequencer", pattern: [1, 0, -1] };   // one-phase-on style (off-step in the middle)
+
+  const cV = { terminal: { type: "STEP", amp }, commutation: seq };
+  assert.deepStrictEqual(evalTerminal(cV, { stepIndex: 0 }), { kind: "voltage", V: amp });
+  assert.deepStrictEqual(evalTerminal(cV, { stepIndex: 1 }), { kind: "open" });
+  assert.deepStrictEqual(evalTerminal(cV, { stepIndex: 2 }), { kind: "voltage", V: -amp });
+
+  const cI = { terminal: { type: "CURRENT", amp }, commutation: seq };
+  assert.deepStrictEqual(evalTerminal(cI, { stepIndex: 0 }), { kind: "current", I: amp });
+  assert.deepStrictEqual(evalTerminal(cI, { stepIndex: 1 }), { kind: "open" });
+  assert.deepStrictEqual(evalTerminal(cI, { stepIndex: 2 }), { kind: "current", I: -amp });
 });
