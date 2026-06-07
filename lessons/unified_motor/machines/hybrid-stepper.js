@@ -17,7 +17,7 @@
   const config = {
     grid: { Nr: 34, Ntheta: 512, rInner: 0.010, rOuter: 0.040, ell: 0.038 },
     poles: 8,
-    mechanical: { J: 5e-5, damping: 2e-5, loadTorque: 0 },
+    mechanical: { J: 5e-5, damping: 5e-3, loadTorque: 0 },
     rings: [
       {
         member: "rotor",
@@ -57,17 +57,12 @@
         muR: 1000,
       },
     ],
+    // Two-phase full-step commutation table (both phases energised, sign-sequenced):
+    // the 4-state cycle (A,B) = (+,−),(+,+),(−,+),(−,−) advances the rotor one full
+    // step per commandStep → 200 steps/rev for the 50-tooth rotor (1.8°).
     circuits: [
-      {
-        terminal: { type: "STEP", amp: 24, phaseOffset: -Math.PI / 2 * 0, conductionAngle: Math.PI },
-        commutation: { mode: "sequencer", poles: 8, stepAngleElec: Math.PI / 2 },
-        R: 2.0,
-      },
-      {
-        terminal: { type: "STEP", amp: 24, phaseOffset: -Math.PI / 2 * 1, conductionAngle: Math.PI },
-        commutation: { mode: "sequencer", poles: 8, stepAngleElec: Math.PI / 2 },
-        R: 2.0,
-      },
+      { terminal: { type: "STEP", amp: 24 }, commutation: { mode: "sequencer", pattern: [1, 1, -1, -1] }, R: 2.0 },
+      { terminal: { type: "STEP", amp: 24 }, commutation: { mode: "sequencer", pattern: [-1, 1, 1, -1] }, R: 2.0 },
     ],
     stack: {
       slices: 2,
