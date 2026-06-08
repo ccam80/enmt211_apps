@@ -311,7 +311,8 @@
 
     // Iron teeth between the conductor slots/bars.
     //  - "concentrated" ("C"): salient teeth centred ON each slot (the coil wraps a
-    //    tooth), spanning the full ring rRange.
+    //    tooth), spanning the full ring rRange. With ring.poleTeeth set, each pole
+    //    instead carries a GROUP of fine teeth (see below).
     //  - "distributed" ("W"/"K"): teeth fill the INTER-slot complement of the slot
     //    band (slotRRange), so gap-crossing magnetizing flux reaches the back-iron
     //    through iron teeth instead of a phantom non-magnetic slot gap. Without
@@ -319,18 +320,48 @@
     //    radial flux path), which makes the magnetizing inductance gap/μ-blind.
     const slotTheta = routing.slotTheta;
     if (teethMode === "concentrated") {
-      const spanFraction = ring.spanFraction != null ? ring.spanFraction : 0.5;
-      for (let s = 0; s < nSlots; s++) {
-        const centre = slotTheta[s];
-        const h = spanFraction * (Math.PI / nSlots);
-        features.push({
-          kind: "iron",
-          member,
-          rRange: ring.rRange,
-          thetaRange: [centre - h, centre + h],
-          muR,
-          Bknee: BkneeWound,
-        });
+      if (ring.poleTeeth) {
+        // Grouped pole-face teeth: each of the nSlots poles carries `count` fine
+        // iron teeth at `pitch` (the rotor tooth pitch), centred on the pole, with
+        // gaps between poles. This is the salient-pole hybrid/SR structure — the
+        // teeth are clustered on each energised pole rather than spread evenly
+        // around the bore, so the gap-tooth vernier against the rotor teeth is the
+        // genuine geometry. The per-pole phase progression that makes such a machine
+        // step is the pole pq θ = s·2π/nSlots versus the tooth pitch: pole s aligns
+        // with the rotor teeth at phase (s·Nr/nSlots) mod 1, which advances by the
+        // non-integer pole/rotor-tooth ratio.
+        const count = ring.poleTeeth.count;
+        const pitch = ring.poleTeeth.pitch;
+        const span  = ring.poleTeeth.span != null ? ring.poleTeeth.span : 0.5;
+        const h = span * pitch / 2;
+        for (let s = 0; s < nSlots; s++) {
+          const base = slotTheta[s];
+          for (let j = 0; j < count; j++) {
+            const centre = base + (j - (count - 1) / 2) * pitch;
+            features.push({
+              kind: "iron",
+              member,
+              rRange: ring.rRange,
+              thetaRange: [centre - h, centre + h],
+              muR,
+              Bknee: BkneeWound,
+            });
+          }
+        }
+      } else {
+        const spanFraction = ring.spanFraction != null ? ring.spanFraction : 0.5;
+        for (let s = 0; s < nSlots; s++) {
+          const centre = slotTheta[s];
+          const h = spanFraction * (Math.PI / nSlots);
+          features.push({
+            kind: "iron",
+            member,
+            rRange: ring.rRange,
+            thetaRange: [centre - h, centre + h],
+            muR,
+            Bknee: BkneeWound,
+          });
+        }
       }
     } else if (teethMode === "distributed") {
       // Conductor slot arc = angularWidth (centred on slotTheta[s]); the tooth is
@@ -516,6 +547,25 @@
             }
           } catch (e) {
             errors.push(`rings[${ri}] winding resolution error: ${e.message}`);
+          }
+
+          // Grouped pole-face teeth (salient-pole hybrid/SR): each pole carries
+          // `count` fine teeth at `pitch`. count >= 1, pitch finite positive, span
+          // in (0, 1]. Only meaningful for concentrated ("C") teeth.
+          if (ring.poleTeeth != null) {
+            const pt = ring.poleTeeth;
+            if (ring.element !== "C") {
+              errors.push(`rings[${ri}].poleTeeth is only valid on a concentrated ("C") ring`);
+            }
+            if (!isFinitePositiveInt(pt.count)) {
+              errors.push(`rings[${ri}].poleTeeth.count must be an integer >= 1; got ${pt.count}`);
+            }
+            if (typeof pt.pitch !== "number" || !isFinite(pt.pitch) || pt.pitch <= 0) {
+              errors.push(`rings[${ri}].poleTeeth.pitch must be a finite positive number; got ${pt.pitch}`);
+            }
+            if (pt.span != null && (typeof pt.span !== "number" || !(pt.span > 0 && pt.span <= 1))) {
+              errors.push(`rings[${ri}].poleTeeth.span must be in (0, 1]; got ${pt.span}`);
+            }
           }
         }
       }
