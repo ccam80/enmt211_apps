@@ -230,6 +230,37 @@ same discipline as the brush spec — the new path is reached only by the new co
    `stack.axial`. Reduced system grows by L (≈1); the per-slice Φ-column rides the
    existing multi-RHS Schur solve — negligible cost over today's coupled step.
 
+## P2 implementation notes — the reduced-system condensation (worked out)
+
+Convention (matches the validated P1): work the field in 2-D (per-length). The loop
+flux Φ_l is the 2-D jump variable; slices sharing a loop share `ell` (true for the
+hybrid). 3-D flux = `ell·Φ_l`. `R_axial`/`F_pm` are given in the same 2-D-consistent
+units P1 verified (Ψ = F_pm/(R_field+R_axial)).
+
+Per-slice quantities (from `slice.coupledFluxRhsInto(θ,out)`): the coupling column
+`c_s` (nGlobal) and self term `d_s`. Slice net-flux jump `Ψ_s = Σ_l σ(s,l)·Φ_l`,
+incidence `σ(s,l) ∈ {−1,0,+1}`.
+
+Coupled residuals (added to the existing `[i_free, ω, θ]` system → `nu = nf+2+L`):
+- **Field row, slice s:** `R_field,s += c_s·Ψ_s`  (add before condensation + the conv check).
+- **Field tangent:** `∂R_field,s/∂Φ_l = c_s·σ(s,l)`  ⇒ batch ONE extra column `c_s` per
+  slice into `coupledSolveMultiAgainst`; `xc_s = K_s⁻¹c_s`.
+- **Loop row l (KVL):** `R_Φl = Σ_s σ(s,l)(c_sᵀA_s + d_s Ψ_s) + R_axial,l·Φ_l − F_pm,l`.
+  - `∂R_Φl/∂A_s = σ(s,l)·c_sᵀ` (condensed via `xc_s`).
+  - `∂R_Φl/∂Φ_m = Σ_s σ(s,l)σ(s,m)·d_s + R_axial,l·δ_lm`.
+
+Schur condensation (mirror the mech-row `dTdA·xcol` pattern, lines 259–273):
+- `Φ_l–Φ_m` reduced block: `Σ_s σ(s,l)σ(s,m)(d_s − c_sᵀK_s⁻¹c_s) + R_axial,l δ_lm`
+  `= Σ_s σσ·R_field,s + R_axial`  (loop reluctance = series slice field reluctances + lumped).
+- `Φ_l–(i/ω/θ)` cross: `−Σ_s σ(s,l)·c_sᵀ·xcol_other,s` (and symmetric).
+- `Φ_l` condensed residual: `R_Φl − Σ_s σ(s,l)·c_sᵀ·xr_s`.
+- Back-sub: `δA_s −= Σ_l δΦ_l·σ(s,l)·xc_s`.
+
+`c_s,d_s` are frozen per Newton iter (their ν-dependence is 2nd-order) — Newton still
+converges; the field tangent's `dν` is unchanged. Netlist (`σ`, `R_axial`, `F_pm`)
+comes from `expanded.axial` (P4); P2 drives it via a test stand-in. Validate against a
+2-slice analytic lumped circuit (two series field reluctances + R_axial, one F_pm).
+
 ## Phasing
 
 - **P1 — cut DOF in one slice.** Add the saddle-point cut to `motor-slice` field
