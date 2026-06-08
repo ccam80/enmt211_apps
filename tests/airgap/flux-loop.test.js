@@ -47,9 +47,20 @@ function solveLoop(Rax, Fpm) {
   });
 }
 
-test("flux loop: two coupled slices reproduce the series-reluctance flux split", () => {
+test("flux loop: production solve matches the closed-form radial reluctance", () => {
+  // The field reluctance the production path (solveCoupled) sees for the flux mode
+  // must equal the analytic radial reluctance of the all-air annulus,
+  //   R_f = (1/μ0/2π)·ln(rOut/rIn).
+  // Recovered from the solved loop flux at R_axial=0: Φ = F_pm/(2·R_f) ⇒ R_f = F_pm/(2Φ).
   const Rf = (1 / MU0 / (2 * Math.PI)) * Math.log(rOut / rIn);
-  for (const Rax of [0, Rf, 5 * Rf]) {
+  const r0 = solveLoop(0, 100);
+  assert.ok(r0.converged, `coupled solve did not converge (iters=${r0.iters})`);
+  const RfFE = 100 / (2 * r0.Phi[0]);
+  assert.ok(Math.abs(RfFE / Rf - 1) < 2e-3,
+    `production R_field ${RfFE.toExponential(5)} vs analytic ${Rf.toExponential(5)} (rel ${Math.abs(RfFE / Rf - 1).toExponential(2)})`);
+
+  // …and the series-reluctance split holds with a lumped axial branch added.
+  for (const Rax of [Rf, 5 * Rf]) {
     const res = solveLoop(Rax, 100);
     const expect = 100 / (2 * Rf + Rax);
     assert.ok(res.converged, `coupled solve did not converge (Raxial=${Rax.toExponential(2)}, iters=${res.iters})`);
