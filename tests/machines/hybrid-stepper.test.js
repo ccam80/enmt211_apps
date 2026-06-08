@@ -38,43 +38,37 @@ test("the stack has two slices with a half-tooth offset", { timeout: TIMEOUT }, 
   assert.equal(stack.nSlices, 2);
 });
 
-test("the shared axial PM flips sign between slices", { timeout: TIMEOUT }, function () {
+test("the axial PM drives opposite polarity in the two cups", { timeout: TIMEOUT }, function () {
   const { expanded } = build("hybrid-stepper");
-  // Ring 0 is the M ring (axial PM bias source). Find magnet features in each slice
-  // that originate from ring 0. The fluxSources[0] has ringRef:0 and sliceSigns:[+1,-1]
-  // so slice 0 has +Mr and slice 1 has -Mr.
-  function getMagnetMr(slice) {
-    for (const f of slice.section.features) {
-      if (f.kind === "magnet") {
-        return f.Mr;
-      }
-    }
-    return null;
-  }
-  const mr0 = getMagnetMr(expanded.slices[0]);
-  const mr1 = getMagnetMr(expanded.slices[1]);
-  assert.ok(mr0 !== null, "slice 0 has no magnet feature");
-  assert.ok(mr1 !== null, "slice 1 has no magnet feature");
-  assertClose(mr1, -mr0, 1e-12);
+  // The PM is axial: a flux loop (stack.axial) threads the two cups with opposite
+  // sign, so cup 0 carries +Ψ (all-N teeth) and cup 1 −Ψ (all-S), closing through the
+  // magnet MMF. (This replaces the in-plane sliceSigns magnet, which a 2-D slice
+  // cannot host as a uniform per-cup bias.)
+  assert.ok(expanded.axial && Array.isArray(expanded.axial.loops) && expanded.axial.loops.length === 1,
+    "expected one axial flux loop");
+  const loop = expanded.axial.loops[0];
+  const signs = {};
+  for (const e of loop.slices) signs[e.s] = e.sign;
+  assert.equal(signs[0], 1, "cup 0 should carry +flux");
+  assert.equal(signs[1], -1, "cup 1 should carry −flux (opposite polarity)");
+  assert.ok(loop.Fpm > 0, `axial PM MMF should be positive; got ${loop.Fpm}`);
 });
 
-test("self-steps under the commutation table", { timeout: 120000 }, function () {
-  // Genuine stepping: each commandStep must advance the rotor by one full step
-  // in a single consistent direction and settle. This currently FAILS — and is
-  // meant to: the 50-tooth rotor has no matching stator teeth to vernier against
-  // (a 16-slot distributed winding), so the energized field holds only at a
-  // coarse ~3-well/rev scale and commanded steps rock about it with net ≈ 0
-  // rather than advancing 1.8°. The fix is a toothed-stator-pole redesign; until
-  // then this asserts the real specification rather than masking it with a
-  // "did it twitch" check.
+test("self-steps under the commutation table", { timeout: 300000 }, function () {
+  // Genuine fine-stepping: each commandStep advances the rotor one full step
+  // (a quarter rotor-tooth) in a consistent direction and settles. The axial-flux
+  // PM bias (stack.axial), modulated by the 50 rotor teeth, couples to the grouped
+  // stator pole teeth so the four full-step states sit a quarter tooth apart → 200
+  // steps/rev. The half-tooth cup offset gives alternating sub-steps that average
+  // to the step. (Heavy: 50 teeth → ~600 gap nodes × 2 slices × the flux loop.)
   const { runtime } = build("hybrid-stepper");
   runtime.reset();
-  for (let s = 0; s < 60; s++) runtime.step(1 / 240);   // settle at rest first
+  for (let s = 0; s < 120; s++) runtime.step(1 / 240);   // settle at rest first
   const start = runtime.state.theta;
   const N = 5, stepAngle = 2 * Math.PI / 200;            // 1.8° per step (200 steps/rev)
   for (let cmd = 0; cmd < N; cmd++) {
     runtime.commandStep(1);
-    for (let s = 0; s < 60; s++) runtime.step(1 / 240);
+    for (let s = 0; s < 90; s++) runtime.step(1 / 240);
   }
   const net = Math.abs(runtime.state.theta - start);
   assert.ok(net > 0.7 * N * stepAngle && net < 1.3 * N * stepAngle,

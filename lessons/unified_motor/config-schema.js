@@ -621,6 +621,32 @@
         }
       }
     }
+    // axial-flux netlist
+    if (stack.axial != null) {
+      const ax = stack.axial;
+      const defs = ax.branches || {};
+      if (!Array.isArray(ax.loops) || ax.loops.length < 1) {
+        errors.push(`stack.axial.loops must be a non-empty array`);
+      } else {
+        for (let li = 0; li < ax.loops.length; li++) {
+          const loop = ax.loops[li];
+          if (!Array.isArray(loop.slices) || loop.slices.length < 1) {
+            errors.push(`stack.axial.loops[${li}].slices must be a non-empty array of {s, sign}`);
+          } else {
+            for (const e of loop.slices) {
+              if (!Number.isInteger(e.s) || e.s < 0 || e.s >= nSlices) errors.push(`stack.axial.loops[${li}] slice index ${e.s} out of range [0, ${nSlices})`);
+              if (e.sign !== 1 && e.sign !== -1) errors.push(`stack.axial.loops[${li}] slice ${e.s} sign must be ±1; got ${e.sign}`);
+            }
+          }
+          if (loop.branches != null) {
+            if (!Array.isArray(loop.branches)) errors.push(`stack.axial.loops[${li}].branches must be an array of branch names`);
+            else for (const bn of loop.branches) if (defs[bn] == null) errors.push(`stack.axial.loops[${li}] references undefined branch "${bn}"`);
+          }
+          if (loop.Raxial != null && (typeof loop.Raxial !== "number" || loop.Raxial < 0)) errors.push(`stack.axial.loops[${li}].Raxial must be a non-negative number`);
+          if (loop.Fpm != null && typeof loop.Fpm !== "number") errors.push(`stack.axial.loops[${li}].Fpm must be a number`);
+        }
+      }
+    }
 
     // Validate that resolved circuit count matches config.circuits.length
     // (only if rings and circuits are valid enough to attempt)
@@ -848,7 +874,40 @@
       slices,
       Rcoupling,
       cage,
+      axial: buildAxial(stack, config.grid.ell),
     };
+  }
+
+  // Build the axial-flux netlist consumed by MotorStack.solveCoupled. Each loop is a
+  // magnetic circuit threading a signed set of slices (their net-radial-flux DOFs Ψ_s)
+  // with a lumped axial reluctance R_axial and PM MMF F_pm. Quantities are in the 2-D
+  // per-length convention the field solve uses: F_pm is the magnet MMF in A-turns
+  // (Br·ℓ_pm/μ0); a lumped branch reluctance scales by the stack length ell (R_2D =
+  // ell·R_3D). A loop may give Raxial/Fpm directly (raw) or reference named branches
+  // (geometry length/area/muR → reluctance, Br/length → MMF; or raw reluctance/mmf).
+  function buildAxial(stack, ell) {
+    if (!stack || !stack.axial || !Array.isArray(stack.axial.loops)) return null;
+    const MU0 = 4e-7 * Math.PI;
+    const defs = stack.axial.branches || {};
+    function rel(name) {
+      const b = defs[name]; if (!b) return 0;
+      if (b.reluctance != null) return b.reluctance;
+      if (b.length != null && b.area != null) return ell * b.length / (MU0 * (b.muR != null ? b.muR : 1) * b.area);
+      return 0;
+    }
+    function mmf(name) {
+      const b = defs[name]; if (!b) return 0;
+      if (b.mmf != null) return b.mmf;
+      if (b.Br != null && b.length != null) return b.Br * b.length / MU0;
+      return 0;
+    }
+    const loops = stack.axial.loops.map(function (loop) {
+      let Rax = loop.Raxial != null ? loop.Raxial : 0;
+      let Fpm = loop.Fpm != null ? loop.Fpm : 0;
+      if (Array.isArray(loop.branches)) for (const bn of loop.branches) { Rax += rel(bn); Fpm += mmf(bn); }
+      return { slices: loop.slices, Raxial: Rax, Fpm: Fpm };
+    });
+    return { loops: loops };
   }
 
   // Build the feature list for a specific slice k, applying fluxSource sign flips

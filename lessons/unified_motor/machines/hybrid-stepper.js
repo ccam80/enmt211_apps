@@ -1,77 +1,62 @@
 (function () {
   "use strict";
 
-  // Hybrid stepper motor: NEMA 23/34 style, 200 steps/rev
-  // 50 rotor teeth, 8 stator pole pairs (Q=16), 2 axial magnets
-  // OD ≈ 80 mm, air gap 2.0 mm at 20 mm radius
-  // Rotor radial: axial magnet (10-14mm), iron pole-piece body (14-19mm),
-  //               shallow 1mm surface teeth (19-20mm). Tooth depth ≈ 5% of
-  //               rotor radius matches real NEMA 23/34 geometry.
-  // Nr=34 ensures at least 2 grid cells across the 2 mm air gap
-  const MAGNET_R        = [0.010, 0.014];
-  const ROTOR_BODY_R    = [0.014, 0.019];
-  const ROTOR_TEETH_R   = [0.019, 0.020];
-  const STATOR_BORE_R   = [0.022, 0.034];
-  const STATOR_YOKE_R   = [0.034, 0.040];
+  // Hybrid stepper — 50 rotor teeth, 200 steps/rev (1.8°). Faithful 2.5-D model:
+  // the permanent magnet is AXIAL (one per rotor cup, opposite polarity), magnetizing
+  // each cup's teeth to a single polarity. That uniform per-cup bias cannot live in a
+  // single 2-D r-θ slice (net radial flux there is topologically zero); it is carried
+  // by the axial-flux circuit (stack.axial) — net flux out cup A's all-N teeth, across
+  // the gap, back through cup B's all-S teeth, closing axially through the magnet. The
+  // two cups are one half-tooth apart (sliceOffsets). Modulated by the 50 teeth the
+  // bias couples to the Q=8/p=4 winding's 50th gap harmonic (8·6+2), and the 50/8 =
+  // 6.25 pole/tooth ratio places the four full-step states a quarter-tooth apart.
+  //
+  // Stator: 8 salient poles, each a GROUP of 6 fine teeth at the rotor tooth pitch
+  // (poleTeeth) — the genuine salient-pole hybrid structure, not teeth spread evenly
+  // round the bore. Small physical gap (0.3 mm) so the tooth-pitch modulation is not
+  // smeared flat. The gap mesh resolves the finer of the two tooth counts automatically.
+  const ROTOR_BODY_R   = [0.010, 0.019];   // pole-piece body carrying the radial+axial flux
+  const ROTOR_TEETH_R  = [0.019, 0.020];   // 50 surface teeth, 1 mm
+  const POLE_TEETH_R   = [0.0203, 0.0213]; // stator pole-face fine teeth (across the 0.3 mm gap)
+  const STATOR_SLOT_R  = [0.0213, 0.030];  // conductors behind the pole teeth
+  const STATOR_YOKE_R  = [0.030, 0.040];   // back-iron
 
   const config = {
-    grid: { Nr: 34, Ntheta: 512, rInner: 0.010, rOuter: 0.040, ell: 0.038 },
-    poles: 8,
-    mechanical: { J: 5e-5, damping: 5e-3, loadTorque: 0 },
+    grid: { Nr: 300, Ntheta: 768, rInner: 0.010, rOuter: 0.040, ell: 0.038 },
+    poles: 4,
+    mechanical: { J: 5e-5, damping: 3e-3, frictionTorque: 3e-4, loadTorque: 0 },
     rings: [
-      {
-        member: "rotor",
-        element: "M",
-        rRange: MAGNET_R,
-        magnets: 2,
-        Mr: 8e5,
-        backIron: false,
-        muR: 1000,
-      },
-      {
-        member: "rotor",
-        element: "I",
-        rRange: ROTOR_BODY_R,
-        teeth: 1,
-        theta0: 0,
-        spanFraction: 1.0,
-        muR: 1000,
-      },
-      {
-        member: "rotor",
-        element: "I",
-        rRange: ROTOR_TEETH_R,
-        teeth: 50,
-        theta0: 0,
-        spanFraction: 0.5,
-        muR: 1000,
-      },
+      { member: "rotor", element: "I", rRange: ROTOR_BODY_R, teeth: 1, theta0: 0, spanFraction: 1.0, muR: 1000 },
+      { member: "rotor", element: "I", rRange: ROTOR_TEETH_R, teeth: 50, theta0: 0, spanFraction: 0.5, muR: 1000 },
       {
         member: "stator",
         element: "C",
-        rRange: STATOR_BORE_R,
-        winding: { standard: { m: 2, p: 8, Q: 16, coilPitch: 1, turns: 100 } },
-        slotRRange: STATOR_BORE_R,
-        slotFraction: 0.5,
+        rRange: POLE_TEETH_R,
+        winding: { standard: { m: 2, p: 4, Q: 8, coilPitch: 1, turns: 100 } },
+        poleTeeth: { count: 6, pitch: 2 * Math.PI / 50, span: 0.5 },
+        slotRRange: STATOR_SLOT_R,
         ironRRange: STATOR_YOKE_R,
         muR: 1000,
       },
     ],
-    // Two-phase full-step commutation table (both phases energised, sign-sequenced):
-    // the 4-state cycle (A,B) = (+,−),(+,+),(−,+),(−,−) advances the rotor one full
-    // step per commandStep → 200 steps/rev for the 50-tooth rotor (1.8°).
+    // Two-phase full-step commutation table: the 4-state cycle (A,B) advances the rotor
+    // a quarter tooth per commandStep → 200 steps/rev (1.8°).
     circuits: [
       { terminal: { type: "STEP", amp: 24 }, commutation: { mode: "sequencer", pattern: [1, 1, -1, -1] }, R: 2.0 },
       { terminal: { type: "STEP", amp: 24 }, commutation: { mode: "sequencer", pattern: [-1, 1, 1, -1] }, R: 2.0 },
     ],
     stack: {
       slices: 2,
-      sliceOffsets: [0, Math.PI / 50],
-      fluxSources: [{ ringRef: 0, sliceSigns: [+1, -1] }],
+      sliceOffsets: [0, Math.PI / 50],   // the two cups, one half-tooth apart
+      axial: {
+        // Axial NdFeB magnet (MMF = Br·ℓ/μ0 ≈ 6000 A-turns), opposite polarity per cup.
+        branches: { pm: { Br: 1.2, length: 0.00628 } },
+        loops: [ { slices: [{ s: 0, sign: 1 }, { s: 1, sign: -1 }], branches: ["pm"], Raxial: 0 } ],
+      },
     },
   };
 
   const UM = window.UnifiedMotor || (window.UnifiedMotor = {});
-  (UM.MACHINES || (UM.MACHINES = [])).push({ id: "hybrid-stepper", label: "Hybrid stepper 50T/8PP (200 steps/rev)", config });
+  (UM.MACHINES || (UM.MACHINES = [])).push({ id: "hybrid-stepper", label: "Hybrid stepper 50T (200 steps/rev)", config });
   if (!UM.defaultConfig) UM.defaultConfig = config;
 })();
