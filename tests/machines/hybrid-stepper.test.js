@@ -63,12 +63,12 @@ test("self-steps under the commutation table", { timeout: 300000 }, function () 
   // to the step. (Heavy: 50 teeth → ~600 gap nodes × 2 slices × the flux loop.)
   const { runtime } = build("hybrid-stepper");
   runtime.reset();
-  for (let s = 0; s < 120; s++) runtime.step(1 / 240);   // settle at rest first
+  runtime.step(1.0);                                     // settle at rest first (1 s sim)
   const start = runtime.state.theta;
   const N = 5, stepAngle = 2 * Math.PI / 200;            // 1.8° per step (200 steps/rev)
   for (let cmd = 0; cmd < N; cmd++) {
     runtime.commandStep(1);
-    for (let s = 0; s < 90; s++) runtime.step(1 / 240);
+    runtime.step(0.6);                                   // 0.6 s sim — one quarter-tooth step settles in ~0.12 s
   }
   const net = Math.abs(runtime.state.theta - start);
   assert.ok(net > 0.7 * N * stepAngle && net < 1.3 * N * stepAngle,

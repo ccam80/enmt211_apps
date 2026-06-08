@@ -398,9 +398,21 @@ What each render layer reads — quoted from Phase 5 D2/D3 + Phase 2's
        `let smoothedMagScale = 1;` declaration + the per-frame
        `smoothedMagScale` update block (it fed the deleted built-in rig).
     8. The `circuits` / `mechanical` / `applyDrive` / `reapplyDrive` /
-       `requestRebuild` / `buildCtx` / `PHYS_DT` / `STEPS_PER_FRAME` /
-       physics step / plots / readouts / pointer / reset / pause /
-       unmount logic is unchanged.
+       `requestRebuild` / `buildCtx` / plots / readouts / pointer / reset /
+       pause / unmount logic is unchanged.
+    9. **Stepping is wall-budgeted, not fixed-cadence.** `PHYS_DT` and
+       `STEPS_PER_FRAME` are removed. Each frame advances the sim by
+       `orderedStepDt` of SIM-time (the "ordered speed" — a Playback slider,
+       default `1/240` s) via a single `runtime.step(orderedStepDt,
+       FRAME_BUDGET_MS)`; the engine's adaptive loop bails after
+       `FRAME_BUDGET_MS = 30` ms of WALL-time (always after ≥1 solve), so a
+       heavy commutation transient never stalls the frame. When the cap lands
+       the frame short of `orderedStepDt` the sim is playing below the ordered
+       speed → a header **slow-motion warning** shows the achieved fraction.
+       This needs the engine seam `runtime.step(dt, wallBudgetMs?)`
+       (`lib/motor-run.js`): when `wallBudgetMs` is given the internal solve
+       loop breaks once that much wall-time has elapsed; omitted → deterministic
+       full-`dt` coverage (the path every test drives).
 
 - **Tests**:
   - `tests/render/mesh-view-prod.test.js`:
@@ -1014,6 +1026,12 @@ What each render layer reads — quoted from Phase 5 D2/D3 + Phase 2's
        stator surfaces (smooth, no stair-stepping).
     8. Reset re-zeroes the rotor angle/speed and clears plot history;
        Pause halts the sim.
+    9. The **Playback `step/frame` slider** ("ordered speed") changes how
+       much sim-time each frame advances — raising it visibly speeds the
+       rotor up to the point where solves saturate the 30 ms wall budget,
+       at which the **slow-motion warning** appears in the header showing the
+       achieved fraction of the ordered speed (and clears when the rotor
+       settles and solves are cheap again).
   - All listed headless tests pass.
 
 ## Wave 6.4: Click-to-place feature editor

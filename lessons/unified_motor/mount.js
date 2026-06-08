@@ -237,12 +237,21 @@
     btnPause.textContent = "Pause";
     btnPause.style.cssText = "padding:3px 10px;background:var(--panel2,#232932);color:var(--ink);border:1px solid var(--grid,#2a313c);border-radius:4px;cursor:pointer;";
 
+    // Slow-motion warning — shown when the wall-time budget caps the per-frame
+    // solve below the ordered sim-step (the sim is playing slower than ordered).
+    const warnBadge = el("span", "um-slow-badge", {
+      fontSize: "11px", fontWeight: "600", color: "#ffb454",
+      padding: "2px 6px", borderRadius: "4px",
+      background: "rgba(255,180,84,0.12)", border: "1px solid rgba(255,180,84,0.4)",
+      display: "none", whiteSpace: "nowrap",
+    });
+
     // Header controls slot from HEADER_CONTROLS
     const headerCtrlSlot = el("div", "um-header-ctrl-slot", {
       display: "flex", alignItems: "center", gap: "6px",
     });
 
-    header.append(titleSpan, btnReset, btnPause, headerCtrlSlot);
+    header.append(titleSpan, btnReset, btnPause, warnBadge, headerCtrlSlot);
 
     // --- 3-zone upper region ------------------------------------------------
     const upperRegion = el("div", "um-upper", {
@@ -375,6 +384,18 @@
     // tiny damping left the rotor with no sane steady state).
     for (const d of sliderDefs) applyDrive(d.key, d.value);
 
+    // Playback control — sim-time advanced per render frame ("ordered speed").
+    // Independent of the FRAME_BUDGET_MS wall cap: this sets the target; the cap
+    // sets the ceiling on solve time. Higher = faster playback when solves are
+    // cheap; when they aren't the header flags slow-motion.
+    const playbackLabel = el("div", "", { fontWeight: "600", margin: "8px 0 4px", fontSize: "12px", color: "var(--muted,#8a93a3)" });
+    playbackLabel.textContent = "Playback";
+    shelf.appendChild(playbackLabel);
+    buildSliders(shelf, [
+      { key: "stepMs", label: "step/frame (ms)", min: 2, max: 33, step: 0.1, value: 1000 / 240, log: true,
+        tip: "Sim-time advanced per render frame; capped by the " + FRAME_BUDGET_MS + " ms wall budget." },
+    ], function (key, v) { orderedStepDt = v / 1000; });
+
     // -----------------------------------------------------------------------
     //  5. Orbit-camera tool state
     // -----------------------------------------------------------------------
@@ -433,22 +454,24 @@
     // -----------------------------------------------------------------------
     //  6. Plot history + timing
     // -----------------------------------------------------------------------
-    const PHYS_DT   = 1 / 240;
     const HIST_HZ   = 60;
     const HIST_WIN  = 8;
     const history   = makePlotHistory(HIST_WIN, HIST_HZ);
 
-    let acc = 0;
     let paused = false;
-    let histAcc = 0;
     let rafId = null;
     let lastTime = null;
 
-    // Physics steps per render frame. The full nonlinear air-gap solve runs on
-    // EVERY step (full accuracy), so this is decoupled from wall-clock: the sim
-    // plays in smooth slow-motion. 1 step/frame keeps the frame light (one solve)
-    // for the highest frame rate; the rotor turns at ~frameRate × PHYS_DT realtime.
-    const STEPS_PER_FRAME = 1;
+    // Stepping budget. Each render frame advances the sim by `orderedStepDt` of
+    // SIM-time (the "ordered speed", set by the Playback slider), spending at most
+    // FRAME_BUDGET_MS of WALL-time on solves — runtime.step bails after the budget,
+    // so a heavy commutation transient (where one solve can exceed the budget)
+    // never stalls rendering. When the cap lands the frame short of orderedStepDt
+    // the sim is playing slower than ordered; slowMo drives the header warning.
+    const FRAME_BUDGET_MS = 30;
+    let orderedStepDt = 1 / 240;   // sim-seconds per frame
+    let slowMo   = false;
+    let slowFrac = 1;
 
     // -----------------------------------------------------------------------
     //  7. Readout builder
@@ -599,17 +622,18 @@
       const dtFrame = Math.min((now - lastTime) / 1000, 0.05);
       lastTime = now;
 
-      // Physics — solve-every-step (full Ntheta=256 + saturation, bit-accurate),
-      // a FIXED small number of steps per render frame, decoupled from wall-clock.
-      // The full nonlinear air-gap solve (~tens of ms) cannot run realtime at this
-      // resolution without sacrificing accuracy (every cheap torque shortcut —
-      // coarsening, held-torque, co-energy — costs 10–40% accuracy), so the sim
-      // plays in smooth slow-motion (~0.1× realtime) instead of choppily at
-      // realtime. Field, torque and dynamics are exact on every step.
+      // Physics — the adaptive solver advances orderedStepDt of sim-time this
+      // frame, spending at most FRAME_BUDGET_MS of wall-time (runtime.step bails
+      // after the budget, always after ≥1 solve). The full nonlinear air-gap solve
+      // is exact on every sub-step; when a transient is too heavy to cover
+      // orderedStepDt inside the budget the frame lands short and the sim plays in
+      // slow-motion (flagged in the header) rather than dropping the frame.
       if (!paused) {
-        for (let s = 0; s < STEPS_PER_FRAME; s++) {
-          runtime.step(PHYS_DT);
-        }
+        const before = runtime.state.t;
+        runtime.step(orderedStepDt, FRAME_BUDGET_MS);
+        const advanced = runtime.state.t - before;
+        slowMo   = advanced < orderedStepDt - 1e-12;
+        slowFrac = orderedStepDt > 0 ? advanced / orderedStepDt : 1;
         // Plot history — one sample per frame, on the sim-time axis.
         const st  = runtime.state;
         const tau = runtime.lastSolve ? runtime.lastSolve.torque : 0;
@@ -674,6 +698,14 @@
           const lk = solved.fluxLinkages[k];
           rdFlux[k].textContent = Number.isFinite(lk) ? lk.toExponential(3) : "—";
         }
+      }
+
+      // Slow-motion warning — the wall budget capped this frame below the ordered step.
+      if (slowMo && !paused) {
+        warnBadge.style.display = "";
+        warnBadge.textContent = "⚠ slow-motion · " + Math.round(slowFrac * 100) + "% of ordered";
+      } else {
+        warnBadge.style.display = "none";
       }
     }
 

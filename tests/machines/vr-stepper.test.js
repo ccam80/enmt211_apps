@@ -52,12 +52,12 @@ test("self-steps under the commutation table", { timeout: 120000 }, function () 
   // weak "did it move at all" check passes on rocking; this asserts net advance.
   const { runtime } = build("vr-stepper");
   runtime.reset();
-  for (let s = 0; s < 60; s++) runtime.step(1 / 240);   // settle at rest first
+  runtime.step(0.5);                                    // settle at rest first (0.5 s sim)
   const start = runtime.state.theta;
   const N = 5, stepAngle = 2 * Math.PI / 24;             // 15° per step (24 steps/rev)
   for (let cmd = 0; cmd < N; cmd++) {
     runtime.commandStep(1);
-    for (let s = 0; s < 60; s++) runtime.step(1 / 240);
+    runtime.step(0.5);                                  // 0.5 s sim per commanded step
   }
   const net = Math.abs(runtime.state.theta - start);
   assert.ok(net > 0.7 * N * stepAngle && net < 1.3 * N * stepAngle,

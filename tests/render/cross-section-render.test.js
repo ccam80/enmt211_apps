@@ -34,7 +34,7 @@ async function makeRuntime(stepOnce) {
   const cfg = loadMachine("pmsm");
   const expanded = CS.expand(cfg);
   const runtime = LIB.MotorRun.create(expanded, feaOpts({ poles: expanded.poles }));
-  if (stepOnce) runtime.step(1 / 240);
+  if (stepOnce) runtime.step(0.01);   // advance a few ms of sim to populate one field bundle
   return { cfg, expanded, runtime };
 }
 

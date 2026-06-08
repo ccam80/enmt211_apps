@@ -33,14 +33,16 @@ test("a settled rotor still honors a step command", () => {
   rt.reset();
 
   // Settle, and keep running long past the point where an unbounded step would have
-  // frozen the loop (dt doubles to the float64 wall within ~100 settled steps).
-  for (let s = 0; s < 140; s++) rt.step(1 / 240);
+  // frozen the loop. At steady state each accepted solve advances ~dtMax (1e-2 s),
+  // so 1.5 s of settled sim is ~150 solves — well past the ~100 at which an uncapped
+  // step would have doubled dt to the float64 wall (integ.t + dt == integ.t).
+  rt.step(1.5);
   assert.ok(Math.abs(rt.state.omega) < 0.5, `rotor did not settle: ω=${rt.state.omega}`);
   const settledTheta = rt.state.theta;
 
   // Command one step. A frozen sim leaves the rotor exactly where it was.
   rt.commandStep(1);
-  for (let s = 0; s < 160; s++) rt.step(1 / 240);
+  rt.step(0.8);
   const moved = rt.state.theta - settledTheta;
   const stepAngle = 2 * Math.PI / 24;   // 12/8, 3-phase, one-phase-on → 15°
   assert.ok(Math.abs(moved) > 0.3 * stepAngle,
