@@ -1,7 +1,7 @@
 "use strict";
 
 // =============================================================================
-//  auto-sizing.test.js — Phase 2.6 physics-driven mesh sizing tests
+//  auto-sizing.test.js — physics-driven mesh sizing tests
 //
 //  Tests:
 //   1. Wound conductor at 60 Hz with copper gets >= 3 layers (skin-depth floor)

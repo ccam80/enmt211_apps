@@ -86,7 +86,7 @@
 
     const viz = UM.fieldViz || (UM.fieldViz = defaultFieldViz());
 
-    // Static mesh (Phase 5 D2). Before the first solve this is the stable ref.
+    // Static mesh. Before the first solve this is the stable ref.
     let bodies = null;
     try {
       bodies = runtime.stack.sliceMesh(k);
@@ -107,7 +107,7 @@
     const rotor = bodies.rotor;
     const stator = bodies.stator;
 
-    // Per-frame field bundle (Phase 5 D3) — may be null before the first solve.
+    // Per-frame field bundle — may be null before the first solve.
     const solved = runtime.lastSolve;
     const field = (solved && solved.perSliceField && solved.perSliceField[k])
       ? solved.perSliceField[k] : null;

@@ -24,16 +24,14 @@ function makeSlice(cfg, refine) {
   );
 }
 
-describe("MotorSlice mesh-refinement convergence (Wave 5.2)", function () {
+describe("MotorSlice mesh-refinement convergence", function () {
   before(async function () { await initSolver(); });
 
   // -----------------------------------------------------------------------
   it("static-rotor torque convergent under mesh refinement (currents=[5])", function () {
-    // Per 2026-05-28 spec amendment (Phase 5 Amendments block): the
-    // currents=[0] pure-cogging point convergence is deferred to Phase 7's
-    // validation suite, where the harmonic-gap k=0 / magnet-source
-    // discretization-artifact diagnostics live. Wave 5.2 verifies the
-    // loaded currents=[5] case only.
+    // The currents=[0] pure-cogging point convergence is covered by the
+    // harmonic-gap k=0 / magnet-source discretization-artifact diagnostics.
+    // This test verifies the loaded currents=[5] case.
     const cfg = pmConfig();
     const levels = [1.0, SQRT2, 2.0];
     const torquesFive = new Array(levels.length);

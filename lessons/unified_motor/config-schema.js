@@ -201,7 +201,7 @@
 
   // ---------------------------------------------------------------------------
   //  Element→feature builders
-  //  Each returns an array of Phase-2 feature objects for the given ring.
+  //  Each returns an array of feature objects for the given ring.
   //  circuitBase is added to every conductor feature.circuit.
   // ---------------------------------------------------------------------------
 

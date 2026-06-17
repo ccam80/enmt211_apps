@@ -4,7 +4,7 @@
 //  Shared fixtures and helpers for circuit tests.
 //  Not a test file — no .test.js suffix.
 //
-//  Loads the window global and the Phase-1 lib modules individually, then
+//  Loads the window global and the lib modules individually, then
 //  requires motor-circuit.js so LIB.MotorCircuit is attached.
 //  Does NOT require("../_shim.js").
 // =============================================================================

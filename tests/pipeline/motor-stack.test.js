@@ -1,11 +1,10 @@
 "use strict";
 
 // =============================================================================
-//  LIB.MotorStack — FEA-native pipeline tests (Wave 5.3 rewrite).
+//  LIB.MotorStack — FEA-native pipeline tests.
 //
 //  Drives LIB.MotorStack exclusively through CS.expand(woundConfig | pmConfig |
-//  salientConfig | skewN2Config) + feaOpts(); no grid-only tinySection /
-//  makeExpanded / MotorCompile.compile scaffold. Every slice construction goes
+//  salientConfig | skewN2Config) + feaOpts(). Every slice construction goes
 //  through the real FEA path, so initSolver() must resolve before the first
 //  stack is built.
 // =============================================================================
@@ -182,7 +181,7 @@ describe("motor-stack", function () {
         const body = m[role];
         assert.ok(body && typeof body === "object",
           "sliceMesh(" + k + ")." + role + " must be a BodyMesh object");
-        // Phase-2 BodyMesh contract fields.
+        // BodyMesh contract fields.
         assert.ok(body.nodes instanceof Float64Array,
           role + " nodes must be a Float64Array");
         assert.ok(body.elems instanceof Int32Array,

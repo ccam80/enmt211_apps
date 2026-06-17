@@ -15,7 +15,7 @@ const {
 
 const MU0 = 4 * Math.PI * 1e-7;
 
-describe("MotorSlice Newton driver (Wave 5.1)", function () {
+describe("MotorSlice Newton driver", function () {
   before(async function () { await initSolver(); });
 
   // -----------------------------------------------------------------------

@@ -87,9 +87,9 @@ describe("All 15 fixtures: gapLoop.length === poles × round(2.4 × nuMaxSlice)"
 });
 
 // ---------------------------------------------------------------------------
-//  Phase 4 floor is satisfied when gapMinNodes is passed explicitly.
+//  gapMinNodes floor is satisfied when passed explicitly.
 //
-//  Phase 4 harmonic gap requires N_gap >= 4K where K = 3 × max(slots, poles).
+//  The harmonic gap requires N_gap >= 4K where K = 3 × max(slots, poles).
 //  The mesher enforces this only when the caller passes gapMinNodes explicitly
 //  (the mesher is machine-agnostic and does not compute K internally).
 //  This test verifies that passing gapMinNodes raises N_gap to at least that value.
@@ -104,7 +104,7 @@ describe("gapMinNodes floor is enforced when explicitly passed", () => {
     const physics = MotorMesh.physicsFromConfig(pmsm.config);
     const poles = pmsm.config.poles; // 8
 
-    // Compute Phase 4 floor: K = 3 * max(slots=48, poles=8) = 144, floor = 4*144 = 576
+    // Compute floor: K = 3 * max(slots=48, poles=8) = 144, floor = 4*144 = 576
     const maxSlots = 48;
     const K = 3 * Math.max(maxSlots, poles);
     const floor = 4 * K;

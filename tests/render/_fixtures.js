@@ -1,12 +1,12 @@
 "use strict";
 
 // =============================================================================
-//  Shared fixtures for Phase 6 render tests (Waves 6.1 / 6.2).
+//  Shared fixtures for render tests.
 //  Not a test file — no .test.js suffix. Required by the render test files.
 //
 //  Loads the engine shim (window + engine libs), then directly requires the
-//  Phase-2/3/4/5 modules plus the new Phase-6 render libs and the live panel
-//  modules, mirroring tests/slice/_fixtures.js.
+//  engine modules plus the render libs and the live panel modules,
+//  mirroring tests/slice/_fixtures.js.
 // =============================================================================
 
 if (!globalThis.window) globalThis.window = globalThis;
@@ -23,9 +23,9 @@ require("../../lib/motor-mesh.js");
 require("../../lib/motor-mesh-view.js");
 require("../../lib/airgap-mortar.js");
 
-// gap-eval.js is created in Wave 6.2. Wave-6.1 tests run before it exists, so
-// the require is guarded — the render code guards LIB.GapEval the same way.
-try { require("../../lib/gap-eval.js"); } catch (e) { /* Wave 6.2 not landed */ }
+// gap-eval.js may be absent in some run contexts; the require is guarded so the
+// suite still loads. The render code guards LIB.GapEval the same way.
+try { require("../../lib/gap-eval.js"); } catch (e) { /* gap-eval not present */ }
 
 // Point fea-solver at the absolute mjs path BEFORE requiring it.
 process.env.FEA_SOLVER_MJS_PATH = path.resolve(__dirname, "../../lib/solver.mjs");

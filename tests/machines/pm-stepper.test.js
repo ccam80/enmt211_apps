@@ -63,7 +63,7 @@ test("zero-current detent is a single high-order cogging harmonic with no net to
 
 test("holding torque dominates the detent when a phase is energized", function () {
   const { stack } = build("pm-stepper");
-  // Static θ-sweep with phase 0 energized: the holding (energized restoring) torque
+  // Static θ-sweep with winding 0 energized: the holding (energized restoring) torque
   // must dwarf the zero-current detent — the defining property of a working PM
   // stepper. Field solves only, no time-stepping / no ω-θ pinning. Swept across one
   // pole-pitch centred on θ=0, traversing the φ=0 gap node-coincidence. A winding

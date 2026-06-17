@@ -1,11 +1,11 @@
 "use strict";
 
 // =============================================================================
-//  Shared fixtures for Phase 5 slice tests.
+//  Shared fixtures for slice tests.
 //  Not a test file — no .test.js suffix. Required by test files.
 //
 //  Loads the engine shim (window + engine libs), then directly requires the
-//  Phase-2/3/4/5 modules and the config-schema app module.
+//  engine modules and the config-schema app module.
 // =============================================================================
 
 if (!globalThis.window) globalThis.window = globalThis;

@@ -13,7 +13,7 @@ const {
   pmConfig,
 } = require("./_fixtures.js");
 
-describe("MotorSlice public solve / coggingTorque / clearWarmStart contract (Wave 5.2)", function () {
+describe("MotorSlice public solve / coggingTorque / clearWarmStart contract", function () {
   before(async function () { await initSolver(); });
 
   // -----------------------------------------------------------------------

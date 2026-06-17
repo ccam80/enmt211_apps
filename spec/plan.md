@@ -150,9 +150,11 @@ browser verification + a legacy/agnosticism audit.
 - **Phase 5 (3-D rig):** the rig extrudes the cross-section, draws end-windings and
   per-slice in-gap field, rotates the rotor by `gap.phi`, and shows each cup of a
   multi-slice axial machine; registered via `registerRender3D`.
-- **Phase 6 (verification + audit):** the **user-required browser pass** over the
-  CLAUDE.md checklist passes; repo-wide legacy sweep is clean; the agnosticism
-  audit (allow-list extended to the new files) exits 0; full test suite green.
+- **Phase 6 (verification + audit):** the new `scripts/agnosticism-audit.js`
+  exits 0 — its three static checks (machine-name/id, single-slice fast path,
+  legacy-term sweep) over the engine + new render/UI files are clean; the
+  **user-required browser pass** over the CLAUDE.md checklist passes; full test
+  suite green.
 
 ## Dependency Graph
 
@@ -160,7 +162,7 @@ browser verification + a legacy/agnosticism audit.
 Phase 0 (stale-reference + dead-path removal)            ── runs first, alone
    │
    ├──→ Phase 1 (engine wiring + boot:                   ── parallel after 0 ──┐
-   │            index.html, mount.js)                                          │
+   │            index.html)                                                    │
    └──→ Phase 2 (in-gap field helper:                    ── parallel after 0   │
                 airgap-mortar.js / gap-eval.js)                                │
                          │                                                     │
@@ -195,9 +197,17 @@ change. It may delete dead comments/branches and is the only phase exempt from
 file-locality (it spans wherever stale references live).
 
 ### Wave 0.1: Remove stale references and dead paths
+
+Discovery (run during plan-spec) found the live-code stale-reference surface is
+narrow and fully enumerable, while the bulk of deleted-subsystem references live
+in obsolete `spec/` artifacts from the delivered FEA-rebuild. The work splits
+into two independent, parallel task_groups (see
+`spec/phase-0-stale-reference-dead-path-removal.md` for the enumerated edits).
+
 | Task | Description | Complexity | Key Files |
 |------|-------------|------------|-----------|
-| 0.1.1 | Repo-wide sweep + removal of all references to deleted subsystems — `airgap-harmonic`/`harmonic-set`, `extractCoeffs`, `coenergyTorque`/`evaluateAt`/co-energy/dL-dθ, the polar grid (`airgap-grid/solve/torque/refine/worker`, `motor-compile`, `drawGapField`), and `detailed-toggle` — in code, comments, string literals, test fixtures, and any leftover stub files (e.g. a harmonic-era `gap-eval`). Remove the dead `solved`-variable readout path in `mount.js` (the live readouts will be re-sourced from `runtime.lastSolve` in Phase 1). Confirm the test suite still runs with no new failures. | M | (repo-wide) `lessons/unified_motor/mount.js`, `lib/*.js`, `tests/**`, `spec/*` references |
+| 0.1.1 | Fix the five live-code stale-reference sites: source `mount.js`'s readout `solved` variable from `runtime.lastSolve` (this re-sources the live readouts **in Phase 0**, replacing the dead undeclared-variable read — Phase 1 need not re-do it); delete the orphan `winding-editor.js` (unwired; calls the deleted polar-grid cross-section API); reword three stale comments naming deleted subsystems (`motor-compile` in `winding-model.js`; `coenergyTorque` + a banned historical-provenance line in `motor-circuit.js`; `MotorCompile.compile` in `motor-stack.test.js`); refresh `spec/test-baseline.md` to the current 330/330/0 baseline. The two guard tests that assert deleted symbols are absent are kept. | M | `lessons/unified_motor/mount.js`, `lib/winding-model.js`, `lib/motor-circuit.js`, `tests/pipeline/motor-stack.test.js`, `spec/test-baseline.md`, `lessons/unified_motor/winding-editor.js` (delete) |
+| 0.1.2 | Scripted, enumerated deletion of 21 obsolete delivered-rebuild `spec/` artifacts (old plan `fea-engine-rebuild.md`; the nine `reviews/spec-phase-*.md` + `reviews/spec-review-combined.md`; dated investigation/sprint/audit logs; the superseded `pi-measure-derivation.md`/`feature-brush-commutator.md`/`adaptive-stepper-design.md`/`profile-coupled.js`; and old job-control `.hybrid-state.json` + `.context/review-spec.md`/`T4.1.1-recovery-notes.md`). Keeps live infra (`.context/rules.md`, `.context/lock-protocol.md`), the binding `feature-axial-flux-coupling.md`, `plan.md`, `manifest.json`, and the refreshed `test-baseline.md`. Dry-run before deleting; confirm the suite stays green. | S | (spec-only) the 21 enumerated `spec/*` files |
 
 ---
 
@@ -205,17 +215,26 @@ file-locality (it spans wherever stale references live).
 **Depends on**: Phase 0
 **Parallel with**: Phase 2
 
-Make the live app run on the FEA engine. Owns the two wiring files.
+Make the live app run on the FEA engine. Owns the sole wiring file, `index.html`
+(`mount.js`'s readout re-sourcing is Phase 0's; everything else in `mount.js` is
+already wired against the current engine contract). Single wave.
 
 ### Wave 1.1: index.html script load + solver boot
 | Task | Description | Complexity | Key Files |
 |------|-------------|------------|-----------|
-| 1.1.1 | Add the FEA + render/UI `<script>` tags to `index.html` in dependency order (`fea-solver.js`, `motor-mesh.js`, `motor-mesh-view.js`, `airgap-mortar.js`, `bdf-integrator.js`, `motor-slice.js` **before** the already-present `motor-stack.js`/`motor-run.js`; then `cross-section-render.js`, `render3d.js`, `machine-picker.js`, and the geometry/material panel after `mount.js`, before the machine fixtures). Replace the bare `runTabs(...)` call with a boot that awaits `LIB.FeaSolver.init()` then mounts. (The render/UI files land in Phases 3–5; their tags are added here as the sole owner of `index.html` so later phases never edit it — a file that does not yet exist is a load no-op until its phase ships it. Plan-spec confirms tag set + order.) | S | `lessons/unified_motor/index.html` |
+| 1.1.1 | Add the FEA + render/UI `<script>` tags to `index.html` in dependency order (`fea-solver.js`, `motor-mesh.js`, `motor-mesh-view.js`, `airgap-mortar.js`, `gap-eval.js`, `bdf-integrator.js`, `motor-slice.js` **before** the already-present `motor-stack.js`/`motor-run.js`; then `cross-section-render.js`, `render3d.js`, `machine-picker.js`, and the geometry/material panel after `mount.js`, before the machine fixtures). Replace the bare `runTabs(...)` call with a boot that awaits `LIB.FeaSolver.init()` then mounts. Ship a headless boot+step test (`tests/unified_motor/app-boot.test.js`) proving the default machine steps and the rotor advances, plus an `index.html` structure test. (The render/UI + gap-eval files land in Phases 2–5; their tags are added here as the sole owner of `index.html` so later phases never edit it — see **Phase 1 stub-seeding exception** below. Plan-spec confirms tag set + order.) | M | `lessons/unified_motor/index.html`, stub `lib/gap-eval.js`/`render3d.js`/`machine-picker.js`/`geometry-panel.js`, `tests/unified_motor/{index-wiring,app-boot}.test.js` |
 
-### Wave 1.2: mount.js — live loop against the current contract
-| Task | Description | Complexity | Key Files |
-|------|-------------|------------|-----------|
-| 1.2.1 | Wire `mount.js` to the current engine contract: per-frame readouts + per-circuit flux read from `runtime.lastSolve` (`fieldBundle.torque` / `.fluxLinkages`), not the removed `solved` var; confirm the wall-budgeted `runtime.step(orderedStepDt, FRAME_BUDGET_MS)` loop, playback slider, and slow-mo badge drive correctly off `state.t`; ensure `requestRebuild()` re-expands the config (including `stack.axial`) and re-creates the runtime after solver init; verify the default machine steps and the rotor turns. No machine identity; no DOM access beyond the mount's own canvases. | M | `lessons/unified_motor/mount.js` |
+> **Phase 1 stub-seeding exception.** A `<script src>` to a file that does not exist
+> is a 404/file-not-found console error in the browser, not a no-op — which would
+> violate Phase 1's "boots with no console errors" check. Of the tags Phase 1 adds,
+> `cross-section-render.js` already exists; `lib/gap-eval.js` (Phase 2), `render3d.js`
+> (Phase 5), and `machine-picker.js` + `geometry-panel.js` (Phase 4) do not. Phase 1
+> therefore **creates those four as empty no-op stub files** (comment-only, no
+> statements) so every tag loads cleanly, and Phases 2/4/5 replace the stub *contents*.
+> Phase 1 owns the empty file + the tag; the later phase owns the behavior. These four
+> files thus appear in both Phase 1's and Phase 2/4/5's "Files Owned" by design — the
+> same sanctioned ownership split the Phase-0 file-locality exemption already uses for
+> `mount.js`.
 
 ---
 
@@ -231,32 +250,39 @@ body gap-loops + `perSliceField`. Pure helper; no engine physics change.
 ### Wave 2.1: gap-field evaluation helper + test
 | Task | Description | Complexity | Key Files |
 |------|-------------|------------|-----------|
-| 2.1.1 | Factor the in-gap reconstruction into a reusable `LIB.GapEval` (`evalA`/`evalAOnGrid` or equivalent) — solve the per-radius polar-Laplace field in the annulus from the rotor/stator gap-loop boundary values (the same machinery `torque()` uses), evaluating `A(r,θ)`/`B` across the gap at a render-supplied resolution. Headless test: boundary values reproduce each body's gap-loop nodal `A` to tight tolerance; field is smooth/continuous across the gap at several φ; round-trip on a prescribed analytic gap field. DOM-free; agnostic. | M | `lib/airgap-mortar.js` (or new `lib/gap-eval.js`), `tests/airgap/gap-eval.test.js` |
+| 2.1.1 | Create a standalone `LIB.GapEval` in a new `lib/gap-eval.js` — `evalAOnGrid(gapInput, {Nr,Ntheta})` solving the polar-Laplace field in the annulus from the rotor/stator gap-ring boundary values (the same BVP `torque()` uses, re-derived at the render grid via `LIB.FeaSolver`), returning `{rs,thetas,Az,Br,Bth,Bmag}`. Input is an explicit descriptor `{rotor:{gapR,gapTheta,A}, stator:{gapR,gapTheta,A}, phi}` decoupled from the engine field shape (Phase 3/5 build it from `perSliceField[k]` via `mesh.gapLoop`). `airgap-mortar.js` is NOT touched. Headless test: analytic-harmonic round-trip across the gap at several k/φ; boundary rows reproduce the prescribed ring `A`; smooth/finite/monotone; gap `B` from the harmonic; DOM-free; agnostic. | M | `lib/gap-eval.js` (new), `tests/airgap/gap-eval.test.js` |
 
 ---
 
 ## Phase 3: Geometry-faithful 2-D asset render
 **Depends on**: Phase 1, Phase 2
 
-Replace the material-colored radial-block render with real cross-section sprites
-driven by the `BodyMesh` + config winding routing. Owns the 2-D render pair.
-Field overlays layer on top, gated on `UM.fieldViz`; the rotor is drawn rotated by
-`perSliceField[k].gap.phi`, with smooth cross-gap flux lines via the Phase-2 helper.
+A **ground-up engineering sprite cross-section** — real outlined tooth / tooth-tip
+/ slot-opening profiles, magnet segments with N/S + magnetization arrows, and
+**individual wound conductor cross-sections drawn as discrete wires in every slot**
+(never a filled rectangle). Geometry is driven by `section.features` + `config.rings`
+(dispatch on `feature.kind` / `ring.element` only); the FE mesh feeds only the
+physics overlays. The prior `motor-mesh-view.js` material-fill surface and its
+element-count tests are discarded — they encoded a design the author did not set.
+Flux lines are smooth/interpolated (resampled off the mesh), |B| is a blended
+heatmap, saturation stays per-element. Sprite primitives live in a new
+`lib/cross-section-sprite.js` (reused by Phase 5's 3-D rig); `motor-mesh-view.js`
+is gutted to overlays-only; `cross-section-render.js` orchestrates and fixes the
+stale `LIB.GapEval` call to the Phase-2 `{rotor,stator,phi}` descriptor. Owns a
+sanctioned two-tag `index.html` addition (`cross-section-sprite.js` + the
+Phase-2-omitted `gap-eval.js`).
 
-### Wave 3.1: Sprite geometry primitives (teeth / slots / magnets / conductors)
+### Wave 3.1: Sprite primitives + field overlays (two file-disjoint groups, parallel)
 | Task | Description | Complexity | Key Files |
 |------|-------------|------------|-----------|
-| 3.1.1 | Promote `motor-mesh-view.js` to a production sprite renderer: faithful tooth/slot profiles (tooth body, tooth tip, slot opening), magnet segments with N/S shading + magnetization-direction arrows (from `magDir`), and in-slot conductor cross-sections — all derived from the `BodyMesh` features (kind/`rRange`/`thetaRange`/`magDir`), element-kind dispatch only. No radial-block fallback. | L | `lib/motor-mesh-view.js` |
+| 3.1.1 | New `lib/cross-section-sprite.js` (`LIB.CrossSectionSprite`): passive-geometry primitives — `drawIron` (outlined annular-sector teeth with a gap-side tooth-tip shoulder; full-annulus iron → plain ring), `drawMagnet` (N/S-shaded segments by `Mr` sign), `drawMagnetArrows`, `drawShaftAndGap`. Pure, DOM-free, dispatch on `feature.kind` only. | M | `lib/cross-section-sprite.js` (new) |
+| 3.1.2 | In `cross-section-sprite.js`, `drawWinding(ctx, conductorFeatures, mode, opts)`: **individual wires** per slot — distributed = up to `N_dist=8` discrete wire cross-sections; concentrated = an end-on wrapped bundle of up to `N_conc=10` wires widening where turns accumulate. Per-phase color by `circuit`; ⊙/⊗ polarity from `sign(turns)` (× live current when `currentDensity` on). Mode tag supplied by the orchestrator from the owning ring's `element` (C vs W/K). | L | `lib/cross-section-sprite.js` |
+| 3.1.3 | Gut `lib/motor-mesh-view.js` to overlays-only: delete the material/geometry code; add `resampleField` (polar resample off the mesh) + grid-based **smooth** `drawFluxLines` (Catmull-Rom contours) + **blended** `drawModulusB`; keep per-element `drawSaturation`, `viridis`, `drawGapLoop`. | L | `lib/motor-mesh-view.js` |
 
-### Wave 3.2: Winding glyphs (routing-aware concentrated vs distributed)
+### Wave 3.2: cross-section-render orchestration + cross-gap flux + index.html
 | Task | Description | Complexity | Key Files |
 |------|-------------|------------|-----------|
-| 3.2.1 | Draw windings as real coil glyphs from the per-slot ampere-conductor routing (`winding-model`/`config-schema` output the render reads via the slice/config): **concentrated** = per-tooth coils; **distributed** = span-slot belts; each with per-phase color and go/return polarity markers. W vs C is routing, never a machine branch. | L | `lib/motor-mesh-view.js` |
-
-### Wave 3.3: cross-section-render orchestration + field overlays + gap + rotation
-| Task | Description | Complexity | Key Files |
-|------|-------------|------------|-----------|
-| 3.3.1 | Rewrite `cross-section-render.js` to drive the sprite primitives per slice: base geometry layer (always) + the five field overlays (`fluxLines` incl. smooth cross-gap via `LIB.GapEval`, `modulusB`, `saturation`, `magnetization`, `currentDensity`) each gated on `UM.fieldViz`; rotor drawn rotated by `perSliceField[k].gap.phi` (fallback `state.theta` pre-solve); consumes `runtime.stack.sliceMesh(k)` + `runtime.lastSolve.perSliceField[k]`; paints through the `registerCrossSection2D` seam into the two mount canvases. | L | `lessons/unified_motor/cross-section-render.js` |
+| 3.2.1 | Rewrite `cross-section-render.js` to drive the sprite primitives per slice (rotor rotated by `perSliceField[k].gap.phi`, fallback `state.theta`) + the five field overlays gated on `UM.fieldViz`, recomputing resampled grids only when `runtime.lastSolve` changes; build the Phase-2 `{rotor,stator,phi}` gap descriptor from `gapLoop`+`Anode` and call `LIB.GapEval.evalAOnGrid(descriptor,{Nr,Ntheta})` for smooth cross-gap flux (removing the stale `field.gap` call); keep the `registerCrossSection2D`/header seams. Add the `cross-section-sprite.js` + `gap-eval.js` `<script>` tags to `index.html` (sanctioned overlap with Phase 1). | L | `lessons/unified_motor/cross-section-render.js`, `lessons/unified_motor/index.html` |
 
 ---
 
@@ -271,7 +297,7 @@ call `ctx.requestRebuild()`; **no `mount.js` edit** (Phase 1 owns it).
 ### Wave 4.1: Machine picker
 | Task | Description | Complexity | Key Files |
 |------|-------------|------------|-----------|
-| 4.1.1 | `machine-picker.js`: a header control listing the 15 `UnifiedMotor.MACHINES` fixtures; selecting one deep-copies `{rings,circuits,stack,mechanical,poles,label}` into the live editable `ctx.config` and calls `ctx.requestRebuild()` — preset-loader semantics, no machine identity stored. | M | `lessons/unified_motor/machine-picker.js` |
+| 4.1.1 | `machine-picker.js`: a header control listing the 15 `UnifiedMotor.MACHINES` fixtures; selecting one deep-copies the fixture's **entire** config (all keys incl. `grid`/`gapBand` — `grid` is required by `expand`/`validate`) and replaces the contents of `ctx.config` **in place** (object identity preserved so `mount.js`'s closure-captured `config` is the one re-expanded), with `config.label` falling back to the `MACHINES` entry label, then calls `ctx.requestRebuild()` — preset-loader semantics, no machine identity stored. | M | `lessons/unified_motor/machine-picker.js`, `tests/unified_motor/machine-picker.test.js` |
 
 ### Wave 4.2: Geometry + material + slice/axial editor
 | Task | Description | Complexity | Key Files |
@@ -283,36 +309,77 @@ call `ctx.requestRebuild()`; **no `mount.js` edit** (Phase 1 owns it).
 ## Phase 5: 3-D rig
 **Depends on**: Phase 3 (sprite primitives), Phase 2 (gap-eval)
 
+The 3-D viewport is **orbit-pannable** (no privileged front/back): both axial end
+caps of the stack are drawable faces, so both caps get full sprite detail and all
+faces/walls composite back-to-front (painter's algorithm via `LIB.Layout3D.depthSort`).
+
 ### Wave 5.1: render3d.js
 | Task | Description | Complexity | Key Files |
 |------|-------------|------------|-----------|
-| 5.1.1 | `render3d.js`: axial extrusion of the 2-D sprite cross-section, end-winding arcs (go→return over the stack ends), per-slice in-gap field paint (via `LIB.GapEval`), rotor mesh drawn rigidly rotated by `perSliceField[k].gap.phi` (stator fixed); **multi-slice stacks render each slice/cup** so an axial machine's cups are visible. Registered through `UM.registerRender3D`; reuses the Phase-3 sprite primitives; agnostic. | L | `lessons/unified_motor/render3d.js` |
+| 5.1.1 | `render3d.js`: axial extrusion of the 2-D sprite cross-section via an **affine-per-face** transform that reuses the Phase-3 `LIB.CrossSectionSprite` primitives on **both** end caps of **every** slice (+ rig-drawn side-wall quads); end-winding arcs (go→return, grouped by `circuit`) bulging axially beyond **both** outer stack ends; per-slice in-gap field paint on the caps (smooth per-body flux + cross-gap flux via `LIB.GapEval`, blended `\|B\|`), each gated on `UM.fieldViz`; rotor sprite rotated rigidly by `perSliceField[k].gap.phi` (which already includes `offset[k]` — fallback `state.theta + offset[k]` pre-solve), stator fixed; **multi-slice stacks render each slice/cup** so an axial machine's cups are visible. Registered through `UM.registerRender3D`; reuses the Phase-3 sprite primitives; agnostic. Also applies a **sanctioned single-line `mount.js` overlap edit** adding `canvas: viewport3D` to the 3-D-seam `rctx` (the seam otherwise passes no drawing surface — see below). | L | `lessons/unified_motor/render3d.js`, `lessons/unified_motor/mount.js` (sanctioned overlap), `tests/render/render3d.test.js` |
+
+> **Phase 5 mount-seam exception.** The `mount.js` 3-D render loop calls
+> `UM.RENDER3D.paint(mountCtx, L3, rctx)` but passes the renderer no canvas/context
+> (unlike the 2-D seam, which passes the canvases array). Phase 5 fixes this with a
+> single-line edit to the `rctx` literal (`canvas: viewport3D`) and reads
+> `rctx.canvas` in `render3d.js`. `mount.js` therefore appears in both Phase 0's
+> (readout re-sourcing) and Phase 5's "Files Owned" by design — the same sanctioned
+> cross-phase overlap mechanism used for `index.html` (Phase 1↔3) and the stub files
+> (Phase 1↔2/4/5). The two `mount.js` edits touch disjoint lines.
 
 ---
 
 ## Phase 6: Browser verification + legacy/agnosticism audit
 **Depends on**: all previous phases
 
-> Gets its detailed `spec/phase-6-*.md` via `plan-spec` when it is its turn.
+The repo-wide machine-agnosticism backstop is, today, a *test*
+(`tests/pipeline/agnostic-pipeline.test.js`) that scans `lib/` + `mount.js` only;
+there is **no** `scripts/agnosticism-audit.js` (the references to it in Phases 3/4/5
+and the manifest were authored against an assumed artifact). Phase 6 **creates** that
+script — a standalone, DOM-free Node hygiene gate (`node scripts/agnosticism-audit.js`,
+exit 0 clean / 1 on violation) running three static checks over the engine + the
+new render/UI files — and performs the user-required browser pass. The behavioral
+`agnostic-pipeline.test.js` (identical-`MotorRun`-path / rotor-turns) is unchanged
+and remains the behavioral half of the single-slice guarantee.
 
-### Wave 6.1: User browser pass + repo audit
+The wave splits into two file-disjoint task_groups: the agent-runnable audit
+(`T6.1.1`) and the user-required browser verification (`T6.1.2`).
+
+### Wave 6.1: Repo audit (agent) + user browser pass
 | Task | Description | Complexity | Key Files |
 |------|-------------|------------|-----------|
-| 6.1.1 | **User-required browser pass** (CLAUDE.md checklist): picker loads each of the 15 fixtures; geometry/material/gap edits rebuild; "+ add slice" → axial-flux editor appears and a hybrid/claw-pole config builds and runs; rotor turns; each `fieldViz` toggle paints; smooth cross-gap flux lines bridge rotor↔stator; 3-D rig extrudes + rotates + shows cups; Playback slider + slow-mo badge behave; Reset works; no console errors. Then the repo audit: zero stale references to any deleted subsystem; extend `scripts/agnosticism-audit.js` allow-list to the new files (`machine-picker.js`, `geometry-panel.js`, `render3d.js`, gap-eval) and re-run its checks (no machine-name/type reads in engine + runtime-UI; no single-slice fast path); full `node --test` green. Exit 0. | M | (repo-wide) `scripts/agnosticism-audit.js`, `lessons/unified_motor/*` |
+| 6.1.1 | **Repo hygiene gate (agent — not user-required).** Create `scripts/agnosticism-audit.js` exporting `{ scanForNames, scanForSingleSlice, scanForLegacyTerms, run }` and self-executing `run()`+`process.exit` only when `require.main === module`. Three checks: **(1) machine-name/id** — engine (`lib/*.js` minus the carve-out set `{app.js, registry.js, header-buttons.js, stepper-drive.js, three-phase.js}`) + runtime-UI (`mount.js`, `cross-section-render.js`, `render3d.js`, `machine-picker.js`, `geometry-panel.js`) contain none of the 8 `MACHINE_NAMES` type tokens (substring, case-insensitive) and no quoted machine-**id** literal (15 ids); **(2) single-slice fast path** — same scan set, comments stripped, zero matches of `slices/nSlices === 1` or `slices < 2`; **(3) legacy-term sweep** — `lib/**`, `lessons/**`, `tests/**`, `scripts/**`, `index.html` contain zero deleted-subsystem terms (`airgap-harmonic`, `harmonic-set`/`harmonicSet`, `extractCoeffs`, `coenergyTorque`, `evaluateAt`, `drawGapField`, `MotorCompile`/`compileForOverlay`/`drawCompiledOverlay`, `detailed-toggle`, `airgap-grid`) outside the enumerated carve-out paths (`lib/em-physics.js`, `lessons/ac_motor/**`, `tests/render/mount-2d-seam.test.js`, the audit script + its test, `spec/**`). Add `tests/pipeline/agnosticism-audit.test.js` (unit-tests the three scan fns on synthetic inputs + spawns the script and asserts exit 0) and an `"audit"` npm script. Full `node --test` green. | M | `scripts/agnosticism-audit.js` (new), `tests/pipeline/agnosticism-audit.test.js` (new), `package.json` |
+| 6.1.2 | **User-required browser pass** (CLAUDE.md checklist), recorded in `spec/phase-6-browser-verification.md`: app boots with no console errors; picker loads each of the 15 fixtures into an editable config; geometry/material/gap edits rebuild; "+ add slice" reveals the axial-flux netlist editor and a hybrid/claw-pole config builds and runs; rotor turns; each `fieldViz` toggle paints; smooth cross-gap flux lines bridge rotor↔stator; 3-D rig extrudes + rotates + shows cups; Playback slider + slow-mo badge behave; Reset works. The user runs the checklist in a browser and signs off each item; the agent records pass/fail + notes. | M | `spec/phase-6-browser-verification.md` (new) |
 
 ---
 
 ## Open items deferred to plan-spec
 
-- **gap-eval home (Phase 2):** extract into a new `lib/gap-eval.js` vs export from
-  `lib/airgap-mortar.js` — decide by whether the reconstruction can be cleanly
-  shared without duplicating mortar internals.
-- **geometry/material panel home (Phase 4):** new `geometry-panel.js` vs extending
-  `matrix-panel.js` — confirm `matrix-panel.js`'s current role (schematic editor)
-  to avoid overloading one file across two concerns.
+- **gap-eval home (Phase 2): RESOLVED — new `lib/gap-eval.js`.** The render holds
+  no mortar-engine handle and the render grid (`Nr≈8`,`Ntheta≈96`) differs from the
+  mortar's torque grid (`Nu`,`L_SUB=8`), so the factored `recSolver` is not reusable;
+  `gap-eval.js` re-derives the generic polar-Laplace BVP at the render grid and
+  duplicates no mortar coupling internals. Signature: `evalAOnGrid({rotor,stator,phi},
+  {Nr,Ntheta}) → {rs,thetas,Az,Br,Bth,Bmag}`. Phase 1 must add `lib/gap-eval.js` to
+  the `index.html` load order after `fea-solver.js`; Phase 3/5 build the descriptor
+  from `perSliceField[k]` and call `evalAOnGrid(descriptor, …)` (the draft render's
+  stale `evalAOnGrid(field.gap, …)` call is rewritten in Phase 3 — landing
+  `gap-eval.js` before then turns the `tests/render` flux-line path red transiently,
+  which is accepted). Phase 6 audit allow-list adds `gap-eval.js`.
+- **geometry/material panel home (Phase 4): RESOLVED — new `geometry-panel.js`.**
+  `matrix-panel.js` is a from-scratch config *synthesizer* (toggle-vocabulary →
+  config via `synthesize`); `schematic-panel.js` is a circuit/switch/capacitor
+  editor. Continuous geometry/material editing over an already-loaded config is a
+  distinct concern, so it lands in the new `geometry-panel.js`, not by overloading
+  either existing panel.
 - **Exact `perSliceField` field names (Phases 3/5):** confirm `Anode`/`Belem`/
   `gap.phi` spellings against `lib/motor-stack.js` `fieldBundle` before the render
   consumes them.
-- **Axial-netlist UI affordance (Phase 4):** the minimal control set for branches +
-  loops that stays agnostic and maps 1:1 to `stack.axial` — refine with the user in
-  plan-spec (default: hybrid L=1 two-cup loop pre-filled, generalizable to N/L).
+- **Axial-netlist UI affordance (Phase 4): RESOLVED.** The editor is revealed only
+  at `stack.slices > 1` and is pre-filled with the hybrid L=1 two-cup default
+  (`{branches:{pm:{Br:1.2,length:0.00628}}, loops:[{slices:[{s:0,sign:+1},
+  {s:1,sign:-1}], branches:["pm"], Raxial:0, Fpm:0}]}`), generalizable to a signed
+  N-slice / L-loop netlist. Controls map 1:1 to the `config-schema.js` `stack.axial`
+  shape (per-branch `Br`/`length`/`area`/`muR` or raw `reluctance`/`mmf`; per-loop
+  signed incidence + branch selection + `Raxial`/`Fpm`). "+ add slice" is capped at
+  4; dropping to 1 slice deletes `stack.axial` (bit-identical reduction).

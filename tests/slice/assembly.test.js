@@ -17,7 +17,7 @@ const {
 
 const MU0 = 4 * Math.PI * 1e-7;
 
-describe("MotorSlice assembly + Brauer fit (Wave 5.1)", function () {
+describe("MotorSlice assembly + Brauer fit", function () {
   before(async function () { await initSolver(); });
 
   // -----------------------------------------------------------------------
@@ -232,7 +232,7 @@ describe("MotorSlice assembly + Brauer fit (Wave 5.1)", function () {
       );
       const rotorMats = slice.__internals.bodies.rotor.materials
         .filter(function (m) { return m.kind === "iron"; });
-      // Phase-2 dedup keys on (kind, muR, mrMag, Bknee) so two irons with
+      // Dedup keys on (kind, muR, mrMag, Bknee) so two irons with
       // different Bknee must dedup to two distinct entries.
       assert.strictEqual(rotorMats.length, 2,
         "two distinct iron materials with different Bknee must dedup separately");

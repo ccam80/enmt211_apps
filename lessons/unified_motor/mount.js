@@ -684,6 +684,7 @@
 
       // Readouts
       const st = runtime.state;
+      const solved = runtime.lastSolve;
       const tau = solved ? solved.torque : 0;
       rdTorque.textContent = Number.isFinite(tau)      ? tau.toExponential(3)       : "—";
       rdOmega.textContent  = Number.isFinite(st.omega) ? st.omega.toFixed(3)        : "—";

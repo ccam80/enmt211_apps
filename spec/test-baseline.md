@@ -1,10 +1,8 @@
 # Test Baseline
-- **Timestamp**: 2026-05-27T00:00:00Z
-- **Phase**: 0 (about to start FEA engine rebuild)
+- **Timestamp**: 2026-06-08T00:00:00Z
+- **Phase**: 0 (engine→app integration — stale-reference + dead-path removal)
 - **Command**: node --test
-- **Result**: 202/203 passing, 0 failing, 0 errors, 1 skipped
+- **Result**: 330/330 passing, 0 failing, 0 errors, 0 skipped
 
 ## Skipped Tests (pre-existing)
-| Test | Status | Summary |
-|------|--------|---------|
-| agnostic-pipeline › does not self-start from rest on AC-none | SKIP | excitation model has no current-source (field-regulator) terminal; the voltage-fed field line-starts — deferred per user, see progress.md |
+None.

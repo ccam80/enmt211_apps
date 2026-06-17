@@ -3,13 +3,12 @@
 // =============================================================================
 //  tests/slice/perf.test.js — D1 embed-vs-Schur escalation diagnostic.
 //
-//  Per Phase 5 §11.4: time consecutive `solve(...)` calls on the largest
-//  realistic-DOF fixture (`hybrid-stepper`, full-annulus zero-symmetry).
-//  console.log the per-θ-step mean and max, then assert only that the
-//  measurement was captured (positive finite number). The 16 ms threshold
-//  is the manual escalation gate: if the log line shows mean or max > 16 ms,
-//  the implementer takes a Clarification Exit reporting the measurement —
-//  the test does NOT fail at 16 ms.
+//  Times consecutive `solve(...)` calls on the largest realistic-DOF fixture
+//  (`hybrid-stepper`, full-annulus zero-symmetry). console.log the per-θ-step
+//  mean and max, then assert only that the measurement was captured (positive
+//  finite number). The 16 ms threshold is the manual escalation gate: if the
+//  log line shows mean or max > 16 ms, report the measurement — the test does
+//  NOT fail at 16 ms.
 // =============================================================================
 
 const { describe, it, before } = require("node:test");
@@ -21,7 +20,7 @@ const initSolver = F.initSolver;
 const loadMachine = F.loadMachine;
 const CS = F.CS;
 
-describe("MotorSlice perf diagnostic (Wave 5.3 D1)", function () {
+describe("MotorSlice perf diagnostic", function () {
   before(async function () { await initSolver(); });
 
   // -----------------------------------------------------------------------

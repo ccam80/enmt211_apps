@@ -1,11 +1,11 @@
 "use strict";
 
 // =============================================================================
-//  Shared fixtures for Phase-5 pipeline tests.
+//  Shared fixtures for pipeline tests.
 //  Not a test file — no .test.js suffix. Required by test files.
 //
 //  Loads the engine shim (window + engine libs), then directly requires the
-//  Phase-2/3/4/5 modules and the config-schema app module. Re-exports
+//  engine modules and the config-schema app module. Re-exports
 //  assertClose from the engine fixtures. Exports the four named machine
 //  configs, MACHINE_NAMES, LIB, UnifiedMotor, CS, initSolver, feaOpts.
 // =============================================================================
@@ -15,16 +15,9 @@ const path = require("path");
 // Engine shim installs globalThis.window and engine libs
 const LIB = require("../_shim.js");
 
-// Phase-2 modules
 require("../../lib/winding-model.js");
-
-// Phase-3 module
 require("../../lib/excitation.js");
-
-// Phase-4 module
 require("../../lib/motor-circuit.js");
-
-// Phase-2/5 mesh + air-gap + FEA modules
 require("../../lib/motor-mesh.js");
 require("../../lib/motor-mesh-view.js");
 require("../../lib/airgap-mortar.js");
@@ -34,12 +27,10 @@ process.env.FEA_SOLVER_MJS_PATH = path.resolve(__dirname, "../../lib/solver.mjs"
 require("../../lib/fea-solver.js");
 require("../../lib/motor-slice.js");
 
-// Phase-5 lib modules
 require("../../lib/motor-stack.js");
 require("../../lib/bdf-integrator.js");
 require("../../lib/motor-run.js");
 
-// Phase-5 app module (attaches window.UnifiedMotor.ConfigSchema)
 require("../../lessons/unified_motor/config-schema.js");
 
 const UnifiedMotor = window.UnifiedMotor;
