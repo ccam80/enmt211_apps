@@ -28,10 +28,21 @@
 <script src="../../lib/excitation.js"></script>
 <script src="../../lib/motor-circuit.js"></script>
 <script src="./config-schema.js"></script>
+<script src="../../lib/fea-solver.js"></script>
+<script src="../../lib/motor-mesh.js"></script>
+<script src="../../lib/motor-mesh-view.js"></script>
+<script src="../../lib/airgap-mortar.js"></script>
+<script src="../../lib/gap-eval.js"></script>
+<script src="../../lib/bdf-integrator.js"></script>
+<script src="../../lib/motor-slice.js"></script>
 <script src="../../lib/motor-stack.js"></script>
 <script src="../../lib/motor-run.js"></script>
 <script src="./mount.js"></script>
 <!-- unified-motor modules: later phases append <script> tags below this line ONLY -->
+<script src="./cross-section-render.js"></script>
+<script src="./render3d.js"></script>
+<script src="./machine-picker.js"></script>
+<script src="./geometry-panel.js"></script>
 <script src="./machines/pmsm.js"></script>
 <script src="./machines/brushed-dc-pm.js"></script>
 <script src="./machines/brushed-dc-wound.js"></script>
@@ -49,9 +60,13 @@
 <script src="./machines/pole-mismatch-demo.js"></script>
 <!-- /unified-motor modules -->
 <script>
-  LIB.App.runTabs({
-    title: "Unified Motor",
-    tabs: [{ label: "unified-motor", mount: window.UnifiedMotor.mount }],
+  LIB.FeaSolver.init().then(function () {
+    LIB.App.runTabs({
+      title: "Unified Motor",
+      tabs: [{ label: "unified-motor", mount: window.UnifiedMotor.mount }],
+    });
+  }).catch(function (err) {
+    console.error("FeaSolver.init() failed; unified-motor not mounted:", err);
   });
 </script>
 </body>

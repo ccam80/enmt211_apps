@@ -11,6 +11,7 @@
       "phase": 0,
       "name": "stale-reference-dead-path-removal",
       "spec_file": "spec/phase-0-stale-reference-dead-path-removal.md",
+      "depends_on": [],
       "waves": [
         {
           "wave": "0.1",
@@ -37,6 +38,7 @@
       "phase": 1,
       "name": "engine-wiring-and-boot",
       "spec_file": "spec/phase-1-engine-wiring-and-boot.md",
+      "depends_on": [0],
       "waves": [
         {
           "wave": "1.1",
@@ -56,6 +58,7 @@
       "phase": 2,
       "name": "in-gap-field-reconstruction-helper",
       "spec_file": "spec/phase-2-in-gap-field-reconstruction-helper.md",
+      "depends_on": [0],
       "waves": [
         {
           "wave": "2.1",
@@ -75,6 +78,7 @@
       "phase": 3,
       "name": "geometry-faithful-2d-asset-render",
       "spec_file": "spec/phase-3-geometry-faithful-2d-asset-render.md",
+      "depends_on": [1, 2],
       "waves": [
         {
           "wave": "3.1",
@@ -114,6 +118,7 @@
       "phase": 4,
       "name": "live-editing-ui",
       "spec_file": "spec/phase-4-live-editing-ui.md",
+      "depends_on": [1],
       "waves": [
         {
           "wave": "4.1",
@@ -145,6 +150,7 @@
       "phase": 5,
       "name": "3d-rig",
       "spec_file": "spec/phase-5-3d-rig.md",
+      "depends_on": [2, 3],
       "waves": [
         {
           "wave": "5.1",
@@ -164,6 +170,7 @@
       "phase": 6,
       "name": "verification-and-audit",
       "spec_file": "spec/phase-6-verification-and-audit.md",
+      "depends_on": [0, 1, 2, 3, 4, 5],
       "waves": [
         {
           "wave": "6.1",
