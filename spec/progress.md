@@ -110,3 +110,39 @@ workflow-based skill starting at phase 1.
 - **Coordinator infra this batch**: added `depends_on` to spec/manifest.json (transcribed from plan.md's dependency graph); deleted vestigial spec/.hybrid-state.json; patched workflows/implement.mjs (+ siblings) to JSON.parse string `args` under this runtime.
 - **Incident note**: this batch's fix round destroyed a sibling group's verified work via the sanctioned `gap-eval.js` ownership overlap + an out-of-ownership `rm`. Audited from subagent transcripts and fully recovered. A workflow guardrail is being handled separately by the user.
 
+
+## Task T4.1.1: machine-picker.js — header control that loads a fixture into the editable config
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/unified_motor/machine-picker.test.js
+- **Files modified**: lessons/unified_motor/machine-picker.js
+- **Tests**: 7/7 passing
+
+## Task T3.1.1: Sprite geometry — iron teeth, magnets, shaft, gap
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: lib/cross-section-sprite.js (partial — drawIron, drawMagnet, drawMagnetArrows, drawShaftAndGap), tests/render/cross-section-sprite.test.js (geometry suite)
+- **Files modified**: none
+- **Tests**: 6/6 geometry tests passing
+
+## Task T3.1.2: Sprite windings — individual wires (distributed + concentrated)
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: (lib/cross-section-sprite.js extended with drawWinding + WIRE_PALETTE; tests/render/cross-section-sprite.test.js extended with winding suite)
+- **Files modified**: lib/cross-section-sprite.js
+- **Tests**: 12/12 passing (6 geometry + 6 winding)
+
+## Task T3.1.3: Overlays-only motor-mesh-view.js — smooth flux, blended |B|, saturation
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: none
+- **Files modified**: lib/motor-mesh-view.js, tests/render/mesh-view-prod.test.js
+- **Tests**: 7/7 passing (all new mesh-view-prod tests green)
+- **Out-of-scope regressions**: 3 additional cross-section-render tests now fail beyond the 1 pre-existing baseline failure (`paint dispatches each viz toggle`, `paint paints content when lastSolve is null`, `paint rotates the rotor mesh by gap.phi`). Root cause: `lessons/unified_motor/cross-section-render.js` (T3.2.1 footprint) still calls the deleted `MMV.drawMaterial`, `MMV.drawMagnetization`, `MMV.drawCurrentDensity`, and old mesh-based `drawFluxLines`/`drawModulusB` signatures. These regressions are T3.2.1's to resolve when it rewrites cross-section-render.js.
+
+## Batch-3 (tier 2, wave 1: phases 3 + 4 wave-1) — VERIFIED PASS ✅
+- **Groups**: 3.1.a (T3.1.1+T3.1.2) PASS, 3.1.b (T3.1.3) PASS, 4.1.a (T4.1.1) PASS.
+- **Scope audit**: clean (exit 0 vs checkpoint `117c929`) — no deletions, no created-then-deleted, no out-of-scope modifications.
+- **Suite after batch**: 352/356 passing, 4 failing. All 4 failures are in `tests/render/cross-section-render.test.js` and are the documented T3.2.1 (batch-4) forward-cascade (old test drives the old `cross-section-render.js` against the removed element-mesh API). Recorded in `spec/test-baseline.md`. Not masked.
+- **Coordinator cleanup this batch (user-approved)**: deleted the orphaned `tests/mesh/mesh-view.test.js` (asserted the element-mesh API T3.1.3 deliberately removed; superseded by `tests/render/mesh-view-prod.test.js`). T3.1.3 spec amended with a "Files to delete" entry recording it. This resolved the 3 mesh-view.test.js failures that T3.1.3's API removal regressed but no scheduled task owned.
+- **Resumption context**: this batch was launched after a power-cycle interruption; pre-batch state (phase 0 + tier-1 phases 1+2) was re-established from `spec/progress.md` + git history and confirmed clean before launch.

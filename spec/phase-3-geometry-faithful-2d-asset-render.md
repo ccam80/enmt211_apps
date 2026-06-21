@@ -298,6 +298,15 @@ Two file-disjoint task groups run in parallel: the sprite lib
     - Export exactly: `{ viridis, elemToNodal, resampleField, drawFluxLines,
       drawModulusB, drawSaturation, drawGapLoop }`.
 
+- **Files to delete**:
+  - `tests/mesh/mesh-view.test.js` — the old element-mesh test suite. It asserts
+    the element-fill surface (`colorFor`, `draw`/one-polygon-per-element, the
+    `showGapLoop` path-count contract) that this task removes from
+    `lib/motor-mesh-view.js`. Its coverage is superseded by the new
+    `tests/render/mesh-view-prod.test.js` (overlays-only surface). Leaving it in
+    place would assert a deliberately-deleted API and break the green-suite
+    acceptance criterion below.
+
 - **Tests**:
   - `tests/render/mesh-view-prod.test.js::"resampleField interpolates a nodal field off the mesh"` —
     build the pmsm rotor mesh (`meshOf("pmsm","rotor")`); set `Anode[n] =
