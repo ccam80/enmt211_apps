@@ -146,3 +146,30 @@ workflow-based skill starting at phase 1.
 - **Suite after batch**: 352/356 passing, 4 failing. All 4 failures are in `tests/render/cross-section-render.test.js` and are the documented T3.2.1 (batch-4) forward-cascade (old test drives the old `cross-section-render.js` against the removed element-mesh API). Recorded in `spec/test-baseline.md`. Not masked.
 - **Coordinator cleanup this batch (user-approved)**: deleted the orphaned `tests/mesh/mesh-view.test.js` (asserted the element-mesh API T3.1.3 deliberately removed; superseded by `tests/render/mesh-view-prod.test.js`). T3.1.3 spec amended with a "Files to delete" entry recording it. This resolved the 3 mesh-view.test.js failures that T3.1.3's API removal regressed but no scheduled task owned.
 - **Resumption context**: this batch was launched after a power-cycle interruption; pre-batch state (phase 0 + tier-1 phases 1+2) was re-established from `spec/progress.md` + git history and confirmed clean before launch.
+
+## Task T3.2.1: Rewrite cross-section-render.js + wire index.html
+- **Status**: complete
+- **Agent**: implementer
+- **Files modified**:
+  - `lessons/unified_motor/cross-section-render.js` — rewritten to sprite-based orchestration: rotor sprite (iron, magnets, wiring, shaft/gap) inside `save/rotate(phi)/restore`; stator sprite (iron, magnets, wiring); five field overlays gated on `UM.fieldViz` (saturation, modulusB, fluxLines, magnetization, gapLoop via `LIB.MotorMeshView`); cross-gap flux via `LIB.GapEval.evalAOnGrid({rotor,stator,phi},{Nr,Ntheta})` built from `gapLoop`+`Anode`; overlay grids memoized on `lastSolve` reference; `register`/`registerCrossSection2D`/`registerHeaderControl`/auto-register guard unchanged
+  - `lessons/unified_motor/index.html` — added `<script src="../../lib/cross-section-sprite.js"></script>` immediately after `motor-mesh-view.js`
+  - `tests/render/cross-section-render.test.js` — rewritten with 9 new tests for sprite + overlays-only surface; previous 4 Phase-2-era failures resolved
+- **Tests**: 9/9 new tests passing; full suite 369/369 passing (0 failing, up from 352/356 pre-existing-failing baseline)
+
+## Task T4.2.1: geometry-panel.js — per-ring geometry/material, gap length, slice + axial-flux editor
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/unified_motor/geometry-panel.test.js
+- **Files modified**: lessons/unified_motor/geometry-panel.js
+- **Tests**: 12/12 passing (geometry-panel suite); full suite 369/369 passing (0 regressions)
+
+## Batch-4 (tier 2, wave 2: phases 3 + 4 wave-2) — VERIFIED PASS ✅
+- **Groups**: 3.2.a (T3.2.1) PASS, 4.2.a (T4.2.1) PASS.
+- **Scope audit**: clean (exit 0 vs checkpoint `75af9ec`) — no deletions, no created-then-deleted, no out-of-scope modifications.
+- **Suite after batch**: 369/369 passing, 0 failing. T3.2.1's rewrite of `cross-section-render.js` + its test cleared the 4 carried-forward failures from batch-3; the Phase-3 forward-cascade is fully resolved.
+
+## TIER 2 COMPLETE (phases 3 + 4)
+- Phase 3 (geometry-faithful 2-D asset render): T3.1.1, T3.1.2, T3.1.3, T3.2.1 — all done.
+- Phase 4 (live-editing UI): T4.1.1, T4.2.1 — all done.
+- Committed across batch-3 (`186d82c`) and batch-4. Suite fully green.
+- Remaining: tier 3 (phase 5 / batch-5) → tier 4 (phase 6 / batch-6, includes user-required task T6.1.2).

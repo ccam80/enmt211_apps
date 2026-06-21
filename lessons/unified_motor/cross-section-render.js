@@ -4,8 +4,6 @@
   const UM = window.UnifiedMotor || (window.UnifiedMotor = {});
   const TWO_PI = 2 * Math.PI;
 
-  // D3's locked initial field-viz state. Six independent overlays; flux-lines
-  // on by default, everything else opt-in.
   function defaultFieldViz() {
     return {
       fluxLines: true,
@@ -17,11 +15,6 @@
     };
   }
 
-  // ---------------------------------------------------------------------------
-  //  DPR-fit a canvas to its client size and return { W, H } in CSS pixels.
-  //  Mirrors mount.js's fitCanvas. Falls back to the canvas's intrinsic
-  //  width/height when client dimensions are unavailable (headless mocks).
-  // ---------------------------------------------------------------------------
   function fitCanvas(canvas) {
     const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
     const W = canvas.clientWidth || canvas.width || 0;
@@ -35,30 +28,7 @@
     return { W, H };
   }
 
-  // ---------------------------------------------------------------------------
-  //  rotatedMesh(bodyMesh, phi) → bodyMesh-like clone with rotated nodes.
-  //  The mesh nodes are body-local; a rigid rotation by phi is applied to the
-  //  node coordinates for draw (the underlying mesh is never mutated). Returns
-  //  the original mesh when phi is ~0 (no allocation).
-  // ---------------------------------------------------------------------------
-  function rotatedMesh(bodyMesh, phi) {
-    if (!phi || Math.abs(phi) < 1e-12) return bodyMesh;
-    const src = bodyMesh.nodes;
-    const dst = new Float64Array(src.length);
-    const c = Math.cos(phi), s = Math.sin(phi);
-    for (let n = 0; n < src.length / 2; n++) {
-      const x = src[2 * n], y = src[2 * n + 1];
-      dst[2 * n] = c * x - s * y;
-      dst[2 * n + 1] = s * x + c * y;
-    }
-    const clone = Object.create(bodyMesh);
-    clone.nodes = dst;
-    return clone;
-  }
-
-  // ---------------------------------------------------------------------------
-  //  bodyRadii(bodyMesh) → { rMax } — outermost node radius (for fit scale).
-  // ---------------------------------------------------------------------------
+  // Max node radius across a body mesh — used for fit scale.
   function maxNodeRadius(bodyMesh) {
     const nodes = bodyMesh.nodes;
     let rMax = 0;
@@ -69,15 +39,81 @@
     return rMax;
   }
 
+  // Classify conductor features by their owning ring's element type.
+  // Returns { distributed: Feature[], concentrated: Feature[] } for a given
+  // set of conductor features. Ring classification: element "C" → concentrated,
+  // element "W" or "K" → distributed.
+  function classifyConductors(conductorFeatures, rings) {
+    const distributed = [];
+    const concentrated = [];
+    for (const feat of conductorFeatures) {
+      let matched = false;
+      for (const ring of rings) {
+        if (ring.member !== feat.member) continue;
+        const slotRange = ring.slotRRange != null ? ring.slotRRange : ring.rRange;
+        if (!Array.isArray(slotRange) || slotRange.length < 2) continue;
+        const inRange = slotRange[0] <= feat.rRange[0] && feat.rRange[1] <= slotRange[1];
+        if (!inRange) continue;
+        if (ring.element === "C") {
+          concentrated.push(feat);
+        } else {
+          distributed.push(feat);
+        }
+        matched = true;
+        break;
+      }
+      if (!matched) distributed.push(feat);
+    }
+    return { distributed, concentrated };
+  }
+
+  // Build a GapEval descriptor from a body mesh and its nodal A values.
+  // Returns { gapR, gapTheta, A }.
+  function ringFromGapLoop(body, Anode) {
+    const loop = body.gapLoop;
+    const N = loop.length;
+    const gapTheta = new Float64Array(N);
+    const A = new Float64Array(N);
+    for (let i = 0; i < N; i++) {
+      const ni = loop[i];
+      const x = body.nodes[2 * ni], y = body.nodes[2 * ni + 1];
+      gapTheta[i] = Math.atan2(y, x);
+      A[i] = Anode[ni];
+    }
+    return { gapR: body.gapR, gapTheta, A };
+  }
+
+  // Overlay recompute cache — keyed on lastSolve reference.
+  // Structure: Map<lastSolve, Map<string, grid>>
+  let _overlayCache = null;
+  let _overlayLastSolve = null;
+
+  function getCachedGrid(lastSolve, k, bodyKey, fieldKind) {
+    if (_overlayLastSolve !== lastSolve) {
+      _overlayCache = new Map();
+      _overlayLastSolve = lastSolve;
+    }
+    const cacheKey = k + ":" + bodyKey + ":" + fieldKind;
+    return _overlayCache.get(cacheKey) || null;
+  }
+
+  function setCachedGrid(lastSolve, k, bodyKey, fieldKind, grid) {
+    if (_overlayLastSolve !== lastSolve) {
+      _overlayCache = new Map();
+      _overlayLastSolve = lastSolve;
+    }
+    const cacheKey = k + ":" + bodyKey + ":" + fieldKind;
+    _overlayCache.set(cacheKey, grid);
+  }
+
   // ---------------------------------------------------------------------------
   //  paintCanvas — paint one cross-section canvas for slice index k.
   // ---------------------------------------------------------------------------
-  function paintCanvas(canvas, runtime, expanded, k) {
+  function paintCanvas(canvas, runtime, config, expanded, k) {
     const { W, H } = fitCanvas(canvas);
     if (W <= 0 || H <= 0) return;
     const ctx = canvas.getContext("2d");
 
-    // Background.
     ctx.save();
     ctx.fillStyle = "#0d1013";
     ctx.clearRect(0, 0, W, H);
@@ -86,7 +122,6 @@
 
     const viz = UM.fieldViz || (UM.fieldViz = defaultFieldViz());
 
-    // Static mesh. Before the first solve this is the stable ref.
     let bodies = null;
     try {
       bodies = runtime.stack.sliceMesh(k);
@@ -104,166 +139,208 @@
       return;
     }
 
-    const rotor = bodies.rotor;
+    const rotor  = bodies.rotor;
     const stator = bodies.stator;
 
-    // Per-frame field bundle — may be null before the first solve.
     const solved = runtime.lastSolve;
-    const field = (solved && solved.perSliceField && solved.perSliceField[k])
+    const field  = (solved && solved.perSliceField && solved.perSliceField[k])
       ? solved.perSliceField[k] : null;
 
-    // Rotor body-local rotation: gap.phi when solved, else live theta.
     const phi = field ? field.gap.phi : (runtime.state ? runtime.state.theta : 0);
 
-    // Fit transform: centre the union of both bodies, scale to fill.
+    // Fit transform: centre the union of both bodies.
     const rMax = Math.max(maxNodeRadius(rotor), maxNodeRadius(stator), 1e-6);
     const pad = 10;
     const scale = Math.min((W - 2 * pad) / (2 * rMax), (H - 2 * pad) / (2 * rMax));
 
+    const CSP = window.LIB.CrossSectionSprite;
+    const MMV = window.LIB.MotorMeshView;
+
+    // Resolve features for this slice.
+    const section = expanded.slices[k].section;
+    const features = section.features;
+    const rings = config.rings || [];
+
+    const rotorIron  = features.filter(function (f) { return f.member === "rotor"  && f.kind === "iron";      });
+    const rotorMag   = features.filter(function (f) { return f.member === "rotor"  && f.kind === "magnet";    });
+    const rotorCond  = features.filter(function (f) { return f.member === "rotor"  && f.kind === "conductor"; });
+    const statorIron = features.filter(function (f) { return f.member === "stator" && f.kind === "iron";      });
+    const statorMag  = features.filter(function (f) { return f.member === "stator" && f.kind === "magnet";    });
+    const statorCond = features.filter(function (f) { return f.member === "stator" && f.kind === "conductor"; });
+
+    const rotorClass  = classifyConductors(rotorCond,  rings);
+    const statorClass = classifyConductors(statorCond, rings);
+
+    const currents = (runtime.state && runtime.state.i) ? runtime.state.i : null;
+
     ctx.save();
-    // World→px: centre origin, +y up (canvas y is down → negative scale on y).
     ctx.translate(W / 2, H / 2);
     ctx.scale(scale, -scale);
 
-    const rotorDraw = rotatedMesh(rotor, phi);
-    const MMV = window.LIB.MotorMeshView;
+    const Nr_grid     = 12;
+    const Ntheta_grid = 64;
 
-    // Compose overlays in the fixed order (each gated on UM.fieldViz):
-    //   material → saturation → modulusB → magnetization → currentDensity →
-    //   fluxLines (+ R5 analytic gap) → gapLoop.
-    drawBody(MMV, ctx, rotorDraw, field ? field.rotor : null, viz, runtime, "rotor");
-    drawBody(MMV, ctx, stator, field ? field.stator : null, viz, runtime, "stator");
-
-    // R5 analytic in-gap A(r,θ) reconstruction — additional iso-contours
-    // bridging rotor and stator flux lines, drawn when fluxLines is on and a
-    // field + the GapEval helper are present.
-    if (viz.fluxLines && field && window.LIB.GapEval) {
-      drawAnalyticGap(ctx, field, rotor, stator);
-    }
-
-    // gapLoop mesh-structural overlay.
-    if (viz.gapLoop) {
-      MMV.drawGapLoop(ctx, rotorDraw, { lineWidth: 1 / scale });
-      MMV.drawGapLoop(ctx, stator, { lineWidth: 1 / scale });
-    }
-
-    ctx.restore();
-  }
-
-  // Draw a single body's overlay stack.
-  function drawBody(MMV, ctx, mesh, bodyField, viz, runtime, member) {
-    const lw = 0.4;
-    // Material is the base layer (always drawn so the geometry is visible).
-    MMV.drawMaterial(ctx, mesh, { alpha: 1, lineWidth: lw, stroke: true });
-
-    if (!bodyField) {
-      // Static layer only when no field: glyphs that don't need a solve.
-      if (viz.magnetization) MMV.drawMagnetization(ctx, mesh, {});
-      if (viz.currentDensity && runtime.state) {
-        MMV.drawCurrentDensity(ctx, mesh, runtime.state.i, {});
-      }
-      return;
-    }
-
-    if (viz.saturation) MMV.drawSaturation(ctx, mesh, bodyField.Belem, {});
-    if (viz.modulusB)   MMV.drawModulusB(ctx, mesh, bodyField.Belem, { range: "auto" });
-    if (viz.magnetization) MMV.drawMagnetization(ctx, mesh, {});
-    if (viz.currentDensity && runtime.state) {
-      MMV.drawCurrentDensity(ctx, mesh, runtime.state.i, {});
-    }
-    if (viz.fluxLines) MMV.drawFluxLines(ctx, mesh, bodyField.Anode, { levels: 12 });
-  }
-
-  // R5 analytic in-gap field: sample LIB.GapEval over the annulus and march
-  // iso-contours of A across the sampling grid, drawn into the current
-  // (world-scaled) transform.
-  function drawAnalyticGap(ctx, field, rotor, stator) {
-    const GapEval = window.LIB.GapEval;
-    const r_mr = rotor.gapR;
-    const r_ms = stator.gapR;
-    if (!(r_ms > r_mr)) return;
-    const grid = GapEval.evalAOnGrid(field.gap, r_mr, r_ms, { Nr: 8, Ntheta: 96 });
-    const { rs, thetas, Az } = grid;
-    const Nr = rs.length, Nt = thetas.length;
-
-    // Iso-levels over Az min..max.
-    let aMin = Infinity, aMax = -Infinity;
-    for (let i = 0; i < Az.length; i++) {
-      if (Az[i] < aMin) aMin = Az[i];
-      if (Az[i] > aMax) aMax = Az[i];
-    }
-    if (!(aMax > aMin)) return;
-    const nLevels = 12;
-
+    // ---- Rotor sprite (inside rotate(phi) frame) ----------------------------
     ctx.save();
-    ctx.strokeStyle = "rgba(120,200,255,0.6)";
-    ctx.lineWidth = 0;
-    if (ctx.getTransform) {
-      const t = ctx.getTransform();
-      const sc = Math.hypot(t.a, t.b) || 1;
-      ctx.lineWidth = 1 / sc;
+    ctx.rotate(phi);
+
+    if (CSP) {
+      CSP.drawIron(ctx, rotorIron, { gapEdge: "outer" });
+      CSP.drawMagnet(ctx, rotorMag, {});
+      if (rotorClass.distributed.length > 0) {
+        CSP.drawWinding(ctx, rotorClass.distributed, "distributed", {
+          currents: currents,
+          showCurrentGlyph: viz.currentDensity,
+        });
+      }
+      if (rotorClass.concentrated.length > 0) {
+        CSP.drawWinding(ctx, rotorClass.concentrated, "concentrated", {
+          currents: currents,
+          showCurrentGlyph: viz.currentDensity,
+        });
+      }
+      CSP.drawShaftAndGap(ctx, {
+        shaftR:     rotor.shaftR    != null ? rotor.shaftR    : 0,
+        gapInnerR:  rotor.gapR      != null ? rotor.gapR      : 0,
+        gapOuterR:  stator.gapR     != null ? stator.gapR     : 0,
+      }, {});
     }
 
-    function xy(ri, ti) {
-      const r = rs[ri], th = thetas[ti];
-      return [r * Math.cos(th), r * Math.sin(th)];
+    // Rotor field overlays (inside rotate(phi) frame).
+    if (field && MMV) {
+      const rf = field.rotor;
+      if (viz.saturation) {
+        MMV.drawSaturation(ctx, rf.mesh, rf.Belem, {});
+      }
+      if (viz.modulusB) {
+        let grid = getCachedGrid(solved, k, "rotor", "modulusB");
+        if (!grid) {
+          const nodal = MMV.elemToNodal(rf.mesh, rf.Belem.mag);
+          grid = MMV.resampleField(rf.mesh, nodal, { Nr: Nr_grid, Ntheta: Ntheta_grid });
+          setCachedGrid(solved, k, "rotor", "modulusB", grid);
+        }
+        MMV.drawModulusB(ctx, grid, { range: "auto" });
+      }
+      if (viz.fluxLines) {
+        let grid = getCachedGrid(solved, k, "rotor", "fluxLines");
+        if (!grid) {
+          grid = MMV.resampleField(rf.mesh, rf.Anode, { Nr: Nr_grid, Ntheta: Ntheta_grid });
+          setCachedGrid(solved, k, "rotor", "fluxLines", grid);
+        }
+        MMV.drawFluxLines(ctx, grid, { levels: 12 });
+      }
+      if (viz.magnetization && CSP) {
+        CSP.drawMagnetArrows(ctx, rotorMag, {});
+      }
+    } else if (!field && viz.magnetization && CSP) {
+      CSP.drawMagnetArrows(ctx, rotorMag, {});
     }
-    function val(ri, ti) { return Az[ri * Nt + ti]; }
 
-    for (let l = 1; l <= nLevels; l++) {
-      const level = aMin + (aMax - aMin) * (l / (nLevels + 1));
-      for (let ri = 0; ri + 1 < Nr; ri++) {
-        for (let ti = 0; ti < Nt; ti++) {
-          const tiN = (ti + 1) % Nt;
-          // Two triangles of the polar cell.
-          marchTri(ctx, level, xy(ri, ti), val(ri, ti),
-            xy(ri + 1, ti), val(ri + 1, ti),
-            xy(ri + 1, tiN), val(ri + 1, tiN));
-          marchTri(ctx, level, xy(ri, ti), val(ri, ti),
-            xy(ri + 1, tiN), val(ri + 1, tiN),
-            xy(ri, tiN), val(ri, tiN));
+    if (viz.gapLoop && MMV) {
+      const gapR_scale = (typeof ctx.getTransform === "function")
+        ? 1 / (Math.hypot(ctx.getTransform().a, ctx.getTransform().b) || 1)
+        : 1;
+      MMV.drawGapLoop(ctx, rotor, { lineWidth: gapR_scale });
+    }
+
+    ctx.restore(); // end rotate(phi)
+
+    // ---- Stator sprite (lab frame, no rotation) ----------------------------
+    if (CSP) {
+      CSP.drawIron(ctx, statorIron, { gapEdge: "inner" });
+      CSP.drawMagnet(ctx, statorMag, {});
+      if (statorClass.distributed.length > 0) {
+        CSP.drawWinding(ctx, statorClass.distributed, "distributed", {
+          currents: currents,
+          showCurrentGlyph: viz.currentDensity,
+        });
+      }
+      if (statorClass.concentrated.length > 0) {
+        CSP.drawWinding(ctx, statorClass.concentrated, "concentrated", {
+          currents: currents,
+          showCurrentGlyph: viz.currentDensity,
+        });
+      }
+    }
+
+    // Stator field overlays.
+    if (field && MMV) {
+      const sf = field.stator;
+      if (viz.saturation) {
+        MMV.drawSaturation(ctx, sf.mesh, sf.Belem, {});
+      }
+      if (viz.modulusB) {
+        let grid = getCachedGrid(solved, k, "stator", "modulusB");
+        if (!grid) {
+          const nodal = MMV.elemToNodal(sf.mesh, sf.Belem.mag);
+          grid = MMV.resampleField(sf.mesh, nodal, { Nr: Nr_grid, Ntheta: Ntheta_grid });
+          setCachedGrid(solved, k, "stator", "modulusB", grid);
+        }
+        MMV.drawModulusB(ctx, grid, { range: "auto" });
+      }
+      if (viz.fluxLines) {
+        let grid = getCachedGrid(solved, k, "stator", "fluxLines");
+        if (!grid) {
+          grid = MMV.resampleField(sf.mesh, sf.Anode, { Nr: Nr_grid, Ntheta: Ntheta_grid });
+          setCachedGrid(solved, k, "stator", "fluxLines", grid);
+        }
+        MMV.drawFluxLines(ctx, grid, { levels: 12 });
+      }
+      if (viz.magnetization && CSP) {
+        CSP.drawMagnetArrows(ctx, statorMag, {});
+      }
+      if (viz.gapLoop) {
+        const gapR_scale = (typeof ctx.getTransform === "function")
+          ? 1 / (Math.hypot(ctx.getTransform().a, ctx.getTransform().b) || 1)
+          : 1;
+        MMV.drawGapLoop(ctx, stator, { lineWidth: gapR_scale });
+      }
+    } else if (!field && viz.magnetization && CSP) {
+      CSP.drawMagnetArrows(ctx, statorMag, {});
+    }
+
+    // Cross-gap flux lines (lab frame): build Phase-2 GapEval descriptor.
+    if (viz.fluxLines && field && window.LIB.GapEval) {
+      const GapEval = window.LIB.GapEval;
+      const rotorBody  = field.rotor.mesh;
+      const statorBody = field.stator.mesh;
+      if (rotorBody.gapLoop && statorBody.gapLoop &&
+          rotorBody.gapR > 0 && statorBody.gapR > rotorBody.gapR) {
+        const descriptor = {
+          rotor:  ringFromGapLoop(rotorBody,  field.rotor.Anode),
+          stator: ringFromGapLoop(statorBody, field.stator.Anode),
+          phi:    field.gap.phi,
+        };
+        try {
+          const gapGrid = GapEval.evalAOnGrid(descriptor, { Nr: 8, Ntheta: 96 });
+          MMV.drawFluxLines(ctx, gapGrid, {
+            levels: 12,
+            color:  "rgba(120,200,255,0.6)",
+            lineWidth: 1 / scale,
+          });
+        } catch (e) {
+          // Gap eval failed (e.g. radii constraints not met); skip silently.
         }
       }
     }
-    ctx.restore();
-  }
 
-  function marchTri(ctx, level, pA, vA, pB, vB, pC, vC) {
-    const pts = [];
-    function edge(p0, v0, p1, v1) {
-      if ((v0 < level && v1 >= level) || (v1 < level && v0 >= level)) {
-        const t = (level - v0) / (v1 - v0);
-        pts.push(p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t);
-      }
-    }
-    edge(pA, vA, pB, vB);
-    edge(pB, vB, pC, vC);
-    edge(pC, vC, pA, vA);
-    if (pts.length >= 4) {
-      ctx.beginPath();
-      ctx.moveTo(pts[0], pts[1]);
-      ctx.lineTo(pts[2], pts[3]);
-      ctx.stroke();
-    }
+    ctx.restore(); // end translate/scale
   }
 
   // ---------------------------------------------------------------------------
   //  paint(mountCtx, canvases, rctx) — the 2-D-render seam entry.
-  //
-  //  canvases = [canvas2DA, canvas2DB] (top → bottom). canvas A shows slice 0;
-  //  canvas B shows slice 1 when the stack has ≥ 2 slices, else slice 0 again.
-  //  Both canvases are repainted on every call.
   // ---------------------------------------------------------------------------
   function paint(mountCtx, canvases, rctx) {
-    const runtime = mountCtx.runtime;
+    const runtime  = mountCtx.runtime;
+    const config   = mountCtx.config || (rctx && rctx.config) || {};
     const expanded = (rctx && rctx.expanded) ? rctx.expanded
       : (runtime && runtime.stack ? runtime.stack.expanded : null);
     if (!runtime || !expanded) return;
 
     const nSlices = expanded.slices.length;
-    paintCanvas(canvases[0], runtime, expanded, 0);
+    paintCanvas(canvases[0], runtime, config, expanded, 0);
     const k1 = nSlices > 1 ? 1 : 0;
-    paintCanvas(canvases[1], runtime, expanded, k1);
+    paintCanvas(canvases[1], runtime, config, expanded, k1);
   }
 
   // ---------------------------------------------------------------------------
@@ -314,7 +391,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  //  register(UM) — installs the 2-D seam + the D3 field-view header control.
+  //  register(UM) — installs the 2-D seam + the field-view header control.
   // ---------------------------------------------------------------------------
   function register(UM_arg) {
     const target = UM_arg || UM;
@@ -327,9 +404,6 @@
     }
   }
 
-  // Auto-register only when the seams exist at load time (guarded). In a bare
-  // headless require with no mount.js loaded, registerHeaderControl is absent
-  // and register is NOT auto-called.
   if (UM.registerHeaderControl) register(UM);
 
   UM.CrossSectionRender = { paint, register };
