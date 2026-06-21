@@ -173,3 +173,26 @@ workflow-based skill starting at phase 1.
 - Phase 4 (live-editing UI): T4.1.1, T4.2.1 — all done.
 - Committed across batch-3 (`186d82c`) and batch-4. Suite fully green.
 - Remaining: tier 3 (phase 5 / batch-5) → tier 4 (phase 6 / batch-6, includes user-required task T6.1.2).
+
+## Task T5.1.1: render3d.js — extruded sprite cross-section, end-windings, per-slice in-gap field, multi-slice cups
+- **Status**: complete
+- **Agent**: implementer
+- **Files created**: tests/render/render3d.test.js
+- **Files modified**: lessons/unified_motor/render3d.js, lessons/unified_motor/mount.js
+- **Tests**: 13/13 passing
+
+## Task T5.1.1 (FIX round): render3d.js — banned-word hygiene fix
+- **Status**: complete
+- **Agent**: implementer (fix round)
+- **Files modified**: lessons/unified_motor/render3d.js
+- **Fix**: Removed `else if (runtime && runtime.stack)` block (lines 280-288) decorated by "fallback" comment — dead/transitional code per rules §Code Hygiene. Removed "fallback" comment from `maxOuterRadius` and changed its initial value from `0.06` to `0` (correct max-scan seed). No banned words remain in the file.
+- **Tests**: 13/13 passing (render3d suite); full suite 382/382 passing (0 regressions)
+
+## Batch-5 (tier 3: phase 5) — VERIFIED PASS ✅
+- **Groups**: 5.1.a (T5.1.1) PASS.
+- **Scope audit**: one `modified-out-of-scope` flag on `lessons/unified_motor/mount.js` — **benign, not reverted**. The phase-5 spec mandates this exact single-line "sanctioned overlap" (spec lines 112-114, 264-269, 386-389): the 3-D-seam `rctx` literal gains `canvas: viewport3D` so `render3d.paint` receives a drawing surface. The diff is exactly that one line (`1 insertion, 1 deletion`). The implementer simply omitted `mount.js` from the workflow's returned footprint map (it IS in the implementer's own progress log). PASS stands.
+- **Suite after batch**: 382/382 passing, 0 failing (13 new render3d tests).
+
+## TIER 3 COMPLETE (phase 5)
+- Phase 5 (3-D rig): T5.1.1 — done. Suite fully green.
+- Remaining: tier 4 (phase 6 / batch-6 = {6.1.a, 6.1.b}). T6.1.2 (group 6.1.b) is **user-required** — gated on a real browser-pass confirmation before that group can verify.

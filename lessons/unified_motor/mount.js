@@ -656,7 +656,7 @@
           fov:   Math.PI / 4,
         });
 
-        const rctx = { runtime: runtime, config: config, expanded: expanded, W: W3, H: H3 };
+        const rctx = { runtime: runtime, config: config, expanded: expanded, canvas: viewport3D, W: W3, H: H3 };
         const mountCtx = buildCtx();
 
         // render3d.js always registers the 3-D rig before the first frame (its
