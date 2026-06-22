@@ -3,7 +3,8 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "audit": "node scripts/agnosticism-audit.js"
   },
   "engines": {
     "node": ">=18"
