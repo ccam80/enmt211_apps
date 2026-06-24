@@ -246,12 +246,19 @@
       display: "none", whiteSpace: "nowrap",
     });
 
+    // Per-frame timing split: solve (runtime.step) vs render (3-D + 2-D + plots).
+    // Pause stops the solve but keeps rendering, so pausing isolates render cost.
+    const perfBadge = el("span", "um-perf-badge", {
+      fontSize: "11px", fontFamily: "ui-monospace, monospace", color: "#8a93a3",
+      padding: "2px 6px", whiteSpace: "nowrap", marginLeft: "auto",
+    });
+
     // Header controls slot from HEADER_CONTROLS
     const headerCtrlSlot = el("div", "um-header-ctrl-slot", {
       display: "flex", alignItems: "center", gap: "6px",
     });
 
-    header.append(titleSpan, btnReset, btnPause, warnBadge, headerCtrlSlot);
+    header.append(titleSpan, btnReset, btnPause, warnBadge, perfBadge, headerCtrlSlot);
 
     // --- 3-zone upper region ------------------------------------------------
     const upperRegion = el("div", "um-upper", {
@@ -279,18 +286,16 @@
       gap: "4px",
       minWidth: "0",
     });
-    const canvas2DA = el("canvas", "um-cross-section-a", {
-      flex: "1 1 0",
-      width: "100%",
-      background: "var(--panel,#1b1f25)",
-      borderRadius: "4px",
-    });
-    const canvas2DB = el("canvas", "um-cross-section-b", {
-      flex: "1 1 0",
-      width: "100%",
-      background: "var(--panel,#1b1f25)",
-      borderRadius: "4px",
-    });
+    // display:block + minWidth/minHeight:0 so fitCanvas's bitmap size cannot
+    // feed back into the flex item's min-content size (these stack in a column,
+    // so height is the main axis — without minHeight:0 the canvas grows tall
+    // without bound and the cross-section is scaled into a giant clipped canvas).
+    const canvas2DStyle = function () {
+      return { flex: "1 1 0", display: "block", width: "100%", minWidth: "0", minHeight: "0",
+               background: "var(--panel,#1b1f25)", borderRadius: "4px" };
+    };
+    const canvas2DA = el("canvas", "um-cross-section-a", canvas2DStyle());
+    const canvas2DB = el("canvas", "um-cross-section-b", canvas2DStyle());
     crossSectionCol.append(canvas2DA, canvas2DB);
 
     // Right shelf (sliders + registered shelf panels)
@@ -317,10 +322,17 @@
       overflow: "hidden",
     });
 
-    // Plot canvases
-    const plotTorque  = el("canvas", "um-plot-torque",  { flex: "1 1 0", background: "var(--panel,#1b1f25)", borderRadius: "4px" });
-    const plotOmega   = el("canvas", "um-plot-omega",   { flex: "1 1 0", background: "var(--panel,#1b1f25)", borderRadius: "4px" });
-    const plotCurrent = el("canvas", "um-plot-current", { flex: "1 1 0", background: "var(--panel,#1b1f25)", borderRadius: "4px" });
+    // Plot canvases. display:block + minWidth/minHeight:0 let each flex item
+    // shrink below the canvas's intrinsic (bitmap-attribute) size — without it
+    // fitCanvas's `canvas.width = clientWidth*dpr` feeds back into the item's
+    // min-content width and the plots grow without bound every frame.
+    const plotStyle = function () {
+      return { flex: "1 1 0", display: "block", minWidth: "0", minHeight: "0",
+               background: "var(--panel,#1b1f25)", borderRadius: "4px" };
+    };
+    const plotTorque  = el("canvas", "um-plot-torque",  plotStyle());
+    const plotOmega   = el("canvas", "um-plot-omega",   plotStyle());
+    const plotCurrent = el("canvas", "um-plot-current", plotStyle());
 
     // Readout column
     const readoutCol = el("div", "um-readout-col", {
@@ -383,6 +395,12 @@
     // ran the config's own amp/damping and the UI was a lie (and the config's
     // tiny damping left the rotor with no sane steady state).
     for (const d of sliderDefs) applyDrive(d.key, d.value);
+
+    // Wall-time ceiling per render frame: runtime.step bails after this many ms
+    // of solve time so a heavy commutation transient never stalls rendering.
+    // Declared here (ahead of the stepping loop that enforces it) because the
+    // Playback slider tip below references it.
+    const FRAME_BUDGET_MS = 30;
 
     // Playback control — sim-time advanced per render frame ("ordered speed").
     // Independent of the FRAME_BUDGET_MS wall cap: this sets the target; the cap
@@ -468,7 +486,7 @@
     // so a heavy commutation transient (where one solve can exceed the budget)
     // never stalls rendering. When the cap lands the frame short of orderedStepDt
     // the sim is playing slower than ordered; slowMo drives the header warning.
-    const FRAME_BUDGET_MS = 30;
+    // (FRAME_BUDGET_MS is declared above, before the Playback slider tip uses it.)
     let orderedStepDt = 1 / 240;   // sim-seconds per frame
     let slowMo   = false;
     let slowFrac = 1;
@@ -615,6 +633,12 @@
       ctx2.fillText(label || "no 2-D renderer", W / 2, H / 2);
     }
 
+    // Smoothed per-frame timing (exponential moving average), split into the
+    // solve phase and the render phase so the header shows where the time goes.
+    let perfSolveMs = 0, perfRenderMs = 0;
+    const PERF_EMA = 0.15;
+    const nowMs = function () { return (typeof performance !== "undefined") ? performance.now() : 0; };
+
     function frame(now) {
       rafId = requestAnimationFrame(frame);
 
@@ -628,9 +652,12 @@
       // is exact on every sub-step; when a transient is too heavy to cover
       // orderedStepDt inside the budget the frame lands short and the sim plays in
       // slow-motion (flagged in the header) rather than dropping the frame.
+      let solveMs = 0;
       if (!paused) {
         const before = runtime.state.t;
+        const tSolve = nowMs();
         runtime.step(orderedStepDt, FRAME_BUDGET_MS);
+        solveMs = nowMs() - tSolve;
         const advanced = runtime.state.t - before;
         slowMo   = advanced < orderedStepDt - 1e-12;
         slowFrac = orderedStepDt > 0 ? advanced / orderedStepDt : 1;
@@ -640,6 +667,9 @@
         const i0  = st.i.length > 0 ? st.i[0] : 0;
         history.push(st.t, tau, st.omega, i0);
       }
+
+      // ---- render phase (timed) ----
+      const tRender = nowMs();
 
       // Render 3D viewport
       const { W: W3, H: H3 } = fitCanvas(viewport3D);
@@ -681,6 +711,12 @@
       drawPlot(plotTorque,  history.torque,  "τ (Nm)",    "#ffd54a", v => v.toFixed(4));
       drawPlot(plotOmega,   history.omega,   "ω (rad/s)", "#4ea1ff", v => v.toFixed(2));
       drawPlot(plotCurrent, history.current, "i_0 (A)",   "#66bb6a", v => v.toFixed(3));
+
+      const renderMs = nowMs() - tRender;
+      perfSolveMs  += (solveMs  - perfSolveMs)  * PERF_EMA;
+      perfRenderMs += (renderMs - perfRenderMs) * PERF_EMA;
+      perfBadge.textContent = "solve " + perfSolveMs.toFixed(1) + " · render " + perfRenderMs.toFixed(1) + " ms";
+      UM._perf = { solveMs: perfSolveMs, renderMs: perfRenderMs };
 
       // Readouts
       const st = runtime.state;
