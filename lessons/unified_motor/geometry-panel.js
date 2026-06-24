@@ -49,6 +49,34 @@
     return (lo + hi) / 2;
   }
 
+  // Expand the mesh-domain grid so it bounds all ring geometry. The grid's
+  // [rInner, rOuter] is the radial extent the mesh can represent, so a radius
+  // edit that grows past it must grow the grid rather than be rejected. Radial
+  // cell size (dr) is held roughly constant by rescaling Nr. Expand-only: a
+  // later shrink leaves a slightly larger (still valid) domain.
+  function fitGridToRings(config) {
+    const g = config.grid;
+    if (!g || !Array.isArray(config.rings) || config.rings.length === 0) return;
+    const dr = (g.Nr > 0) ? (g.rOuter - g.rInner) / g.Nr : 0;
+    let lo = Infinity, hi = -Infinity;
+    for (const ring of config.rings) {
+      const e = ringExtents(ring);
+      if (e.lo < lo) lo = e.lo;
+      if (e.hi > hi) hi = e.hi;
+      // The validator bounds the ring's own rRange against the grid, which can
+      // exceed the sub-segment (slot/iron) extents ringExtents reports, so
+      // include rRange directly.
+      if (Array.isArray(ring.rRange) && ring.rRange.length >= 2) {
+        if (ring.rRange[0] < lo) lo = ring.rRange[0];
+        if (ring.rRange[1] > hi) hi = ring.rRange[1];
+      }
+    }
+    if (!isFinite(lo) || !isFinite(hi)) return;
+    g.rInner = Math.min(g.rInner, lo);
+    g.rOuter = Math.max(g.rOuter, hi);
+    if (dr > 0) g.Nr = Math.max(2, Math.round((g.rOuter - g.rInner) / dr));
+  }
+
   // ---------------------------------------------------------------------------
   //  applyGapLength(config, g) — moves both gap-facing surfaces symmetrically.
   //  Returns the achieved gap.
@@ -240,8 +268,37 @@
         listeners.push({ el: el, evt: evt, fn: fn });
       }
 
+      // A status line (kept outside the rebuilt content) and the editable
+      // content container. commitEdit reverts an edit that fails validation, so
+      // the panel must report the reason and resync inputs to the reverted
+      // values — otherwise a rejected edit silently does nothing.
+      const statusEl = document.createElement("div");
+      statusEl.className = "gp-status";
+      statusEl.style.cssText = "color:#ff8a65;font-size:0.8em;min-height:1em;margin:0 0 4px;";
+      const contentEl = document.createElement("div");
+      host.appendChild(statusEl);
+      host.appendChild(contentEl);
+
+      function setError(msg) {
+        statusEl.textContent = msg || "";
+      }
+
+      function applyEdit(mutateFn) {
+        const res = commitEdit(ctx.config, function (c) {
+          mutateFn(c);
+          fitGridToRings(c);
+        });
+        if (res.ok) {
+          setError("");
+          ctx.requestRebuild();
+        } else {
+          setError("Rejected: " + ((res.errors && res.errors[0]) || "invalid geometry"));
+          rebuild();
+        }
+      }
+
       function rebuild() {
-        host.innerHTML = "";
+        contentEl.innerHTML = "";
         const config = ctx.config;
         const rings = config.rings || [];
 
@@ -257,56 +314,46 @@
 
           // rRange[0]
           buildNumberInput(section, "rRange[0]", ring.rRange[0], function (v) {
-            commitEdit(config, function (c) { c.rings[ri].rRange[0] = v; });
-            ctx.requestRebuild();
+            applyEdit(function (c) { c.rings[ri].rRange[0] = v; });
           });
           // rRange[1]
           buildNumberInput(section, "rRange[1]", ring.rRange[1], function (v) {
-            commitEdit(config, function (c) { c.rings[ri].rRange[1] = v; });
-            ctx.requestRebuild();
+            applyEdit(function (c) { c.rings[ri].rRange[1] = v; });
           });
 
           if (ring.element === "I" && ring.teeth != null) {
             buildIntInput(section, "teeth", ring.teeth, function (v) {
-              commitEdit(config, function (c) { c.rings[ri].teeth = v; });
-              ctx.requestRebuild();
+              applyEdit(function (c) { c.rings[ri].teeth = v; });
             });
           }
           if (ring.element === "M" && ring.magnets != null) {
             buildIntInput(section, "magnets", ring.magnets, function (v) {
-              commitEdit(config, function (c) { c.rings[ri].magnets = v; });
-              ctx.requestRebuild();
+              applyEdit(function (c) { c.rings[ri].magnets = v; });
             });
           }
           if ((ring.element === "W" || ring.element === "C") &&
               ring.winding && ring.winding.standard) {
             buildIntInput(section, "Q (slots)", ring.winding.standard.Q, function (v) {
-              commitEdit(config, function (c) {
-                c.rings[ri].winding.standard.Q = v;
-              });
-              ctx.requestRebuild();
+              applyEdit(function (c) { c.rings[ri].winding.standard.Q = v; });
             });
           }
           if (ring.muR != null) {
             buildNumberInput(section, "muR", ring.muR, function (v) {
-              commitEdit(config, function (c) { c.rings[ri].muR = v; });
-              ctx.requestRebuild();
+              applyEdit(function (c) { c.rings[ri].muR = v; });
             });
           }
           if (ring.element === "M" && ring.Mr != null) {
             buildNumberInput(section, "Mr", ring.Mr, function (v) {
-              commitEdit(config, function (c) { c.rings[ri].Mr = v; });
-              ctx.requestRebuild();
+              applyEdit(function (c) { c.rings[ri].Mr = v; });
             });
           }
           if (ring.Bknee != null) {
             buildNumberInput(section, "Bknee", ring.Bknee, function (v) {
-              commitEdit(config, function (c) { c.rings[ri].Bknee = v; });
-              ctx.requestRebuild();
+              applyEdit(function (c) { c.rings[ri].Bknee = v; });
             });
           }
 
-          host.appendChild(section);
+          contentEl.appendChild(section);
         });
 
         // Global gap length
@@ -341,7 +388,7 @@
         });
         gapLabel.appendChild(gapInput);
         gapSection.appendChild(gapLabel);
-        host.appendChild(gapSection);
+        contentEl.appendChild(gapSection);
 
         // Slices
         const sliceSection = document.createElement("div");
@@ -375,7 +422,7 @@
           }
         });
         sliceSection.appendChild(rmBtn);
-        host.appendChild(sliceSection);
+        contentEl.appendChild(sliceSection);
 
         // Axial-flux netlist (visible when slices > 1)
         if (nSlices > 1 && stack.axial) {
@@ -402,10 +449,9 @@
               if (b[field] != null) {
                 buildNumberInput(bDiv, field, b[field], function (fieldName) {
                   return function (v) {
-                    commitEdit(config, function (c) {
+                    applyEdit(function (c) {
                       c.stack.axial.branches[bname][fieldName] = v;
                     });
-                    ctx.requestRebuild();
                   };
                 }(field));
               }
@@ -423,25 +469,23 @@
 
             if (loop.Raxial != null) {
               buildNumberInput(lDiv, "Raxial", loop.Raxial, function (v) {
-                commitEdit(config, function (c) {
+                applyEdit(function (c) {
                   c.stack.axial.loops[li].Raxial = v;
                 });
-                ctx.requestRebuild();
               });
             }
             if (loop.Fpm != null) {
               buildNumberInput(lDiv, "Fpm", loop.Fpm, function (v) {
-                commitEdit(config, function (c) {
+                applyEdit(function (c) {
                   c.stack.axial.loops[li].Fpm = v;
                 });
-                ctx.requestRebuild();
               });
             }
 
             axSection.appendChild(lDiv);
           });
 
-          host.appendChild(axSection);
+          contentEl.appendChild(axSection);
         }
       }
 

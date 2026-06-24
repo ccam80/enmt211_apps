@@ -516,11 +516,16 @@
             const p01 = L3.project(_pt01);
 
             ctx.save();
+            // Match the cap items' transform convention: set the DPR base and
+            // draw in CSS px. (The wall items used to multiply by dpr manually
+            // while the base transform was already dpr — drawing at dpr² and
+            // pulling the cylinder off the cross-section at dpr != 1.)
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
             ctx.beginPath();
-            ctx.moveTo(p00.px * dpr, p00.py * dpr);
-            ctx.lineTo(p10.px * dpr, p10.py * dpr);
-            ctx.lineTo(p11.px * dpr, p11.py * dpr);
-            ctx.lineTo(p01.px * dpr, p01.py * dpr);
+            ctx.moveTo(p00.px, p00.py);
+            ctx.lineTo(p10.px, p10.py);
+            ctx.lineTo(p11.px, p11.py);
+            ctx.lineTo(p01.px, p01.py);
             ctx.closePath();
             ctx.fillStyle = "rgba(40,44,55,0.85)";
             ctx.fill();
@@ -551,8 +556,9 @@
               paint: function () {
                 const color = WIRE_PALETTE[_arc.circuit % WIRE_PALETTE.length];
                 ctx.save();
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
                 ctx.strokeStyle = color;
-                ctx.lineWidth   = 2 * dpr;
+                ctx.lineWidth   = 2;
                 ctx.beginPath();
                 const pts = _arc.points;
                 const ns  = pts.length / 3;
@@ -560,9 +566,9 @@
                   const wp = { x: pts[pi * 3], y: pts[pi * 3 + 1], z: pts[pi * 3 + 2] };
                   const pp = L3.project(wp);
                   if (pi === 0) {
-                    ctx.moveTo(pp.px * dpr, pp.py * dpr);
+                    ctx.moveTo(pp.px, pp.py);
                   } else {
-                    ctx.lineTo(pp.px * dpr, pp.py * dpr);
+                    ctx.lineTo(pp.px, pp.py);
                   }
                 }
                 ctx.stroke();
@@ -587,8 +593,9 @@
               paint: function () {
                 const color = WIRE_PALETTE[_arc.circuit % WIRE_PALETTE.length];
                 ctx.save();
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
                 ctx.strokeStyle = color;
-                ctx.lineWidth   = 2 * dpr;
+                ctx.lineWidth   = 2;
                 ctx.beginPath();
                 const pts = _arc.points;
                 const ns  = pts.length / 3;
@@ -596,9 +603,9 @@
                   const wp = { x: pts[pi * 3], y: pts[pi * 3 + 1], z: pts[pi * 3 + 2] };
                   const pp = L3.project(wp);
                   if (pi === 0) {
-                    ctx.moveTo(pp.px * dpr, pp.py * dpr);
+                    ctx.moveTo(pp.px, pp.py);
                   } else {
-                    ctx.lineTo(pp.px * dpr, pp.py * dpr);
+                    ctx.lineTo(pp.px, pp.py);
                   }
                 }
                 ctx.stroke();

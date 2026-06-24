@@ -684,6 +684,11 @@
           pitch: orbitPitch,
           dist:  ORBIT_DIST,
           fov:   Math.PI / 4,
+          // Orthographic: the cross-section caps are drawn through a single
+          // affine ctx transform, which only matches a linear projection. Under
+          // perspective at this camera distance the caps diverge from the
+          // per-vertex-projected walls (~20 px) and the rig looks non-coaxial.
+          ortho: true,
         });
 
         const rctx = { runtime: runtime, config: config, expanded: expanded, canvas: viewport3D, W: W3, H: H3 };
