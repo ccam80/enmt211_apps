@@ -19,10 +19,10 @@ const {
 // Ensure Layout3D is loaded (required by render3d.js for projection).
 try { require("../../lib/layout3d.js"); } catch (e) { /* may already be loaded */ }
 
-// Ensure CrossSectionSprite is loaded (Phase-3 lib).
+// Ensure CrossSectionSprite is loaded (cross-section-sprite primitives).
 try { require("../../lib/cross-section-sprite.js"); } catch (e) { /* may already be loaded */ }
 
-// Ensure GapEval is loaded (Phase-2 lib).
+// Ensure GapEval is loaded (gap-eval lib).
 try { require("../../lib/gap-eval.js"); } catch (e) { /* may not be present */ }
 
 // Load render3d.js (its require is guarded in _fixtures already; require again is idempotent).

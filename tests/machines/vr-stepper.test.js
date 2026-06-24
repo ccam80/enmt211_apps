@@ -15,7 +15,7 @@ test("config validates", { timeout: TIMEOUT }, function () {
   assert.deepEqual(result.errors, []);
 });
 
-test("expands to Phase-2 sections with matching circuit count", { timeout: TIMEOUT }, function () {
+test("expands to sections with matching circuit count", { timeout: TIMEOUT }, function () {
   const { expanded, config } = build("vr-stepper");
   assert.equal(expanded.nCircuits, config.circuits.length);
   for (const slice of expanded.slices) {

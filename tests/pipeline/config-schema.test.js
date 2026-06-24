@@ -23,7 +23,7 @@ const CS = UnifiedMotor.ConfigSchema;
 
 describe("config-schema", function () {
   // -------------------------------------------------------------------------
-  it("expand produces Phase-2 sections", function () {
+  it("expand produces sections", function () {
     const expanded = CS.expand(woundConfig());
     assert.ok(Array.isArray(expanded.slices), "slices must be an array");
     assert.ok(expanded.slices.length >= 1, "slices must be non-empty");

@@ -97,17 +97,11 @@ describe("agnosticism-audit", function () {
 
   it("a missing scan target is reported as a violation", function () {
     const nonexistent = "lib/__nonexistent_file_for_test__.js";
-    const absPath     = path.resolve(__dirname, "../../", nonexistent);
-
-    // Drive the name-scan logic manually using the exported functions,
-    // replicating the missing-file detection from run() without loading WASM.
-    const fs = require("node:fs");
-    let violation = null;
-    if (!fs.existsSync(absPath)) {
-      violation = { check: "missing", relPath: nonexistent, line: 0, detail: "file not found on disk" };
-    }
-    assert.ok(violation !== null, "expected a missing violation to be produced");
-    assert.strictEqual(violation.check, "missing");
+    const violations = audit.scanFileListForMissing([nonexistent]);
+    assert.ok(violations.length >= 1, "expected at least one missing violation");
+    const v = violations.find(function (x) { return x.relPath === nonexistent; });
+    assert.ok(v != null, "expected a violation with relPath === nonexistent");
+    assert.strictEqual(v.check, "missing");
   });
 
   it("scanForPlanVocab flags Phase/Wave/task tokens", function () {

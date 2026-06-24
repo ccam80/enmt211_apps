@@ -299,7 +299,7 @@
       CSP.drawMagnetArrows(ctx, statorMag, {});
     }
 
-    // Cross-gap flux lines (lab frame): build Phase-2 GapEval descriptor.
+    // Cross-gap flux lines (lab frame): build the GapEval descriptor.
     if (viz.fluxLines && field && window.LIB.GapEval) {
       const GapEval = window.LIB.GapEval;
       const rotorBody  = field.rotor.mesh;

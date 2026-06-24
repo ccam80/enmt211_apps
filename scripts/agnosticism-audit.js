@@ -318,6 +318,24 @@ function collectLegacyFiles() {
 }
 
 // ---------------------------------------------------------------------------
+//  scanFileListForMissing(relPaths) → violation[]
+//
+//  Takes an array of repo-relative paths and returns a violation for each
+//  path that does not exist on disk. Used by run() for both scan lists and
+//  exported for testing without running the full audit.
+// ---------------------------------------------------------------------------
+function scanFileListForMissing(relPaths) {
+  const violations = [];
+  for (const rel of relPaths) {
+    const abs = path.join(REPO_ROOT, rel);
+    if (!fs.existsSync(abs)) {
+      violations.push({ check: "missing", relPath: rel, line: 0, detail: "file not found on disk" });
+    }
+  }
+  return violations;
+}
+
+// ---------------------------------------------------------------------------
 //  run() → 0 | 1
 //
 //  Enumerates scan targets, runs all checks, prints violations to stderr,
@@ -329,10 +347,11 @@ function run() {
   // --- Name + single-slice scan ---
   const nameScanRel = NAME_SCAN_FILES.concat(collectLibFiles());
 
+  allViolations.push(...scanFileListForMissing(nameScanRel));
+
   for (const rel of nameScanRel) {
     const abs = path.join(REPO_ROOT, rel);
     if (!fs.existsSync(abs)) {
-      allViolations.push({ check: "missing", relPath: rel, line: 0, detail: "file not found on disk" });
       continue;
     }
     const src = fs.readFileSync(abs, "utf8");
@@ -343,10 +362,11 @@ function run() {
   // --- Legacy + plan-vocab scan ---
   const legacyFiles = collectLegacyFiles();
 
+  allViolations.push(...scanFileListForMissing(legacyFiles));
+
   for (const rel of legacyFiles) {
     const abs = path.join(REPO_ROOT, rel);
     if (!fs.existsSync(abs)) {
-      allViolations.push({ check: "missing", relPath: rel, line: 0, detail: "file not found on disk" });
       continue;
     }
     const src = fs.readFileSync(abs, "utf8");
@@ -373,6 +393,7 @@ module.exports = {
   scanForSingleSlice,
   scanForLegacyTerms,
   scanForPlanVocab,
+  scanFileListForMissing,
   run,
   MACHINE_NAMES,
   MACHINE_IDS,

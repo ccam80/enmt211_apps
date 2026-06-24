@@ -37,7 +37,7 @@ function syntheticConductor(turns, circuit, rRange, thetaRange) {
 }
 
 // ---------------------------------------------------------------------------
-//  Task T3.1.1: Sprite geometry tests
+//  Sprite geometry tests
 // ---------------------------------------------------------------------------
 
 describe("cross-section-sprite geometry", function () {
@@ -175,7 +175,7 @@ describe("cross-section-sprite geometry", function () {
 });
 
 // ---------------------------------------------------------------------------
-//  Task T3.1.2: Sprite winding tests
+//  Sprite winding tests
 // ---------------------------------------------------------------------------
 
 describe("cross-section-sprite windings", function () {

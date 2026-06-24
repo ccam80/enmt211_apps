@@ -20,7 +20,7 @@ test("config validates", function () {
   assert.strictEqual(result.errors.length, 0);
 });
 
-test("expands to Phase-2 sections with matching circuit count", function () {
+test("expands to sections with matching circuit count", function () {
   const { expanded } = build("pmsm");
   assert.strictEqual(expanded.nCircuits, byId["pmsm"].config.circuits.length);
   for (const slice of expanded.slices) {
