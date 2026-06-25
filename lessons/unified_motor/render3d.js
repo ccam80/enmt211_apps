@@ -281,8 +281,11 @@
   }
 
   // Extrude one annular sector [r0,r1] x [a0,a1] over [z0,z1] into outward-facing
-  // quads: outer + inner cylindrical bands (tessellated), the two radial flanks,
-  // and the two axial end caps. Full-circle sectors skip their flanks.
+  // quads: outer + inner cylindrical bands (tessellated) and the two radial
+  // flanks. Full-circle sectors skip their flanks. No axial end caps — the
+  // detailed cap sprite IS the end face; emitting flat end-cap discs here would
+  // compete with the single-depth sprite item and occlude it (and its flux
+  // overlay) on the camera-near side.
   function extrudeSector(faces, r0, r1, a0, a1, z0, z1, rgb, rotor, opts) {
     opts = opts || {};
     const cutFlanks = opts.cutFlanks || null;
@@ -302,10 +305,6 @@
         pushQuad(faces, P(r0, ab, z0), P(r0, aa, z0), P(r0, aa, z1), P(r0, ab, z1),
           -Math.cos(am), -Math.sin(am), 0, rgb, rotor);
       }
-      pushQuad(faces, P(r0, aa, z0), P(r1, aa, z0), P(r1, ab, z0), P(r0, ab, z0),
-        0, 0, -1, rgb, rotor);
-      pushQuad(faces, P(r0, ab, z1), P(r1, ab, z1), P(r1, aa, z1), P(r0, aa, z1),
-        0, 0, 1, rgb, rotor);
     }
 
     if (span < 2 * Math.PI - 1e-6) {
