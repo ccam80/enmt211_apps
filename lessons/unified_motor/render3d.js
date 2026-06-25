@@ -275,9 +275,10 @@
     cut:  [120, 120, 134],   // freshly-cut radial faces, lighter steel
   };
 
-  // Push one quad face (world, unrotated) with an outward normal and base rgb.
-  function pushQuad(faces, p0, p1, p2, p3, nx, ny, nz, rgb, rotor) {
-    faces.push({ v: [p0, p1, p2, p3], n: [nx, ny, nz], rgb: rgb, rotor: rotor });
+  // Push one quad face (world, unrotated) with an outward normal, base rgb, and
+  // opacity (a ∈ [0,1]).
+  function pushQuad(faces, p0, p1, p2, p3, nx, ny, nz, rgb, rotor, a) {
+    faces.push({ v: [p0, p1, p2, p3], n: [nx, ny, nz], rgb: rgb, rotor: rotor, a: a != null ? a : 1 });
   }
 
   // Extrude one annular sector [r0,r1] x [a0,a1] over [z0,z1] into outward-facing
@@ -289,30 +290,31 @@
   function extrudeSector(faces, r0, r1, a0, a1, z0, z1, rgb, rotor, opts) {
     opts = opts || {};
     const cutFlanks = opts.cutFlanks || null;
+    const a = opts.alpha != null ? opts.alpha : 1;
     const span = a1 - a0;
     const nSeg = Math.max(1, Math.ceil(span / ARC_SEG));
     const dA = span / nSeg;
 
-    function P(r, a, z) { return [r * Math.cos(a), r * Math.sin(a), z]; }
+    function P(r, ang, z) { return [r * Math.cos(ang), r * Math.sin(ang), z]; }
 
     for (let i = 0; i < nSeg; i++) {
       const aa = a0 + i * dA;
       const ab = aa + dA;
       const am = (aa + ab) / 2;
       pushQuad(faces, P(r1, aa, z0), P(r1, ab, z0), P(r1, ab, z1), P(r1, aa, z1),
-        Math.cos(am), Math.sin(am), 0, rgb, rotor);
+        Math.cos(am), Math.sin(am), 0, rgb, rotor, a);
       if (r0 > 1e-6) {
         pushQuad(faces, P(r0, ab, z0), P(r0, aa, z0), P(r0, aa, z1), P(r0, ab, z1),
-          -Math.cos(am), -Math.sin(am), 0, rgb, rotor);
+          -Math.cos(am), -Math.sin(am), 0, rgb, rotor, a);
       }
     }
 
     if (span < 2 * Math.PI - 1e-6) {
       const flankRgb = cutFlanks || rgb;
       pushQuad(faces, P(r0, a0, z0), P(r1, a0, z0), P(r1, a0, z1), P(r0, a0, z1),
-        Math.sin(a0), -Math.cos(a0), 0, flankRgb, rotor);
+        Math.sin(a0), -Math.cos(a0), 0, flankRgb, rotor, a);
       pushQuad(faces, P(r1, a1, z0), P(r0, a1, z0), P(r0, a1, z1), P(r1, a1, z1),
-        -Math.sin(a1), Math.cos(a1), 0, flankRgb, rotor);
+        -Math.sin(a1), Math.cos(a1), 0, flankRgb, rotor, a);
     }
   }
 
@@ -323,18 +325,19 @@
     const [r0, r1] = feat.rRange;
     const [t0, t1] = feat.thetaRange;
     const span = t1 - t0;
+    const a = feat.alpha != null ? feat.alpha : 1;
 
     if (span >= 2 * Math.PI - 1e-6) {
       if (cut) {
-        extrudeSector(faces, r0, r1, KEEP_A0, KEEP_A1, z0, z1, rgb, rotor, { cutFlanks: COLOR.cut });
+        extrudeSector(faces, r0, r1, KEEP_A0, KEEP_A1, z0, z1, rgb, rotor, { cutFlanks: COLOR.cut, alpha: a });
       } else {
-        extrudeSector(faces, r0, r1, 0, 2 * Math.PI, z0, z1, rgb, rotor, {});
+        extrudeSector(faces, r0, r1, 0, 2 * Math.PI, z0, z1, rgb, rotor, { alpha: a });
       }
       return;
     }
 
     if (cut && inWedge((t0 + t1) / 2)) return;
-    extrudeSector(faces, r0, r1, t0, t1, z0, z1, rgb, rotor, {});
+    extrudeSector(faces, r0, r1, t0, t1, z0, z1, rgb, rotor, { alpha: a });
   }
 
   // Replicate cross-section-sprite's distributed wire layout (positions + radius)
@@ -368,16 +371,17 @@
   function extrudeWires(faces, feat, z0, z1, rgb, rotor, cut) {
     const [t0, t1] = feat.thetaRange;
     if (cut && inWedge((t0 + t1) / 2)) return;
+    const alpha = feat.alpha != null ? feat.alpha : 1;
     const wires = distributedWireLayout(feat);
     const normals = [[0, -1], [1, 0], [0, 1], [-1, 0]];
     for (const w of wires) {
       const h = w.r, x = w.x, y = w.y;
       const c = [[x - h, y - h], [x + h, y - h], [x + h, y + h], [x - h, y + h]];
       for (let s = 0; s < 4; s++) {
-        const a = c[s], b = c[(s + 1) % 4];
+        const p = c[s], q = c[(s + 1) % 4];
         pushQuad(faces,
-          [a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], z1], [a[0], a[1], z1],
-          normals[s][0], normals[s][1], 0, rgb, rotor);
+          [p[0], p[1], z0], [q[0], q[1], z0], [q[0], q[1], z1], [p[0], p[1], z1],
+          normals[s][0], normals[s][1], 0, rgb, rotor, alpha);
       }
     }
   }
@@ -670,9 +674,9 @@
 
         const rgb = face.rgb;
         const sh = 0.40 + 0.60 * facing;
-        const fill = "rgb(" + Math.round(rgb[0] * sh) + "," +
-                              Math.round(rgb[1] * sh) + "," +
-                              Math.round(rgb[2] * sh) + ")";
+        const fill = "rgba(" + Math.round(rgb[0] * sh) + "," +
+                               Math.round(rgb[1] * sh) + "," +
+                               Math.round(rgb[2] * sh) + "," + face.a + ")";
 
         items.push({
           depth: depth,
