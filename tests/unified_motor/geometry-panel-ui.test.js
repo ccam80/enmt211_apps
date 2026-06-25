@@ -1,14 +1,17 @@
 "use strict";
 
 // =============================================================================
-//  Geometry panel — DOM-driving tests for the component-tree editing controls.
+//  Geometry panel — DOM-driving tests for the layer/thickness editor.
 //
-//  The pure helpers live in geometry-panel.test.js. This file boots the panel
-//  build() against the headless DOM harness and drives the actual buttons, to
-//  guard two regressions:
-//    1. structural edits (add/remove component or ring) must repaint the panel;
-//    2. winding/cage components must be addable, inserting their circuits so the
-//       config stays valid.
+//  The body→ring→component nesting is collapsed to one flat layer stack per
+//  body. Layers are sized by thickness off a gap-facing radius, so overlap (the
+//  winding-inside-a-magnet failure) is structurally impossible. These tests
+//  drive the real controls and guard:
+//    - adding any layer (incl. windings, which insert their circuits) never
+//      produces overlapping radial bands;
+//    - reorder / material-change / gap-radius / remove keep the config valid and
+//      circuit-consistent;
+//    - the "ring" concept is gone from the UI.
 // =============================================================================
 
 const { test } = require("node:test");
@@ -23,8 +26,24 @@ function walk(node, out) {
 function buttons(host, text) {
   return walk(host, []).filter(function (e) { return e.tagName === "BUTTON" && e.textContent === text; });
 }
-function cardCount(host) {
-  return walk(host, []).filter(function (e) { return e._className === "gp-comp-kind"; }).length;
+function layerRows(host) {
+  return walk(host, []).filter(function (e) { return e._className === "gp-layer"; });
+}
+function bodyComps(config, side) {
+  const ring = config.rings.find(function (r) { return r.member === side; });
+  const comps = ring.components.slice();
+  comps.sort(function (a, b) { return side === "inner" ? b.rRange[1] - a.rRange[1] : a.rRange[0] - b.rRange[0]; });
+  return comps;
+}
+function assertNoOverlap(config, side) {
+  const comps = bodyComps(config, side);
+  for (let i = 0; i < comps.length; i++) {
+    for (let j = i + 1; j < comps.length; j++) {
+      const a = comps[i].rRange, b = comps[j].rRange;
+      const overlap = Math.max(a[0], b[0]) < Math.min(a[1], b[1]) - 1e-12;
+      assert.ok(!overlap, `${side} layers ${i}/${j} overlap: [${a}] vs [${b}]`);
+    }
+  }
 }
 
 function mountPanel(machineId) {
@@ -44,87 +63,117 @@ function mountPanel(machineId) {
   return { shim, CS, ctx, host };
 }
 
-test("adding a winding component inserts its phase circuits and stays valid", function () {
+test("the ring concept is gone — only layer controls exist", function () {
+  const { shim, host } = mountPanel("pmsm");
+  try {
+    assert.strictEqual(buttons(host, "+ ring").length, 0, "no + ring control");
+    assert.strictEqual(buttons(host, "✕ ring").length, 0, "no ✕ ring control");
+    assert.strictEqual(buttons(host, "+ component").length, 0, "no + component control");
+    assert.ok(buttons(host, "+ layer").length >= 2, "each body offers + layer");
+  } finally { shim.uninstall(); }
+});
+
+test("adding a winding layer inserts its circuits and produces no overlap", function () {
   const { shim, CS, ctx, host } = mountPanel("pmsm");
   try {
     const circuits0 = ctx.config.circuits.length;
-    const cards0 = cardCount(host);
-
-    // Drive the first ring's "+ component" button with the winding kind selected.
-    const addBtns = buttons(host, "+ component");
-    assert.ok(addBtns.length > 0, "each ring must offer an add-component control");
-    const sel = addBtns[0].parentNode.children[0];
-    // The add menu must offer winding kinds, not just iron/magnet.
+    const addBtns = buttons(host, "+ layer");
+    const sel = addBtns[0].parentNode.children[0];   // inner body's add menu
     const kinds = (sel.children || []).map(function (o) { return o.value; });
-    assert.ok(kinds.includes("distributed-winding"), "add menu must include distributed-winding");
-    assert.ok(kinds.includes("cage"), "add menu must include cage");
+    assert.ok(kinds.includes("distributed-winding") && kinds.includes("cage"),
+      "add menu must offer winding + cage");
 
     sel.value = "distributed-winding";
     addBtns[0].dispatch("click");
 
     const v = CS.validate(ctx.config);
-    assert.ok(v.ok, "config must stay valid after adding a winding: " + (v.errors || []).join("; "));
-    assert.strictEqual(ctx.config.circuits.length, circuits0 + 3,
-      "a 3-phase winding must append exactly 3 circuits");
-    // expand's resolved circuit count must match the circuits array.
-    const exp = CS.expand(ctx.config);
-    assert.strictEqual(exp.nCircuits, ctx.config.circuits.length, "nCircuits must match circuits.length");
-    // The panel must have repainted (more cards rendered than before).
-    assert.ok(cardCount(host) > cards0, "panel must repaint after a structural edit");
-  } finally {
-    shim.uninstall();
-  }
+    assert.ok(v.ok, "valid after adding a winding: " + (v.errors || []).join("; "));
+    assert.strictEqual(ctx.config.circuits.length, circuits0 + 3, "3-phase winding adds 3 circuits");
+    assert.strictEqual(CS.expand(ctx.config).nCircuits, ctx.config.circuits.length, "nCircuits matches");
+    assertNoOverlap(ctx.config, "inner");
+    assertNoOverlap(ctx.config, "outer");
+  } finally { shim.uninstall(); }
 });
 
-function cardByKindLabel(host, label) {
-  const all = walk(host, []);
-  return all.find(function (card) {
-    if (card._className !== "gp-comp") return false;
-    return walk(card, []).some(function (e) { return e._className === "gp-comp-kind" && e.textContent === label; });
-  });
-}
-
-test("removing a winding component splices exactly its circuits", function () {
+test("setting a gap radius moves the whole stack and keeps the gap clear", function () {
   const { shim, CS, ctx, host } = mountPanel("pmsm");
   try {
-    // pmsm's stator winding is 3 phases → 3 circuits.
-    assert.strictEqual(ctx.config.circuits.length, 3, "pmsm starts with 3 circuits");
+    // inner body's gap-radius input is the first number input whose label mentions Gap radius.
+    const inputs = walk(host, []).filter(function (e) { return e.tagName === "INPUT" && e.type === "number"; });
+    // Find via the wrapping label text.
+    const gapInput = walk(host, []).find(function (e) {
+      return e.tagName === "LABEL" && /Gap radius/.test(e.textContent);
+    });
+    const inp = (gapInput.children || []).find(function (e) { return e.tagName === "INPUT"; });
+    inp.value = "40";          // mm — pull the inner gap surface inward
+    inp.dispatch("change");
 
-    const card = cardByKindLabel(host, "distributed winding");
-    assert.ok(card, "a distributed-winding card must be present");
+    const v = CS.validate(ctx.config);
+    assert.ok(v.ok, "valid after gap-radius edit: " + (v.errors || []).join("; "));
+    const innerGap = Math.max.apply(null, bodyComps(ctx.config, "inner").map(function (c) { return c.rRange[1]; }));
+    assert.ok(Math.abs(innerGap - 0.040) < 1e-9, "inner gap surface must be 40 mm, got " + innerGap * 1000);
+    assertNoOverlap(ctx.config, "inner");
+    assert.doesNotThrow(function () { CS.expand(ctx.config); });
+  } finally { shim.uninstall(); }
+});
+
+test("dragging a layer reorders it without changing circuits", function () {
+  const { shim, CS, ctx, host } = mountPanel("pmsm");
+  try {
+    const circuits0 = ctx.config.circuits.length;
+    const before = bodyComps(ctx.config, "inner").map(function (c) { return c.kind; });
+    const rows = layerRows(host);            // inner body's layers come first
+    rows[0].dispatch("dragstart");
+    rows[1].dispatch("drop");
+
+    const after = bodyComps(ctx.config, "inner").map(function (c) { return c.kind; });
+    assert.notDeepStrictEqual(after, before, "inner layer order must change");
+    assert.deepStrictEqual(after.slice().sort(), before.slice().sort(), "same layers, reordered");
+    assert.strictEqual(ctx.config.circuits.length, circuits0, "reorder must not change circuits");
+    assert.ok(CS.validate(ctx.config).ok, "valid after reorder");
+    assertNoOverlap(ctx.config, "inner");
+  } finally { shim.uninstall(); }
+});
+
+test("changing a layer's material adjusts circuits and stays valid", function () {
+  const { shim, CS, ctx, host } = mountPanel("pmsm");
+  try {
+    // Expand the outer winding layer, then switch its material to cage.
+    const heads = walk(host, []).filter(function (e) { return e._className === "gp-layer-head"; });
+    // Find the head whose kind label is the distributed winding.
+    const windingHead = heads.find(function (h) {
+      return walk(h, []).some(function (e) { return e._className === "gp-layer-kind" && e.textContent === "distributed winding"; });
+    });
+    windingHead.dispatch("click");           // expand it
+
+    const matSelect = walk(host, []).find(function (e) {
+      return e.tagName === "LABEL" && /Material/.test(e.textContent);
+    });
+    const sel = (matSelect.children || []).find(function (e) { return e.tagName === "SELECT"; });
+    sel.value = "cage";
+    sel.dispatch("change");
+
+    const v = CS.validate(ctx.config);
+    assert.ok(v.ok, "valid after material change to cage: " + (v.errors || []).join("; "));
+    // cage default has 12 bars → 12 circuits replacing the 3 winding phases.
+    assert.strictEqual(ctx.config.circuits.length, 12, "cage must own 12 bar circuits");
+    assert.strictEqual(CS.expand(ctx.config).nCircuits, 12, "expand resolves 12 circuits");
+    assert.ok(bodyComps(ctx.config, "outer").some(function (c) { return c.kind === "cage"; }), "outer now has a cage layer");
+  } finally { shim.uninstall(); }
+});
+
+test("removing a layer splices its circuits and stays valid", function () {
+  const { shim, CS, ctx, host } = mountPanel("pmsm");
+  try {
+    const card = walk(host, []).find(function (e) {
+      return e._className === "gp-layer" &&
+        walk(e, []).some(function (x) { return x._className === "gp-layer-kind" && x.textContent === "distributed winding"; });
+    });
     const rm = walk(card, []).find(function (e) { return e.tagName === "BUTTON" && e.textContent === "✕"; });
-    assert.ok(rm, "the winding card must have a remove control");
     rm.dispatch("click");
 
-    assert.strictEqual(ctx.config.circuits.length, 0,
-      "removing the only winding must splice its 3 circuits, leaving 0");
-    const v = CS.validate(ctx.config);
-    assert.ok(v.ok, "config must stay valid after removing the winding: " + (v.errors || []).join("; "));
-    const exp = CS.expand(ctx.config);
-    assert.strictEqual(exp.nCircuits, 0, "expand must resolve 0 circuits");
-  } finally {
-    shim.uninstall();
-  }
-});
-
-test("adding then removing a ring leaves the config valid and circuit-consistent", function () {
-  const { shim, CS, ctx, host } = mountPanel("pmsm");
-  try {
-    const rings0 = ctx.config.rings.length;
-
-    const addRing = buttons(host, "+ ring");
-    assert.ok(addRing.length >= 2, "each body must offer a + ring control");
-    addRing[addRing.length - 1].dispatch("click");      // outer body
-    assert.strictEqual(ctx.config.rings.length, rings0 + 1, "a ring must be added");
-    assert.ok(CS.validate(ctx.config).ok, "config must stay valid after adding a ring");
-
-    const rmRing = buttons(host, "✕ ring");
-    rmRing[rmRing.length - 1].dispatch("click");        // remove the just-added ring
-    assert.strictEqual(ctx.config.rings.length, rings0, "the ring must be removed");
-    const v = CS.validate(ctx.config);
-    assert.ok(v.ok, "config must stay valid after removing the ring: " + (v.errors || []).join("; "));
-    assert.doesNotThrow(function () { CS.expand(ctx.config); }, "expand must not throw");
-  } finally {
-    shim.uninstall();
-  }
+    assert.strictEqual(ctx.config.circuits.length, 0, "removing the only winding splices its 3 circuits");
+    assert.ok(CS.validate(ctx.config).ok, "valid after removing the winding");
+    assert.strictEqual(CS.expand(ctx.config).nCircuits, 0, "expand resolves 0 circuits");
+  } finally { shim.uninstall(); }
 });
