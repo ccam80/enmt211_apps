@@ -85,21 +85,16 @@
       label: "Default wound machine",
       grid: { Nr: 12, Ntheta: 24, rInner: 0.04, rOuter: 0.06, ell: 0.1 },
       poles: 2,
+      motion: { inner: "rotating", outer: "static" },
       rings: [
-        {
-          member: "stator",
-          element: "W",
-          rRange: [0.052, 0.06],
-          winding: { standard: { m: 1, p: 2, Q: 6, coilPitch: 3, turns: 20 } },
-          muR: 1000,
-        },
-        {
-          member: "rotor",
-          element: "I",
-          rRange: [0.04, 0.048],
-          teeth: 2,
-          muR: 1000,
-        },
+        { member: "outer", components: [
+          { kind: "iron", rRange: [0.052, 0.06], muR: 1000, alpha: 1 },
+          { kind: "distributed-winding", rRange: [0.052, 0.06],
+            winding: { standard: { m: 1, p: 2, Q: 6, coilPitch: 3, turns: 20 } }, muR: 1000, alpha: 1 },
+        ] },
+        { member: "inner", components: [
+          { kind: "iron", rRange: [0.04, 0.048], teeth: 2, muR: 1000, alpha: 1 },
+        ] },
       ],
       circuits: [
         { terminal: { type: "DC", amp: 5.0 }, commutation: { mode: "none" }, R: 1.0 },

@@ -8,8 +8,7 @@ const assert = require("node:assert/strict");
 // ---------------------------------------------------------------------------
 //  Headless harness — no DOM required for pure-logic tests.
 //  document access lives only inside build() callbacks, not tested here.
-//  The panel edits the canonical component form, so every fixture is converted
-//  via ConfigSchema.toComponentConfig first (what the panel does on load).
+//  Fixtures and the panel both speak the canonical component form directly.
 // ---------------------------------------------------------------------------
 
 if (!globalThis.window) globalThis.window = globalThis;
@@ -43,10 +42,10 @@ require(path.join(ROOT, "lessons/unified_motor/geometry-panel.js"));
 
 const { applyGapLength, setSlices, defaultAxial, commitEdit } = UM.GeometryPanel;
 
-// Helper: the pmsm config in canonical component form (what the panel edits).
+// Helper: a deep copy of the pmsm config (already canonical component form).
 function pmsmConfig() {
   const entry = UM.MACHINES.find(function (m) { return m.id === "pmsm"; });
-  return UM.ConfigSchema.toComponentConfig(JSON.parse(JSON.stringify(entry.config)));
+  return JSON.parse(JSON.stringify(entry.config));
 }
 
 // Locate a ring's component by kind.
@@ -107,16 +106,17 @@ test("applyGapLength keeps the config valid and expandable", function () {
 test("applyGapLength is topology-agnostic for an outrunner (stator inner, rotor outer)", function () {
   // Stator is radially inside the rotor — the inner group must be detected as
   // the radially-inner body regardless of which one rotates.
-  const cfg = UM.ConfigSchema.toComponentConfig({
+  const cfg = {
     grid: { Nr: 20, Ntheta: 64, rInner: 0.02, rOuter: 0.06, ell: 0.05 },
     poles: 4,
     mechanical: { J: 1e-4 },
+    motion: { inner: "static", outer: "rotating" },
     rings: [
-      { member: "stator", element: "I", rRange: [0.02, 0.030] },
-      { member: "rotor",  element: "I", rRange: [0.034, 0.060] },
+      { member: "inner", components: [ { kind: "iron", rRange: [0.02, 0.030], alpha: 1 } ] },
+      { member: "outer", components: [ { kind: "iron", rRange: [0.034, 0.060], alpha: 1 } ] },
     ],
     circuits: [],
-  });
+  };
   // The rotor (outer) rotates — motion must reflect the outrunner topology.
   assert.strictEqual(cfg.motion.outer, "rotating", "outer (rotor) body must rotate");
   assert.strictEqual(cfg.motion.inner, "static", "inner (stator) body must be static");

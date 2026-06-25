@@ -47,29 +47,9 @@
     const distributed = [];
     const concentrated = [];
     for (const feat of conductorFeatures) {
-      // Component features carry their winding kind directly.
-      if (feat.component != null) {
-        if (feat.component === "concentrated-winding") concentrated.push(feat);
-        else distributed.push(feat);
-        continue;
-      }
-      // Element-feature fallback: classify by the owning ring's element type.
-      let matched = false;
-      for (const ring of rings) {
-        if (ring.member !== feat.member) continue;
-        const slotRange = ring.slotRRange != null ? ring.slotRRange : ring.rRange;
-        if (!Array.isArray(slotRange) || slotRange.length < 2) continue;
-        const inRange = slotRange[0] <= feat.rRange[0] && feat.rRange[1] <= slotRange[1];
-        if (!inRange) continue;
-        if (ring.element === "C") {
-          concentrated.push(feat);
-        } else {
-          distributed.push(feat);
-        }
-        matched = true;
-        break;
-      }
-      if (!matched) distributed.push(feat);
+      // Conductor features carry their winding kind via feat.component.
+      if (feat.component === "concentrated-winding") concentrated.push(feat);
+      else distributed.push(feat);
     }
     return { distributed, concentrated };
   }

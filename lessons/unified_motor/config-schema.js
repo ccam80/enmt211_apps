@@ -16,14 +16,14 @@
     return Number.isInteger(v) && v >= 2 && v % 2 === 0;
   }
 
-  // Build a routing object from a ring descriptor.
-  // For element "K" rings: uses ring.cage = { bars } to build a cage routing.
-  // For element "W" or "C" rings: uses ring.winding.standard or explicit routing.
+  // Build a routing object from a winding descriptor (a cage component carries
+  // ring.cage = { bars }; a distributed/concentrated winding carries
+  // ring.winding.standard or an explicit routing object).
   function resolveWinding(ring) {
-    if (ring.element === "K") {
-      if (!ring.cage || !Number.isInteger(ring.cage.bars)) {
+    if (ring.cage) {
+      if (!Number.isInteger(ring.cage.bars)) {
         throw new Error(
-          `resolveWinding: element "K" ring requires cage.bars (integer); got ${JSON.stringify(ring.cage)}`
+          `resolveWinding: cage requires cage.bars (integer); got ${JSON.stringify(ring.cage)}`
         );
       }
       return LIB.WindingModel.cageRouting({ bars: ring.cage.bars });
@@ -71,8 +71,8 @@
   //  outermost inner-side row and the innermost outer-side row.
   //  Returns null if no valid band of width >= 2 exists.
   //
-  //  Dispatch is ONLY on ring.member (geometric side) / ring.element /
-  //  ring.components / ring.rRange (and sub-ranges). No machine identity is used.
+  //  Dispatch is ONLY on ring.member (geometric side) / ring.components (and
+  //  their sub-ranges). No machine identity is used.
   // ---------------------------------------------------------------------------
   function deriveGapBand(grid, rings) {
     const { Nr, rInner, rOuter } = grid;
@@ -91,35 +91,12 @@
 
     for (const ring of rings) {
       const member = positionSide(ring);
-      const el = ring.element;
 
-      // Collect rRange segments that this ring occupies
+      // Collect rRange segments that this ring's components occupy
       const segments = [];
-
-      if (Array.isArray(ring.components)) {
-        for (const comp of ring.components) {
-          if (comp.rRange) segments.push(comp.rRange);
-          if (comp.slotRRange) segments.push(comp.slotRRange);
-        }
-      } else if (el === "I") {
-        segments.push(ring.rRange);
-      } else if (el === "M") {
-        segments.push(ring.rRange);
-        if (ring.backIron && ring.backIronRRange) {
-          segments.push(ring.backIronRRange);
-        }
-      } else if (el === "W" || el === "K") {
-        // Slot region
-        segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
-        // Back-iron region
-        segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
-      } else if (el === "C") {
-        // Slot region
-        segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
-        // Back-iron region
-        segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
-        // Teeth (same rRange as ring)
-        segments.push(ring.rRange);
+      for (const comp of (ring.components || [])) {
+        if (comp.rRange) segments.push(comp.rRange);
+        if (comp.slotRRange) segments.push(comp.slotRRange);
       }
 
       for (const seg of segments) {
@@ -205,26 +182,11 @@
     const rc = grid.rInner + (i + 0.5) * dr;
 
     for (const ring of rings) {
-      const el = ring.element;
-      const segments = [];
-
-      if (el === "I") {
-        segments.push(ring.rRange);
-      } else if (el === "M") {
-        segments.push(ring.rRange);
-        if (ring.backIron && ring.backIronRRange) segments.push(ring.backIronRRange);
-      } else if (el === "W" || el === "K") {
-        segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
-        segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
-      } else if (el === "C") {
-        segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
-        segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
-        segments.push(ring.rRange);
-      }
-
-      for (const seg of segments) {
-        if (!Array.isArray(seg) || seg.length < 2) continue;
-        if (rc >= seg[0] && rc < seg[1]) return false;
+      for (const comp of (ring.components || [])) {
+        for (const seg of [comp.rRange, comp.slotRRange]) {
+          if (!Array.isArray(seg) || seg.length < 2) continue;
+          if (rc >= seg[0] && rc < seg[1]) return false;
+        }
       }
     }
     return true;
@@ -286,23 +248,10 @@
       });
     }
 
-    if (ring.backIron) {
-      const muR = ring.muR != null ? ring.muR : 1000;
-      features.push({
-        kind: "iron",
-        member,
-        rRange: ring.backIronRRange,
-        thetaRange: [0, TWO_PI],
-        muR,
-        Bknee: ring.Bknee != null ? ring.Bknee : null,
-      });
-    }
-
     return features;
   }
 
-  function buildWoundFeatures(ring, circuitBase, teethMode, emitBackIron) {
-    if (emitBackIron == null) emitBackIron = true;
+  function buildWoundFeatures(ring, circuitBase, teethMode) {
     const features = [];
     const member = ring.member;
     const muR = ring.muR != null ? ring.muR : 1000;
@@ -331,26 +280,13 @@
 
     const BkneeWound = ring.Bknee != null ? ring.Bknee : null;
 
-    // Back-iron feature spanning the full ring rRange. Omitted when the caller
-    // supplies the back-iron as its own component (the component model keeps the
-    // yoke a separate, independently-sized iron layer).
-    if (emitBackIron) {
-      features.push({
-        kind: "iron",
-        member,
-        rRange: ring.ironRRange != null ? ring.ironRRange : ring.rRange,
-        thetaRange: [0, TWO_PI],
-        muR,
-        Bknee: BkneeWound,
-      });
-    }
-
-    // Iron teeth between the conductor slots/bars.
-    //  - "concentrated" ("C"): salient teeth centred ON each slot (the coil wraps a
-    //    tooth), spanning the full ring rRange. With ring.poleTeeth set, each pole
-    //    instead carries a GROUP of fine teeth (see below).
-    //  - "distributed" ("W"/"K"): teeth fill the INTER-slot complement of the slot
-    //    band (slotRRange), so gap-crossing magnetizing flux reaches the back-iron
+    // Iron teeth between the conductor slots/bars. The yoke/back-iron is the
+    // winding's own separate iron component, so it is not emitted here.
+    //  - "concentrated": salient teeth centred ON each slot (the coil wraps a
+    //    tooth), spanning the full rRange. With poleTeeth set, each pole instead
+    //    carries a GROUP of fine teeth (see below).
+    //  - "distributed": teeth fill the INTER-slot complement of the slot band
+    //    (slotRRange), so gap-crossing magnetizing flux reaches the back-iron
     //    through iron teeth instead of a phantom non-magnetic slot gap. Without
     //    these the whole slotRRange band is conductors + air (zero iron in the
     //    radial flux path), which makes the magnetizing inductance gap/μ-blind.
@@ -436,83 +372,8 @@
   //  The back-iron of a winding is its own `iron` component (independently sized).
   // ---------------------------------------------------------------------------
 
-  // Convert a legacy element ring into the component form (element is a subset of
-  // components). Ordering reproduces the element builders' feature order so the
-  // mesh rasterization is byte-identical: wound back-iron first, magnet back-iron
-  // last.
-  function ringToComponents(ring) {
-    if (Array.isArray(ring.components)) return ring;
-    const m = ring.member;
-    const el = ring.element;
-    const muR = ring.muR;
-    const Bknee = ring.Bknee;
-    let comps;
-    if (el === "I") {
-      comps = [{ kind: "iron", rRange: ring.rRange, teeth: ring.teeth, spanFraction: ring.spanFraction, theta0: ring.theta0, muR, Bknee, alpha: 1 }];
-    } else if (el === "M") {
-      comps = [{ kind: "magnet", rRange: ring.rRange, poles: ring.magnets, Mr: ring.Mr, muR, Bknee, alpha: 1 }];
-      if (ring.backIron) comps.push({ kind: "iron", rRange: ring.backIronRRange, muR, Bknee, alpha: 1 });
-    } else {
-      const kind = el === "C" ? "concentrated-winding" : el === "K" ? "cage" : "distributed-winding";
-      comps = [
-        { kind: "iron", rRange: ring.ironRRange != null ? ring.ironRRange : ring.rRange, muR, Bknee, alpha: 1 },
-        { kind: kind, rRange: ring.rRange, slotRRange: ring.slotRRange, winding: ring.winding, cage: ring.cage,
-          slotWidth: ring.slotWidth, slotFraction: ring.slotFraction, spanFraction: ring.spanFraction,
-          poleTeeth: ring.poleTeeth, muR, Bknee, alpha: 1 },
-      ];
-    }
-    return { member: m, components: comps };
-  }
-
-  // Radial midpoint of a component ring (across all component sub-ranges).
-  function componentRingRadialMid(ring) {
-    let lo = Infinity, hi = -Infinity;
-    for (const c of ring.components) {
-      for (const s of [c.rRange, c.slotRRange]) {
-        if (Array.isArray(s) && s.length >= 2) {
-          if (s[0] < lo) lo = s[0];
-          if (s[1] > hi) hi = s[1];
-        }
-      }
-    }
-    return (lo + hi) / 2;
-  }
-
-  // Convert a whole config to the canonical component form: every ring becomes
-  // components, and legacy kinematic members (rotor/stator) become geometric
-  // sides (inner/outer) with a config.motion map (the rotor is the rotating
-  // side). Inner/outer is decided by mean radius. A config already in component +
-  // inner/outer form is returned with only its rings normalized. Pure function.
-  function toComponentConfig(config) {
-    const out = JSON.parse(JSON.stringify(config));
-    if (!Array.isArray(out.rings)) return out;
-    out.rings = out.rings.map(ringToComponents);
-
-    const hasLegacy = out.rings.some(function (r) { return r.member === "rotor" || r.member === "stator"; });
-    if (hasLegacy) {
-      const rotor = out.rings.filter(function (r) { return r.member === "rotor"; });
-      const stator = out.rings.filter(function (r) { return r.member === "stator"; });
-      if (rotor.length && stator.length) {
-        const mean = function (rs) {
-          let s = 0;
-          for (const r of rs) s += componentRingRadialMid(r);
-          return s / rs.length;
-        };
-        const rotorInner = mean(rotor) <= mean(stator);
-        for (const r of out.rings) {
-          const wasRotor = r.member === "rotor";
-          r.member = (wasRotor === rotorInner) ? "inner" : "outer";
-        }
-        out.motion = rotorInner
-          ? { inner: "rotating", outer: "static" }
-          : { inner: "static", outer: "rotating" };
-      }
-    }
-    return out;
-  }
-
-  // Geometry-derived cage descriptor for one cage component (mirrors the element
-  // "K" path), keyed at the component's first bar circuit index.
+  // Geometry-derived cage descriptor for one cage component, keyed at the
+  // component's first bar circuit index.
   function computeCageInfo(synth, comp, startIndex, config) {
     const rr = synth.rRange || synth.slotRRange;
     const slotR = synth.slotRRange || synth.rRange;
@@ -554,10 +415,10 @@
       let feats = [];
 
       if (comp.kind === "iron") {
-        feats = buildIronFeatures({ member, element: "I", rRange: comp.rRange, teeth: comp.teeth,
+        feats = buildIronFeatures({ member, rRange: comp.rRange, teeth: comp.teeth,
           spanFraction: comp.spanFraction, theta0: comp.theta0, muR: comp.muR, Bknee: comp.Bknee });
       } else if (comp.kind === "magnet") {
-        feats = buildMagnetFeatures({ member, element: "M", rRange: comp.rRange, magnets: comp.poles,
+        feats = buildMagnetFeatures({ member, rRange: comp.rRange, magnets: comp.poles,
           Mr: comp.Mr, muR: comp.muR, Bknee: comp.Bknee });
         if (sliceSign !== 1) {
           feats = feats.map(function (f) {
@@ -567,13 +428,12 @@
           });
         }
       } else if (comp.kind === "distributed-winding" || comp.kind === "concentrated-winding" || comp.kind === "cage") {
-        const el = comp.kind === "concentrated-winding" ? "C" : comp.kind === "cage" ? "K" : "W";
         const mode = comp.kind === "concentrated-winding" ? "concentrated" : "distributed";
-        const synth = { member, element: el, rRange: comp.rRange, slotRRange: comp.slotRRange,
+        const synth = { member, rRange: comp.rRange, slotRRange: comp.slotRRange,
           winding: comp.winding, cage: comp.cage, slotWidth: comp.slotWidth, slotFraction: comp.slotFraction,
           spanFraction: comp.spanFraction, poleTeeth: comp.poleTeeth, muR: comp.muR, Bknee: comp.Bknee };
-        feats = buildWoundFeatures(synth, circuitBase + nCircuits, mode, false);
-        if (el === "K" && comp.cage && config) {
+        feats = buildWoundFeatures(synth, circuitBase + nCircuits, mode);
+        if (comp.kind === "cage" && comp.cage && config) {
           cageInfo = computeCageInfo(synth, comp, circuitBase + nCircuits, config);
         }
         nCircuits += LIB.WindingModel.ampereConductors(resolveWinding(synth)).nCircuits;
@@ -628,8 +488,7 @@
         if (c.Mr != null && (typeof c.Mr !== "number" || !isFinite(c.Mr))) errors.push(`${tag}.Mr must be a finite number; got ${c.Mr}`);
       }
       if (c.kind === "distributed-winding" || c.kind === "concentrated-winding" || c.kind === "cage") {
-        const el = c.kind === "concentrated-winding" ? "C" : c.kind === "cage" ? "K" : "W";
-        const synth = { member: ring.member, element: el, rRange: c.rRange, slotRRange: c.slotRRange,
+        const synth = { member: ring.member, rRange: c.rRange, slotRRange: c.slotRRange,
           winding: c.winding, cage: c.cage, slotWidth: c.slotWidth, slotFraction: c.slotFraction,
           spanFraction: c.spanFraction, poleTeeth: c.poleTeeth };
         try {
@@ -769,77 +628,14 @@
           errors.push(`rings[${ri}] must be a non-null object`);
           continue;
         }
-        if (!["rotor", "stator", "inner", "outer"].includes(ring.member)) {
-          errors.push(`rings[${ri}].member must be one of {inner,outer,rotor,stator}; got ${ring.member}`);
+        if (ring.member !== "inner" && ring.member !== "outer") {
+          errors.push(`rings[${ri}].member must be "inner" or "outer"; got ${ring.member}`);
         }
-        if (ring.components != null) {
-          validateComponents(ring, ri, errors, rInner, rOuter);
+        if (!Array.isArray(ring.components)) {
+          errors.push(`rings[${ri}] must have a components array`);
           continue;
         }
-        const validElements = ["W", "C", "M", "I", "K"];
-        if (!validElements.includes(ring.element)) {
-          errors.push(`rings[${ri}].element must be one of {W,C,M,I,K}; got ${ring.element}`);
-        }
-        if (!Array.isArray(ring.rRange) || ring.rRange.length !== 2) {
-          errors.push(`rings[${ri}].rRange must be a [r0, r1] array`);
-        } else {
-          const [r0, r1] = ring.rRange;
-          if (typeof r0 !== "number" || typeof r1 !== "number" || !isFinite(r0) || !isFinite(r1)) {
-            errors.push(`rings[${ri}].rRange values must be finite numbers`);
-          } else {
-            if (rInner !== null && r0 < rInner) {
-              errors.push(`rings[${ri}].rRange[0] (${r0}) must be >= grid.rInner (${rInner})`);
-            }
-            if (rOuter !== null && r1 > rOuter) {
-              errors.push(`rings[${ri}].rRange[1] (${r1}) must be <= grid.rOuter (${rOuter})`);
-            }
-            if (r0 >= r1) {
-              errors.push(`rings[${ri}].rRange[0] (${r0}) must be < rRange[1] (${r1})`);
-            }
-          }
-        }
-        if (ring.Bknee !== undefined) {
-          if (typeof ring.Bknee !== "number" || !isFinite(ring.Bknee) || ring.Bknee <= 0) {
-            errors.push(`rings[${ri}].Bknee must be a finite positive number when present; got ${ring.Bknee}`);
-          }
-        }
-        // For wound rings, validate the winding routing
-        if (ring.element === "W" || ring.element === "C" || ring.element === "K") {
-          try {
-            const routing = resolveWinding(ring);
-            if (routing) {
-              const vResult = LIB.WindingModel.validate(routing);
-              if (!vResult.ok) {
-                for (const e of vResult.errors) {
-                  errors.push(`rings[${ri}] winding: ${e}`);
-                }
-              }
-            } else {
-              errors.push(`rings[${ri}] is wound but has no winding property`);
-            }
-          } catch (e) {
-            errors.push(`rings[${ri}] winding resolution error: ${e.message}`);
-          }
-
-          // Grouped pole-face teeth (salient-pole hybrid/SR): each pole carries
-          // `count` fine teeth at `pitch`. count >= 1, pitch finite positive, span
-          // in (0, 1]. Only meaningful for concentrated ("C") teeth.
-          if (ring.poleTeeth != null) {
-            const pt = ring.poleTeeth;
-            if (ring.element !== "C") {
-              errors.push(`rings[${ri}].poleTeeth is only valid on a concentrated ("C") ring`);
-            }
-            if (!isFinitePositiveInt(pt.count)) {
-              errors.push(`rings[${ri}].poleTeeth.count must be an integer >= 1; got ${pt.count}`);
-            }
-            if (typeof pt.pitch !== "number" || !isFinite(pt.pitch) || pt.pitch <= 0) {
-              errors.push(`rings[${ri}].poleTeeth.pitch must be a finite positive number; got ${pt.pitch}`);
-            }
-            if (pt.span != null && (typeof pt.span !== "number" || !(pt.span > 0 && pt.span <= 1))) {
-              errors.push(`rings[${ri}].poleTeeth.span must be in (0, 1]; got ${pt.span}`);
-            }
-          }
-        }
+        validateComponents(ring, ri, errors, rInner, rOuter);
       }
     }
 
@@ -912,9 +708,8 @@
           errors.push(`stack.fluxSources[${fi}].ringRef (${fs.ringRef}) is out of range [0, ${ringCount})`);
         } else if (Array.isArray(rings) && rings[fs.ringRef]) {
           const rr = rings[fs.ringRef];
-          const isMagnet = Array.isArray(rr.components)
-            ? rr.components.some(function (c) { return c.kind === "magnet"; })
-            : rr.element === "M";
+          const isMagnet = Array.isArray(rr.components) &&
+            rr.components.some(function (c) { return c.kind === "magnet"; });
           if (!isMagnet) {
             errors.push(`stack.fluxSources[${fi}].ringRef points to ring ${fs.ringRef} which has no magnet`);
           }
@@ -958,34 +753,18 @@
       let resolvable = true;
       for (let ri = 0; ri < rings.length; ri++) {
         const ring = rings[ri];
-        if (!ring || typeof ring !== "object") { resolvable = false; break; }
-        if (ring.components) {
-          for (const c of ring.components) {
-            if (c.kind !== "distributed-winding" && c.kind !== "concentrated-winding" && c.kind !== "cage") continue;
-            const el2 = c.kind === "concentrated-winding" ? "C" : c.kind === "cage" ? "K" : "W";
-            const synth = { member: ring.member, element: el2, rRange: c.rRange, slotRRange: c.slotRRange,
-              winding: c.winding, cage: c.cage, slotFraction: c.slotFraction };
-            try {
-              const routing = resolveWinding(synth);
-              if (!routing) { resolvable = false; break; }
-              resolvedTotal += LIB.WindingModel.ampereConductors(routing).nCircuits;
-            } catch (e) { resolvable = false; break; }
-          }
-          if (!resolvable) break;
-          continue;
-        }
-        const el = ring.element;
-        if (el === "W" || el === "C" || el === "K") {
+        if (!ring || typeof ring !== "object" || !Array.isArray(ring.components)) { resolvable = false; break; }
+        for (const c of ring.components) {
+          if (c.kind !== "distributed-winding" && c.kind !== "concentrated-winding" && c.kind !== "cage") continue;
+          const synth = { member: ring.member, rRange: c.rRange, slotRRange: c.slotRRange,
+            winding: c.winding, cage: c.cage, slotFraction: c.slotFraction };
           try {
-            const routing = resolveWinding(ring);
+            const routing = resolveWinding(synth);
             if (!routing) { resolvable = false; break; }
-            const { nCircuits } = LIB.WindingModel.ampereConductors(routing);
-            resolvedTotal += nCircuits;
-          } catch (e) {
-            resolvable = false;
-            break;
-          }
+            resolvedTotal += LIB.WindingModel.ampereConductors(routing).nCircuits;
+          } catch (e) { resolvable = false; break; }
         }
+        if (!resolvable) break;
       }
       if (resolvable && resolvedTotal !== circuits.length) {
         errors.push(
@@ -1083,70 +862,10 @@
     for (let ri = 0; ri < rings.length; ri++) {
       const ring = rings[ri];
 
-      if (ring.components) {
-        const cr = buildComponentRingFeatures(ring, circuitBase, 1, config, config.motion);
-        for (const f of cr.features) baseFeatures.push(f);
-        circuitBase += cr.nCircuits;
-        if (cr.cageInfo) cageInfo = cr.cageInfo;
-        continue;
-      }
-
-      const el = ring.element;
-
-      if (el === "I") {
-        const ringFeatures = buildIronFeatures(ring);
-        for (const f of ringFeatures) baseFeatures.push(f);
-      } else if (el === "M") {
-        const ringFeatures = buildMagnetFeatures(ring);
-        for (const f of ringFeatures) baseFeatures.push(f);
-      } else if (el === "W" || el === "K") {
-        const ringFeatures = buildWoundFeatures(ring, circuitBase, "distributed");
-        for (const f of ringFeatures) baseFeatures.push(f);
-        const routing = resolveWinding(ring);
-        if (el === "K" && ring.cage) {
-          // Record the cage descriptor for end-ring-coupled R assembly below.
-          // startIndex is the global index of this cage's first bar circuit
-          // (BEFORE the circuitBase increment); ringRadius from the bar ring
-          // geometry; ringAreaRatio = end-ring cross-section / bar cross-section.
-          const rr = ring.rRange || ring.slotRRange;
-          // Geometry-derived cage BAR resistance R_b = ρ·ell/A_bar. A real cast
-          // cage bar is a conductor of axial length ell and cross-section
-          //   A_bar = (radial slot height)·(bar arc),  bar arc = slotFraction·2π·r_m/N.
-          // ρ defaults to aluminium (cast-cage standard, ~20°C). Override per ring
-          // via cage.rho (resistivity, Ω·m) or cage.Rb (explicit Ω). Falls back to
-          // the circuit R only if the slot geometry / ell is unavailable.
-          // (The former fixed R=0.03 Ω was ~1000× too large → rotor τ=L/R ~1000×
-          // too short [0.12 ms vs ~50-200 ms physical] → no slip torque, and the
-          // rotor dynamics fell below one timestep. See cage-induction investigation.)
-          const slotR = ring.slotRRange || ring.rRange;
-          const ellAxial = (config.grid && config.grid.ell) || null;
-          let RbDerived = null;
-          if (ring.cage.Rb != null) {
-            RbDerived = ring.cage.Rb;
-          } else if (slotR && ellAxial) {
-            const rMean = 0.5 * (slotR[0] + slotR[1]);
-            const radialH = slotR[1] - slotR[0];
-            const slotFrac = ring.slotFraction != null ? ring.slotFraction : 0.5;
-            const arcW = slotFrac * (2 * Math.PI * rMean) / ring.cage.bars;
-            const Abar = radialH * arcW;
-            const rho = ring.cage.rho != null ? ring.cage.rho : 2.8e-8; // Ω·m, Al
-            if (Abar > 0) RbDerived = (rho * ellAxial) / Abar;
-          }
-          cageInfo = {
-            startIndex: circuitBase,
-            bars: ring.cage.bars,
-            ringRadius: rr ? 0.5 * (rr[0] + rr[1]) : null,
-            ringAreaRatio: ring.cage.ringAreaRatio != null ? ring.cage.ringAreaRatio : 1.0,
-            Rb: RbDerived,
-          };
-        }
-        circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;
-      } else if (el === "C") {
-        const ringFeatures = buildWoundFeatures(ring, circuitBase, "concentrated");
-        for (const f of ringFeatures) baseFeatures.push(f);
-        const routing = resolveWinding(ring);
-        circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;
-      }
+      const cr = buildComponentRingFeatures(ring, circuitBase, 1, config, config.motion);
+      for (const f of cr.features) baseFeatures.push(f);
+      circuitBase += cr.nCircuits;
+      if (cr.cageInfo) cageInfo = cr.cageInfo;
     }
 
     const nCircuits = circuitBase;
@@ -1250,49 +969,14 @@
 
     for (let ri = 0; ri < rings.length; ri++) {
       const ring = rings[ri];
-
-      if (ring.components) {
-        const sign = signMap.has(ri) ? signMap.get(ri) : 1;
-        const cr = buildComponentRingFeatures(ring, circuitBase, sign, null, motion);
-        for (const f of cr.features) features.push(f);
-        circuitBase += cr.nCircuits;
-        continue;
-      }
-
-      const el = ring.element;
-
-      if (el === "I") {
-        const ringFeatures = buildIronFeatures(ring);
-        for (const f of ringFeatures) features.push(f);
-      } else if (el === "M") {
-        const rawFeatures = buildMagnetFeatures(ring);
-        const sign = signMap.has(ri) ? signMap.get(ri) : 1;
-        for (const f of rawFeatures) {
-          if (f.kind === "magnet") {
-            features.push(Object.assign({}, f, {
-              Mr: f.Mr * sign,
-              Mtheta: f.Mtheta * sign,
-            }));
-          } else {
-            // iron back-iron feature — unchanged
-            features.push(f);
-          }
-        }
-      } else if (el === "W" || el === "K") {
-        const ringFeatures = buildWoundFeatures(ring, circuitBase, "distributed");
-        for (const f of ringFeatures) features.push(f);
-        const routing = resolveWinding(ring);
-        circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;
-      } else if (el === "C") {
-        const ringFeatures = buildWoundFeatures(ring, circuitBase, "concentrated");
-        for (const f of ringFeatures) features.push(f);
-        const routing = resolveWinding(ring);
-        circuitBase += LIB.WindingModel.ampereConductors(routing).nCircuits;
-      }
+      const sign = signMap.has(ri) ? signMap.get(ri) : 1;
+      const cr = buildComponentRingFeatures(ring, circuitBase, sign, null, motion);
+      for (const f of cr.features) features.push(f);
+      circuitBase += cr.nCircuits;
     }
 
     return features;
   }
 
-  UM.ConfigSchema = { validate, expand, ringToComponents, toComponentConfig };
+  UM.ConfigSchema = { validate, expand };
 })();

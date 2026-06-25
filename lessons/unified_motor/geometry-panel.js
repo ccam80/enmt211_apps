@@ -8,7 +8,7 @@
 
   // ---------------------------------------------------------------------------
   //  Internal helpers — the panel edits the component form exclusively, so all
-  //  geometry helpers read ring.components (never ring.element).
+  //  geometry helpers read ring.components.
   // ---------------------------------------------------------------------------
 
   // Radial occupancy segments of a component ring (every component sub-range).
@@ -217,21 +217,6 @@
   }
 
   // ---------------------------------------------------------------------------
-  //  ensureComponentForm(config) — convert a legacy/element config to the
-  //  canonical component + inner/outer + motion form in place. Idempotent.
-  // ---------------------------------------------------------------------------
-  function ensureComponentForm(config) {
-    if (!Array.isArray(config.rings)) return;
-    const needsConvert = config.rings.some(function (r) {
-      return r && (!Array.isArray(r.components) || r.member === "rotor" || r.member === "stator");
-    });
-    if (!needsConvert) return;
-    const conv = UM.ConfigSchema.toComponentConfig(config);
-    for (const k of Object.keys(config)) delete config[k];
-    for (const k of Object.keys(conv)) config[k] = conv[k];
-  }
-
-  // ---------------------------------------------------------------------------
   //  Semantic display metadata — one table mapping component fields to
   //  human-readable labels + units. Values are stored in SI; toDisplay/
   //  fromDisplay convert for the input. The user never sees raw Mr/Mtheta.
@@ -311,7 +296,6 @@
     setSlices: setSlices,
     defaultAxial: defaultAxial,
     commitEdit: commitEdit,
-    ensureComponentForm: ensureComponentForm,
   };
 
   // ---------------------------------------------------------------------------
@@ -326,11 +310,6 @@
         el.addEventListener(evt, fn);
         listeners.push({ el: el, evt: evt, fn: fn });
       }
-
-      // The live config is edited in component form. Convert on build so a
-      // freshly-loaded (legacy) machine becomes editable here without a runtime
-      // shim elsewhere.
-      ensureComponentForm(ctx.config);
 
       const statusEl = document.createElement("div");
       statusEl.className = "gp-status";

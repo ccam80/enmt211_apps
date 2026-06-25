@@ -27,9 +27,14 @@ function twoSliceConfig() {
     grid: { Nr: 24, Ntheta: 256, rInner: rIn, rOuter: rOut, ell: 0.05 },
     poles: 2,
     mechanical: { J: 1e-4, damping: 0, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
-      { member: "rotor",  element: "I", rRange: [0.020, 0.028], teeth: 1, theta0: 0, spanFraction: 1.0, muR: 1 },
-      { member: "stator", element: "I", rRange: [0.032, 0.040], teeth: 1, theta0: 0, spanFraction: 1.0, muR: 1 },
+      { member: "inner", components: [
+        { kind: "iron", rRange: [0.020, 0.028], teeth: 1, theta0: 0, spanFraction: 1.0, muR: 1, alpha: 1 },
+      ] },
+      { member: "outer", components: [
+        { kind: "iron", rRange: [0.032, 0.040], teeth: 1, theta0: 0, spanFraction: 1.0, muR: 1, alpha: 1 },
+      ] },
     ],
     circuits: [],
     stack: { slices: 2, sliceOffsets: [0, 0] },

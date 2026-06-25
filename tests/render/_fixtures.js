@@ -49,7 +49,6 @@ if (!process.env.RENDER_TESTS_HEADLESS_ONLY) {
   for (const rel of [
     "../../lessons/unified_motor/cross-section-render.js",
     "../../lessons/unified_motor/render3d.js",
-    "../../lessons/unified_motor/matrix-panel.js",
     "../../lessons/unified_motor/machine-picker.js",
   ]) {
     try { require(rel); } catch (e) { /* later-wave module not landed */ }

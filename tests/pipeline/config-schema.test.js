@@ -80,21 +80,16 @@ describe("config-schema", function () {
       grid: { Nr: 12, Ntheta: 24, rInner: 0.04, rOuter: 0.06, ell: 0.1 },
       gapBand: { iInner: 4, iOuter: 8 },
       poles: 2,
+      motion: { inner: "rotating", outer: "static" },
       rings: [
-        {
-          member: "rotor",
-          element: "M",
-          rRange: [0.04, 0.047],
-          magnets: 2,
-          Mr: 8e5,
-        },
-        {
-          member: "stator",
-          element: "W",
-          rRange: [0.053, 0.06],
-          winding: { standard: { m: 1, p: 2, Q: 6, coilPitch: 3, turns: 20 } },
-          muR: 1000,
-        },
+        { member: "inner", components: [
+          { kind: "magnet", rRange: [0.04, 0.047], poles: 2, Mr: 8e5, alpha: 1 },
+        ] },
+        { member: "outer", components: [
+          { kind: "iron", rRange: [0.053, 0.06], muR: 1000, alpha: 1 },
+          { kind: "distributed-winding", rRange: [0.053, 0.06],
+            winding: { standard: { m: 1, p: 2, Q: 6, coilPitch: 3, turns: 20 } }, muR: 1000, alpha: 1 },
+        ] },
       ],
       circuits: [
         { terminal: { type: "DC", amp: 5.0 }, commutation: { mode: "none" }, R: 1.0 },
