@@ -1,35 +1,55 @@
 (function () {
   "use strict";
 
-  const ROTOR_YOKE     = [0.030, 0.038];
-  const ROTOR_SURFACE  = [0.038, 0.043];
-  const STATOR_YOKE    = [0.051, 0.055];
-  const STATOR_SURFACE = [0.047, 0.051];
 
   const config = {
     grid: { Nr: 12, Ntheta: 256, rInner: 0.030, rOuter: 0.055, ell: 0.10 },
     poles: 4,
     mechanical: { J: 1e-4, damping: 1e-5, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
       {
-        member: "rotor",
-        element: "I",
-        rRange: ROTOR_SURFACE,
-        teeth: 6,
-        theta0: 0,
-        spanFraction: 0.5,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.038, 0.043],
+            teeth: 6,
+            spanFraction: 0.5,
+            theta0: 0,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "stator",
-        element: "W",
-        rRange: STATOR_SURFACE,
-        winding: { standard: { m: 3, p: 4, Q: 12, coilPitch: 3, turns: 40 } },
-        slotRRange: STATOR_SURFACE,
-        slotFraction: 0.5,
-        ironRRange: STATOR_YOKE,
-        muR: 1000,
-      },
+        member: "outer",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.051, 0.055],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "distributed-winding",
+            rRange: [0.047, 0.051],
+            slotRRange: [0.047, 0.051],
+            winding: {
+              standard: {
+                m: 3,
+                p: 4,
+                Q: 12,
+                coilPitch: 3,
+                turns: 40
+              }
+            },
+            slotFraction: 0.5,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      }
     ],
     circuits: [
       {

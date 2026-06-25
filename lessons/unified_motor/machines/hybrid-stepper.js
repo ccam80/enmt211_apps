@@ -25,19 +25,68 @@
     grid: { Nr: 300, Ntheta: 768, rInner: 0.010, rOuter: 0.040, ell: 0.038 },
     poles: 4,
     mechanical: { J: 5e-5, damping: 3e-3, frictionTorque: 3e-4, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
-      { member: "rotor", element: "I", rRange: ROTOR_BODY_R, teeth: 1, theta0: 0, spanFraction: 1.0, muR: 1000 },
-      { member: "rotor", element: "I", rRange: ROTOR_TEETH_R, teeth: 50, theta0: 0, spanFraction: 0.5, muR: 1000 },
       {
-        member: "stator",
-        element: "C",
-        rRange: POLE_TEETH_R,
-        winding: { standard: { m: 2, p: 4, Q: 8, coilPitch: 1, turns: 100 } },
-        poleTeeth: { count: 6, pitch: 2 * Math.PI / 50, span: 0.5 },
-        slotRRange: STATOR_SLOT_R,
-        ironRRange: STATOR_YOKE_R,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.01, 0.019],
+            teeth: 1,
+            spanFraction: 1,
+            theta0: 0,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
+      {
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.019, 0.02],
+            teeth: 50,
+            spanFraction: 0.5,
+            theta0: 0,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      },
+      {
+        member: "outer",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.03, 0.04],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "concentrated-winding",
+            rRange: [0.0203, 0.0213],
+            slotRRange: [0.0213, 0.03],
+            winding: {
+              standard: {
+                m: 2,
+                p: 4,
+                Q: 8,
+                coilPitch: 1,
+                turns: 100
+              }
+            },
+            poleTeeth: {
+              count: 6,
+              pitch: 0.12566370614359174,
+              span: 0.5
+            },
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      }
     ],
     // Two-phase full-step commutation table: the 4-state cycle (A,B) advances the rotor
     // a quarter tooth per commandStep → 200 steps/rev (1.8°).

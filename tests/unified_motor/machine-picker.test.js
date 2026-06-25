@@ -75,10 +75,9 @@ test("loadMachine replaces ctx.config contents in place and rebuilds", function 
 test("the loaded config is a deep copy of the fixture", function () {
   const ctx = { config: {}, requestRebuild() {} };
   UM.MachinePicker.loadMachine(ctx, "pmsm");
-  const originalValue = ctx.config.rings[0].rRange[0];
-  ctx.config.rings[0].rRange[0] = 0.999;
+  ctx.config.rings[0].components[0].rRange[0] = 0.999;
   const entry = UM.MACHINES.find(function (m) { return m.id === "pmsm"; });
-  assert.notStrictEqual(entry.config.rings[0].rRange[0], 0.999,
+  assert.notStrictEqual(entry.config.rings[0].components[0].rRange[0], 0.999,
     "mutating the loaded config must not affect the fixture");
 });
 

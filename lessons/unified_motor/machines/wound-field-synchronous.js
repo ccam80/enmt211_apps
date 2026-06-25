@@ -7,10 +7,6 @@
   // Nr=50 ensures at least 2 grid cells across the 3 mm air gap
   // Stator: m=3, p=8 (pole-count), Q=36, coilPitch=4, SPP=36/(3*8)=1.5
   // Rotor:  m=1, p=8 (pole-count), Q=8,  coilPitch=1, SPP=8/(1*8)=1
-  const ROTOR_YOKE_R    = [0.022, 0.040];
-  const ROTOR_POLES_R   = [0.040, 0.054];
-  const STATOR_BORE_R   = [0.057, 0.074];
-  const STATOR_YOKE_R   = [0.074, 0.092];
 
   const config = {
     grid: { Nr: 50, Ntheta: 512, rInner: 0.022, rOuter: 0.092, ell: 0.130 },
@@ -21,27 +17,64 @@
     // step from rest. 0.4 kg·m² keeps this machine firmly non-self-starting (mean
     // speed from rest stays «1% of synchronous), against its ~76 N·m peak torque.
     mechanical: { J: 0.4, damping: 3e-4, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
       {
-        member: "rotor",
-        element: "W",
-        rRange: ROTOR_POLES_R,
-        winding: { standard: { m: 1, p: 8, Q: 8, coilPitch: 1, turns: 80 } },
-        slotRRange: ROTOR_POLES_R,
-        slotFraction: 0.5,
-        ironRRange: ROTOR_YOKE_R,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.022, 0.04],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "distributed-winding",
+            rRange: [0.04, 0.054],
+            slotRRange: [0.04, 0.054],
+            winding: {
+              standard: {
+                m: 1,
+                p: 8,
+                Q: 8,
+                coilPitch: 1,
+                turns: 80
+              }
+            },
+            slotFraction: 0.5,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "stator",
-        element: "W",
-        rRange: STATOR_BORE_R,
-        winding: { standard: { m: 3, p: 8, Q: 36, coilPitch: 4, turns: 30 } },
-        slotRRange: STATOR_BORE_R,
-        slotFraction: 0.5,
-        ironRRange: STATOR_YOKE_R,
-        muR: 1000,
-      },
+        member: "outer",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.074, 0.092],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "distributed-winding",
+            rRange: [0.057, 0.074],
+            slotRRange: [0.057, 0.074],
+            winding: {
+              standard: {
+                m: 3,
+                p: 8,
+                Q: 36,
+                coilPitch: 4,
+                turns: 30
+              }
+            },
+            slotFraction: 0.5,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      }
     ],
     circuits: [
       {

@@ -5,36 +5,60 @@
   // High-torque inrunner, OD=124 mm (servo class), air gap 2.0 mm at 38 mm radius
   // 12p/18s: m=3 phases, p=12 (pole-count), Q=18, coilPitch=1, SPP=Q/(m*p)=0.5
   // Nr=48 ensures at least 2 grid cells across the 2 mm air gap
-  const ROTOR_YOKE_R    = [0.018, 0.030];
-  const ROTOR_SURFACE_R = [0.030, 0.038];
-  const STATOR_BORE_R   = [0.040, 0.052];
-  const STATOR_YOKE_R   = [0.052, 0.062];
 
   const config = {
     grid: { Nr: 48, Ntheta: 512, rInner: 0.018, rOuter: 0.062, ell: 0.060 },
     poles: 12,
     mechanical: { J: 3e-4, damping: 8e-5, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
       {
-        member: "rotor",
-        element: "M",
-        rRange: ROTOR_SURFACE_R,
-        magnets: 12,
-        Mr: 9.5e5,
-        backIron: true,
-        backIronRRange: ROTOR_YOKE_R,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "magnet",
+            rRange: [0.03, 0.038],
+            poles: 12,
+            Mr: 950000,
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "iron",
+            rRange: [0.018, 0.03],
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "stator",
-        element: "C",
-        rRange: STATOR_BORE_R,
-        winding: { standard: { m: 3, p: 12, Q: 18, coilPitch: 1, turns: 30 } },
-        slotRRange: STATOR_BORE_R,
-        slotFraction: 0.55,
-        ironRRange: STATOR_YOKE_R,
-        muR: 1000,
-      },
+        member: "outer",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.052, 0.062],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "concentrated-winding",
+            rRange: [0.04, 0.052],
+            slotRRange: [0.04, 0.052],
+            winding: {
+              standard: {
+                m: 3,
+                p: 12,
+                Q: 18,
+                coilPitch: 1,
+                turns: 30
+              }
+            },
+            slotFraction: 0.55,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      }
     ],
     circuits: [
       {

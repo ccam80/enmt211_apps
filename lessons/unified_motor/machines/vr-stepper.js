@@ -11,35 +11,55 @@
   // (24 steps/rev). OD ≈ 72 mm, 2.0 mm air gap at 19 mm radius.
   // damping sized to ζ≈0.7 of the energised holding stiffness (k≈0.11 N·m/rad,
   // J=1e-5 ⇒ critical ≈ 2.1e-3) so each commanded step settles in ~one swing.
-  const ROTOR_YOKE_R    = [0.006, 0.014];
-  const ROTOR_TEETH_R   = [0.014, 0.019];
-  const STATOR_BORE_R   = [0.021, 0.030];
-  const STATOR_YOKE_R   = [0.030, 0.036];
 
   const config = {
     grid: { Nr: 34, Ntheta: 256, rInner: 0.006, rOuter: 0.036, ell: 0.038 },
     poles: 8,
     mechanical: { J: 1e-5, damping: 1.5e-3, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
       {
-        member: "rotor",
-        element: "I",
-        rRange: ROTOR_TEETH_R,
-        teeth: 8,
-        theta0: 0,
-        spanFraction: 0.5,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.014, 0.019],
+            teeth: 8,
+            spanFraction: 0.5,
+            theta0: 0,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "stator",
-        element: "C",
-        rRange: STATOR_BORE_R,
-        winding: { standard: { m: 3, p: 8, Q: 12, coilPitch: 1, turns: 120 } },
-        slotRRange: STATOR_BORE_R,
-        slotFraction: 0.5,
-        ironRRange: STATOR_YOKE_R,
-        muR: 1000,
-      },
+        member: "outer",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.03, 0.036],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "concentrated-winding",
+            rRange: [0.021, 0.03],
+            slotRRange: [0.021, 0.03],
+            winding: {
+              standard: {
+                m: 3,
+                p: 8,
+                Q: 12,
+                coilPitch: 1,
+                turns: 120
+              }
+            },
+            slotFraction: 0.5,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      }
     ],
     circuits: [
       { terminal: { type: "STEP", amp: 24 }, commutation: { mode: "sequencer", pattern: [1, 0, 0] }, R: 3.0 },

@@ -9,64 +9,97 @@
   // Alternating iron-rich spans and narrow spans (low spanFraction) at each
   // radial layer approximate the d/q anisotropy of a multi-barrier rotor
   // without requiring a new element kind in the schema.
-  const ROTOR_INNER_YOKE_R  = [0.022, 0.035];
-  const ROTOR_BARRIER1_R    = [0.035, 0.044];
-  const ROTOR_BARRIER2_R    = [0.044, 0.052];
-  const ROTOR_SURFACE_R     = [0.052, 0.058];
-  const STATOR_BORE_R       = [0.061, 0.078];
-  const STATOR_YOKE_R       = [0.078, 0.095];
 
   const config = {
     grid: { Nr: 52, Ntheta: 512, rInner: 0.022, rOuter: 0.095, ell: 0.130 },
     poles: 4,
     mechanical: { J: 4e-3, damping: 3e-4, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
       {
-        member: "rotor",
-        element: "I",
-        rRange: ROTOR_INNER_YOKE_R,
-        teeth: 1,
-        theta0: 0,
-        spanFraction: 1.0,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.022, 0.035],
+            teeth: 1,
+            spanFraction: 1,
+            theta0: 0,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "rotor",
-        element: "I",
-        rRange: ROTOR_BARRIER1_R,
-        teeth: 4,
-        theta0: 0,
-        spanFraction: 0.6,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.035, 0.044],
+            teeth: 4,
+            spanFraction: 0.6,
+            theta0: 0,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "rotor",
-        element: "I",
-        rRange: ROTOR_BARRIER2_R,
-        teeth: 4,
-        theta0: 0,
-        spanFraction: 0.7,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.044, 0.052],
+            teeth: 4,
+            spanFraction: 0.7,
+            theta0: 0,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "rotor",
-        element: "I",
-        rRange: ROTOR_SURFACE_R,
-        teeth: 4,
-        theta0: 0,
-        spanFraction: 0.8,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.052, 0.058],
+            teeth: 4,
+            spanFraction: 0.8,
+            theta0: 0,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "stator",
-        element: "W",
-        rRange: STATOR_BORE_R,
-        winding: { standard: { m: 3, p: 4, Q: 36, coilPitch: 9, turns: 50 } },
-        slotRRange: STATOR_BORE_R,
-        slotFraction: 0.5,
-        ironRRange: STATOR_YOKE_R,
-        muR: 1000,
-      },
+        member: "outer",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.078, 0.095],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "distributed-winding",
+            rRange: [0.061, 0.078],
+            slotRRange: [0.061, 0.078],
+            winding: {
+              standard: {
+                m: 3,
+                p: 4,
+                Q: 36,
+                coilPitch: 9,
+                turns: 50
+              }
+            },
+            slotFraction: 0.5,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      }
     ],
     circuits: [
       {

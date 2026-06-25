@@ -23,8 +23,12 @@ before(async () => { await F.initSolver(); });
 test("a settled rotor still honors a step command", () => {
   // 12/8 reluctance stepper on the commutation-table drive, damped enough to settle.
   const c = JSON.parse(JSON.stringify(F.byId["vr-stepper"].config));
-  c.rings.find((r) => r.member === "rotor").teeth = 8;
-  c.rings.find((r) => r.member === "stator").winding.standard = { m: 3, p: 8, Q: 12, coilPitch: 1, turns: 120 };
+  const rotorSide = c.motion.inner === "rotating" ? "inner" : "outer";
+  const statorSide = rotorSide === "inner" ? "outer" : "inner";
+  const rotorRing = c.rings.find((r) => r.member === rotorSide);
+  const statorRing = c.rings.find((r) => r.member === statorSide);
+  rotorRing.components.find((k) => k.kind === "iron").teeth = 8;
+  statorRing.components.find((k) => /winding$/.test(k.kind)).winding.standard = { m: 3, p: 8, Q: 12, coilPitch: 1, turns: 120 };
   const pat = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   c.circuits.forEach((ci, k) => { ci.terminal = { type: "STEP", amp: 24 }; ci.commutation = { mode: "sequencer", pattern: pat[k] }; });
   c.mechanical.damping = 1.3e-3; c.mechanical.frictionTorque = 3e-4;

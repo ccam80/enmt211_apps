@@ -4,36 +4,60 @@
   // 8-pole 48-slot integer-slot PMSM, m=3 q=2, surface magnets
   // OD=132 mm (servo class), air gap 2.0 mm at 42 mm radius
   // Nr=50 ensures at least 2 grid cells across the 2 mm air gap
-  const ROTOR_YOKE_R    = [0.020, 0.035];
-  const ROTOR_SURFACE_R = [0.035, 0.042];
-  const STATOR_BORE_R   = [0.044, 0.058];
-  const STATOR_YOKE_R   = [0.058, 0.066];
 
   const config = {
     grid: { Nr: 50, Ntheta: 512, rInner: 0.020, rOuter: 0.066, ell: 0.080 },
     poles: 8,
     mechanical: { J: 5e-4, damping: 1e-4, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
       {
-        member: "rotor",
-        element: "M",
-        rRange: ROTOR_SURFACE_R,
-        magnets: 8,
-        Mr: 9e5,
-        backIron: true,
-        backIronRRange: ROTOR_YOKE_R,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "magnet",
+            rRange: [0.035, 0.042],
+            poles: 8,
+            Mr: 900000,
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "iron",
+            rRange: [0.02, 0.035],
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "stator",
-        element: "W",
-        rRange: STATOR_BORE_R,
-        winding: { standard: { m: 3, p: 8, Q: 48, coilPitch: 6, turns: 20 } },
-        slotRRange: STATOR_BORE_R,
-        slotFraction: 0.5,
-        ironRRange: STATOR_YOKE_R,
-        muR: 1000,
-      },
+        member: "outer",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.058, 0.066],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "distributed-winding",
+            rRange: [0.044, 0.058],
+            slotRRange: [0.044, 0.058],
+            winding: {
+              standard: {
+                m: 3,
+                p: 8,
+                Q: 48,
+                coilPitch: 6,
+                turns: 20
+              }
+            },
+            slotFraction: 0.5,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      }
     ],
     circuits: [
       {

@@ -6,35 +6,55 @@
   // Air gap 3.0 mm at 54 mm radius
   // Stator: Q=8 slots, m=4 phases, p=2 pole-pairs → Q%(m*p)=8%8=0 ✓, coilPitch=1
   // Nr=50 ensures at least 2 grid cells across the 3 mm air gap
-  const ROTOR_YOKE_R    = [0.022, 0.042];
-  const ROTOR_TEETH_R   = [0.042, 0.054];
-  const STATOR_BORE_R   = [0.057, 0.074];
-  const STATOR_YOKE_R   = [0.074, 0.090];
 
   const config = {
     grid: { Nr: 50, Ntheta: 384, rInner: 0.022, rOuter: 0.090, ell: 0.120 },
     poles: 8,
     mechanical: { J: 2e-3, damping: 2e-4, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
       {
-        member: "rotor",
-        element: "I",
-        rRange: ROTOR_TEETH_R,
-        teeth: 6,
-        theta0: 0,
-        spanFraction: 0.5,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.042, 0.054],
+            teeth: 6,
+            spanFraction: 0.5,
+            theta0: 0,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "stator",
-        element: "C",
-        rRange: STATOR_BORE_R,
-        winding: { standard: { m: 4, p: 2, Q: 8, coilPitch: 1, turns: 80 } },
-        slotRRange: STATOR_BORE_R,
-        slotFraction: 0.5,
-        ironRRange: STATOR_YOKE_R,
-        muR: 1000,
-      },
+        member: "outer",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.074, 0.09],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "concentrated-winding",
+            rRange: [0.057, 0.074],
+            slotRRange: [0.057, 0.074],
+            winding: {
+              standard: {
+                m: 4,
+                p: 2,
+                Q: 8,
+                coilPitch: 1,
+                turns: 80
+              }
+            },
+            slotFraction: 0.5,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      }
     ],
     circuits: [
       {

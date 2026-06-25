@@ -4,36 +4,60 @@
   // 4-pole 24-slot brushed DC with PM stator field, magnet arc ≈ 120°
   // Small-frame power-tool / wiper motor, OD ≈ 50 mm
   // Nr=22 ensures at least 2 grid cells across the 2.0 mm air gap
-  const ROTOR_YOKE_R    = [0.006, 0.013];
-  const ROTOR_SURFACE_R = [0.013, 0.019];
-  const STATOR_PM_R     = [0.021, 0.022];
-  const STATOR_YOKE_R   = [0.022, 0.025];
 
   const config = {
     grid: { Nr: 22, Ntheta: 256, rInner: 0.006, rOuter: 0.025, ell: 0.050 },
     poles: 4,
     mechanical: { J: 2e-5, damping: 5e-6, loadTorque: 0 },
+    motion: { inner: "rotating", outer: "static" },
     rings: [
       {
-        member: "rotor",
-        element: "W",
-        rRange: ROTOR_SURFACE_R,
-        winding: { standard: { m: 1, p: 4, Q: 24, coilPitch: 6, turns: 15 } },
-        slotRRange: ROTOR_SURFACE_R,
-        slotFraction: 0.55,
-        ironRRange: ROTOR_YOKE_R,
-        muR: 1000,
+        member: "inner",
+        components: [
+          {
+            kind: "iron",
+            rRange: [0.006, 0.013],
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "distributed-winding",
+            rRange: [0.013, 0.019],
+            slotRRange: [0.013, 0.019],
+            winding: {
+              standard: {
+                m: 1,
+                p: 4,
+                Q: 24,
+                coilPitch: 6,
+                turns: 15
+              }
+            },
+            slotFraction: 0.55,
+            muR: 1000,
+            alpha: 1
+          }
+        ]
       },
       {
-        member: "stator",
-        element: "M",
-        rRange: STATOR_PM_R,
-        magnets: 4,
-        Mr: 8e5,
-        backIron: true,
-        backIronRRange: STATOR_YOKE_R,
-        muR: 1000,
-      },
+        member: "outer",
+        components: [
+          {
+            kind: "magnet",
+            rRange: [0.021, 0.022],
+            poles: 4,
+            Mr: 800000,
+            muR: 1000,
+            alpha: 1
+          },
+          {
+            kind: "iron",
+            rRange: [0.022, 0.025],
+            muR: 1000,
+            alpha: 1
+          }
+        ]
+      }
     ],
     circuits: [
       {
