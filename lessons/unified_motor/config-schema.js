@@ -39,14 +39,40 @@
   }
 
   // ---------------------------------------------------------------------------
+  //  Body identity: geometry (inner/outer) vs kinematics (rotor/stator).
+  //
+  //  A ring's `member` is one of:
+  //    "inner" | "outer"  — geometric side of the air gap; motion comes from
+  //                         config.motion (the rotating side maps to "rotor").
+  //    "rotor" | "stator" — kinematic role given directly.
+  //
+  //  The engine, gap-eval, and renderers key on the kinematic role, so features
+  //  are always tagged "rotor"/"stator" (resolveRole). Gap derivation keys on
+  //  the geometric side (positionSide). The two are independent: an outrunner is
+  //  member "outer" with motion.outer === "rotating".
+  // ---------------------------------------------------------------------------
+  function resolveRole(ring, motion) {
+    const m = ring.member;
+    if (m === "rotor" || m === "stator") return m;
+    const mode = (motion && motion[m]) ? motion[m]
+      : (m === "inner" ? "rotating" : "static");
+    return mode === "rotating" ? "rotor" : "stator";
+  }
+
+  function positionSide(ring) {
+    const m = ring.member;
+    return (m === "outer" || m === "stator") ? "outer" : "inner";
+  }
+
+  // ---------------------------------------------------------------------------
   //  deriveGapBand(grid, rings) → { iInner, iOuter } | null
   //
   //  Automatically finds the longest contiguous pure-air radial run between the
-  //  outermost rotor-member row and the innermost stator-member row.
+  //  outermost inner-side row and the innermost outer-side row.
   //  Returns null if no valid band of width >= 2 exists.
   //
-  //  Dispatch is ONLY on ring.member / ring.element / ring.rRange (and sub-ranges).
-  //  No machine identity is used.
+  //  Dispatch is ONLY on ring.member (geometric side) / ring.element /
+  //  ring.components / ring.rRange (and sub-ranges). No machine identity is used.
   // ---------------------------------------------------------------------------
   function deriveGapBand(grid, rings) {
     const { Nr, rInner, rOuter } = grid;
@@ -58,13 +84,13 @@
       rCentre[i] = rInner + (i + 0.5) * dr;
     }
 
-    // Mark each row as occupied ("rotor" | "stator" | null)
+    // Mark each row as occupied ("inner" | "outer" | null) by geometric side.
     // A row is occupied if its cell centre lies in any ring footprint.
     // Uses the SAME cell-centre test as coveredCells: r0 <= r[i] < r1.
     const rowMember = new Array(Nr).fill(null);
 
     for (const ring of rings) {
-      const member = ring.member;
+      const member = positionSide(ring);
       const el = ring.element;
 
       // Collect rRange segments that this ring occupies
@@ -102,7 +128,7 @@
         const r1 = seg[1];
         for (let i = 0; i < Nr; i++) {
           if (rCentre[i] >= r0 && rCentre[i] < r1) {
-            // Mark as occupied; rotor wins over stator if both claim the same row
+            // Mark as occupied; inner wins over outer if both claim the same row
             // (should not happen in a valid config, but be deterministic)
             if (rowMember[i] === null) {
               rowMember[i] = member;
@@ -112,30 +138,30 @@
       }
     }
 
-    // Find outermost rotor row and innermost stator row
-    let outermostRotor = -1;
-    let innermostStator = Nr;
+    // Find outermost inner-side row and innermost outer-side row
+    let outermostInner = -1;
+    let innermostOuter = Nr;
 
     for (let i = 0; i < Nr; i++) {
-      if (rowMember[i] === "rotor") {
-        outermostRotor = i;
+      if (rowMember[i] === "inner") {
+        outermostInner = i;
       }
     }
     for (let i = 0; i < Nr; i++) {
-      if (rowMember[i] === "stator") {
-        innermostStator = i;
+      if (rowMember[i] === "outer") {
+        innermostOuter = i;
         break;
       }
     }
 
-    if (outermostRotor < 0 || innermostStator >= Nr) {
+    if (outermostInner < 0 || innermostOuter >= Nr) {
       return null;
     }
 
-    // Air annulus: unoccupied rows strictly between outermostRotor and innermostStator
-    // i.e. rows i where outermostRotor < i < innermostStator and rowMember[i] === null
-    const airStart = outermostRotor + 1;
-    const airEnd = innermostStator; // exclusive
+    // Air annulus: unoccupied rows strictly between outermostInner and innermostOuter
+    // i.e. rows i where outermostInner < i < innermostOuter and rowMember[i] === null
+    const airStart = outermostInner + 1;
+    const airEnd = innermostOuter; // exclusive
 
     if (airEnd <= airStart) {
       return null;
@@ -438,6 +464,53 @@
     return { member: m, components: comps };
   }
 
+  // Radial midpoint of a component ring (across all component sub-ranges).
+  function componentRingRadialMid(ring) {
+    let lo = Infinity, hi = -Infinity;
+    for (const c of ring.components) {
+      for (const s of [c.rRange, c.slotRRange]) {
+        if (Array.isArray(s) && s.length >= 2) {
+          if (s[0] < lo) lo = s[0];
+          if (s[1] > hi) hi = s[1];
+        }
+      }
+    }
+    return (lo + hi) / 2;
+  }
+
+  // Convert a whole config to the canonical component form: every ring becomes
+  // components, and legacy kinematic members (rotor/stator) become geometric
+  // sides (inner/outer) with a config.motion map (the rotor is the rotating
+  // side). Inner/outer is decided by mean radius. A config already in component +
+  // inner/outer form is returned with only its rings normalized. Pure function.
+  function toComponentConfig(config) {
+    const out = JSON.parse(JSON.stringify(config));
+    if (!Array.isArray(out.rings)) return out;
+    out.rings = out.rings.map(ringToComponents);
+
+    const hasLegacy = out.rings.some(function (r) { return r.member === "rotor" || r.member === "stator"; });
+    if (hasLegacy) {
+      const rotor = out.rings.filter(function (r) { return r.member === "rotor"; });
+      const stator = out.rings.filter(function (r) { return r.member === "stator"; });
+      if (rotor.length && stator.length) {
+        const mean = function (rs) {
+          let s = 0;
+          for (const r of rs) s += componentRingRadialMid(r);
+          return s / rs.length;
+        };
+        const rotorInner = mean(rotor) <= mean(stator);
+        for (const r of out.rings) {
+          const wasRotor = r.member === "rotor";
+          r.member = (wasRotor === rotorInner) ? "inner" : "outer";
+        }
+        out.motion = rotorInner
+          ? { inner: "rotating", outer: "static" }
+          : { inner: "static", outer: "rotating" };
+      }
+    }
+    return out;
+  }
+
   // Geometry-derived cage descriptor for one cage component (mirrors the element
   // "K" path), keyed at the component's first bar circuit index.
   function computeCageInfo(synth, comp, startIndex, config) {
@@ -468,8 +541,10 @@
   // Build features for one component ring. Returns { features, nCircuits, cageInfo }.
   // sliceSign flips magnet magnetization for fluxSource-driven slices. config is
   // needed only for cage R derivation (pass null when not building cage geometry).
-  function buildComponentRingFeatures(ring, circuitBase, sliceSign, config) {
-    const member = ring.member;
+  // motion (config.motion) resolves the ring's inner/outer side to its kinematic
+  // role; features are always tagged "rotor"/"stator".
+  function buildComponentRingFeatures(ring, circuitBase, sliceSign, config, motion) {
+    const member = resolveRole(ring, motion);
     const features = [];
     let nCircuits = 0;
     let cageInfo = null;
@@ -648,18 +723,19 @@
         const derived = deriveGapBand(g, config.rings);
         if (derived === null) {
           // Diagnose why
-          let hasRotor = false;
-          let hasStator = false;
+          let hasInner = false;
+          let hasOuter = false;
           for (const ring of config.rings) {
-            if (ring.member === "rotor") hasRotor = true;
-            if (ring.member === "stator") hasStator = true;
+            const side = positionSide(ring);
+            if (side === "inner") hasInner = true;
+            if (side === "outer") hasOuter = true;
           }
-          if (!hasRotor) {
-            errors.push("auto gap-band derivation failed: no rotor-member ring found");
-          } else if (!hasStator) {
-            errors.push("auto gap-band derivation failed: no stator-member ring found");
+          if (!hasInner) {
+            errors.push("auto gap-band derivation failed: no inner-side ring found");
+          } else if (!hasOuter) {
+            errors.push("auto gap-band derivation failed: no outer-side ring found");
           } else {
-            errors.push("auto gap-band derivation failed: no contiguous pure-air run of width >= 2 between outermost rotor and innermost stator rows");
+            errors.push("auto gap-band derivation failed: no contiguous pure-air run of width >= 2 between outermost inner-side and innermost outer-side rows");
           }
         }
       }
@@ -693,8 +769,8 @@
           errors.push(`rings[${ri}] must be a non-null object`);
           continue;
         }
-        if (ring.member !== "rotor" && ring.member !== "stator") {
-          errors.push(`rings[${ri}].member must be "rotor" or "stator"; got ${ring.member}`);
+        if (!["rotor", "stator", "inner", "outer"].includes(ring.member)) {
+          errors.push(`rings[${ri}].member must be one of {inner,outer,rotor,stator}; got ${ring.member}`);
         }
         if (ring.components != null) {
           validateComponents(ring, ri, errors, rInner, rOuter);
@@ -767,6 +843,31 @@
       }
     }
 
+    // motion — required when any ring is geometric (inner/outer). Exactly one of
+    // the two sides rotates (one rotor, one stator, matching the engine).
+    if (Array.isArray(rings)) {
+      const usesSides = rings.some(function (r) { return r && (r.member === "inner" || r.member === "outer"); });
+      if (usesSides) {
+        const motion = config.motion;
+        if (!motion || typeof motion !== "object") {
+          errors.push("motion must be a non-null object when rings use inner/outer members");
+        } else {
+          let rotatingCount = 0;
+          for (const side of ["inner", "outer"]) {
+            const v = motion[side];
+            if (v !== "rotating" && v !== "static") {
+              errors.push(`motion.${side} must be "rotating" or "static"; got ${v}`);
+            } else if (v === "rotating") {
+              rotatingCount++;
+            }
+          }
+          if (rotatingCount !== 1) {
+            errors.push(`exactly one of motion.inner / motion.outer must be "rotating"; got ${rotatingCount} rotating`);
+          }
+        }
+      }
+    }
+
     // circuits
     const circuits = config.circuits;
     const validTerminalTypes = ["AC", "DC", "PULSE", "STEP", "OPEN", "SHORT", "CURRENT"];
@@ -809,8 +910,14 @@
         const fs = stack.fluxSources[fi];
         if (!Number.isInteger(fs.ringRef) || fs.ringRef < 0 || fs.ringRef >= ringCount) {
           errors.push(`stack.fluxSources[${fi}].ringRef (${fs.ringRef}) is out of range [0, ${ringCount})`);
-        } else if (Array.isArray(rings) && rings[fs.ringRef] && rings[fs.ringRef].element !== "M") {
-          errors.push(`stack.fluxSources[${fi}].ringRef points to ring ${fs.ringRef} which is not element "M"`);
+        } else if (Array.isArray(rings) && rings[fs.ringRef]) {
+          const rr = rings[fs.ringRef];
+          const isMagnet = Array.isArray(rr.components)
+            ? rr.components.some(function (c) { return c.kind === "magnet"; })
+            : rr.element === "M";
+          if (!isMagnet) {
+            errors.push(`stack.fluxSources[${fi}].ringRef points to ring ${fs.ringRef} which has no magnet`);
+          }
         }
         if (!Array.isArray(fs.sliceSigns) || fs.sliceSigns.length !== nSlices) {
           errors.push(`stack.fluxSources[${fi}].sliceSigns.length must equal stack.slices (${nSlices})`);
@@ -977,7 +1084,7 @@
       const ring = rings[ri];
 
       if (ring.components) {
-        const cr = buildComponentRingFeatures(ring, circuitBase, 1, config);
+        const cr = buildComponentRingFeatures(ring, circuitBase, 1, config, config.motion);
         for (const f of cr.features) baseFeatures.push(f);
         circuitBase += cr.nCircuits;
         if (cr.cageInfo) cageInfo = cr.cageInfo;
@@ -1064,7 +1171,7 @@
     // Build per-slice sections, applying fluxSource sign flips to M rings
     const slices = [];
     for (let k = 0; k < N; k++) {
-      const sliceFeatures = buildSliceFeatures(rings, fluxSources, k);
+      const sliceFeatures = buildSliceFeatures(rings, fluxSources, k, config.motion);
 
       slices.push({
         section: {
@@ -1131,7 +1238,7 @@
   }
 
   // Build the feature list for a specific slice k, applying fluxSource sign flips
-  function buildSliceFeatures(rings, fluxSources, k) {
+  function buildSliceFeatures(rings, fluxSources, k, motion) {
     // Build a Map from ringIndex → sliceSigns[k] for M rings referenced by fluxSources
     const signMap = new Map();
     for (const fs of fluxSources) {
@@ -1146,7 +1253,7 @@
 
       if (ring.components) {
         const sign = signMap.has(ri) ? signMap.get(ri) : 1;
-        const cr = buildComponentRingFeatures(ring, circuitBase, sign, null);
+        const cr = buildComponentRingFeatures(ring, circuitBase, sign, null, motion);
         for (const f of cr.features) features.push(f);
         circuitBase += cr.nCircuits;
         continue;
@@ -1187,5 +1294,5 @@
     return features;
   }
 
-  UM.ConfigSchema = { validate, expand, ringToComponents };
+  UM.ConfigSchema = { validate, expand, ringToComponents, toComponentConfig };
 })();

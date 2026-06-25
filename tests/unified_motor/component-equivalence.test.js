@@ -49,9 +49,7 @@ function assertSameMultiset(a, b, label) {
 }
 
 function toComponentConfig(cfg, CS) {
-  const out = JSON.parse(JSON.stringify(cfg));
-  out.rings = out.rings.map((r) => CS.ringToComponents(r));
-  return out;
+  return CS.toComponentConfig(cfg);
 }
 
 test("every machine's element config and its component conversion expand identically", () => {
@@ -68,6 +66,15 @@ test("every machine's element config and its component conversion expand identic
 
       const v = CS.validate(compCfg);
       assert.ok(v.ok, `${entry.id}: component config must validate; errors: ${JSON.stringify(v.errors)}`);
+
+      // The conversion must decouple geometry (inner/outer) from motion: members
+      // become sides and a motion map with exactly one rotating side appears.
+      for (const r of compCfg.rings) {
+        assert.ok(r.member === "inner" || r.member === "outer",
+          `${entry.id}: converted ring member must be inner/outer; got ${r.member}`);
+      }
+      assert.ok(compCfg.motion && (compCfg.motion.inner === "rotating") !== (compCfg.motion.outer === "rotating"),
+        `${entry.id}: exactly one side must rotate; got ${JSON.stringify(compCfg.motion)}`);
 
       const compExp = CS.expand(compCfg);
 
