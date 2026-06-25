@@ -3,31 +3,22 @@
 
   const UM = window.UnifiedMotor || (window.UnifiedMotor = {});
 
+  const MU0 = 4e-7 * Math.PI;   // Bᵣ = μ₀·Mr (display remanence in tesla)
+  const MM = 1000;              // metres → millimetres for radius display
+
   // ---------------------------------------------------------------------------
-  //  Internal helpers
+  //  Internal helpers — the panel edits the component form exclusively, so all
+  //  geometry helpers read ring.components (never ring.element).
   // ---------------------------------------------------------------------------
 
-  // Collect radial occupancy segments for a ring using the same per-element
-  // rule as deriveGapBand in config-schema.js (lines 73–92).
+  // Radial occupancy segments of a component ring (every component sub-range).
   function ringSegments(ring) {
-    const el = ring.element;
-    const segments = [];
-    if (el === "I") {
-      segments.push(ring.rRange);
-    } else if (el === "M") {
-      segments.push(ring.rRange);
-      if (ring.backIron && ring.backIronRRange) {
-        segments.push(ring.backIronRRange);
-      }
-    } else if (el === "W" || el === "K") {
-      segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
-      segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
-    } else if (el === "C") {
-      segments.push(ring.slotRRange != null ? ring.slotRRange : ring.rRange);
-      segments.push(ring.ironRRange != null ? ring.ironRRange : ring.rRange);
-      segments.push(ring.rRange);
+    const segs = [];
+    for (const c of (ring.components || [])) {
+      if (Array.isArray(c.rRange)) segs.push(c.rRange);
+      if (Array.isArray(c.slotRRange)) segs.push(c.slotRRange);
     }
-    return segments;
+    return segs;
   }
 
   // Lower and upper radial extents of a ring across all its segments.
@@ -52,8 +43,7 @@
   // Expand the mesh-domain grid so it bounds all ring geometry. The grid's
   // [rInner, rOuter] is the radial extent the mesh can represent, so a radius
   // edit that grows past it must grow the grid rather than be rejected. Radial
-  // cell size (dr) is held roughly constant by rescaling Nr. Expand-only: a
-  // later shrink leaves a slightly larger (still valid) domain.
+  // cell size (dr) is held roughly constant by rescaling Nr. Expand-only.
   function fitGridToRings(config) {
     const g = config.grid;
     if (!g || !Array.isArray(config.rings) || config.rings.length === 0) return;
@@ -63,18 +53,23 @@
       const e = ringExtents(ring);
       if (e.lo < lo) lo = e.lo;
       if (e.hi > hi) hi = e.hi;
-      // The validator bounds the ring's own rRange against the grid, which can
-      // exceed the sub-segment (slot/iron) extents ringExtents reports, so
-      // include rRange directly.
-      if (Array.isArray(ring.rRange) && ring.rRange.length >= 2) {
-        if (ring.rRange[0] < lo) lo = ring.rRange[0];
-        if (ring.rRange[1] > hi) hi = ring.rRange[1];
-      }
     }
     if (!isFinite(lo) || !isFinite(hi)) return;
     g.rInner = Math.min(g.rInner, lo);
     g.rOuter = Math.max(g.rOuter, hi);
     if (dr > 0) g.Nr = Math.max(2, Math.round((g.rOuter - g.rInner) / dr));
+  }
+
+  // Which member-group is radially inner. Members are geometric (inner/outer),
+  // but mean-radius detection keeps this robust if a config is mislabelled.
+  function innerOuterGroups(config) {
+    const a = config.rings.filter(function (r) { return r.member === "inner"; });
+    const b = config.rings.filter(function (r) { return r.member === "outer"; });
+    function meanMid(rs) {
+      if (!rs.length) return Infinity;
+      let s = 0; for (const r of rs) s += ringMid(r); return s / rs.length;
+    }
+    return (meanMid(a) <= meanMid(b)) ? { inner: a, outer: b } : { inner: b, outer: a };
   }
 
   // ---------------------------------------------------------------------------
@@ -85,18 +80,10 @@
     const grid = config.grid;
     const dr = (grid.rOuter - grid.rInner) / grid.Nr;
 
-    const rotorRings = config.rings.filter(function (r) { return r.member === "rotor"; });
-    const statorRings = config.rings.filter(function (r) { return r.member === "stator"; });
-
-    // Mean midpoint radius of each group
-    function meanMid(rings) {
-      let sum = 0;
-      for (const r of rings) sum += ringMid(r);
-      return sum / rings.length;
-    }
-
-    const innerGroup = (meanMid(rotorRings) <= meanMid(statorRings)) ? rotorRings : statorRings;
-    const outerGroup = (meanMid(rotorRings) <= meanMid(statorRings)) ? statorRings : rotorRings;
+    const groups = innerOuterGroups(config);
+    const innerGroup = groups.inner;
+    const outerGroup = groups.outer;
+    if (!innerGroup.length || !outerGroup.length) return g;
 
     // rIn = max rHi over inner group; rOut = min rLo over outer group
     let rIn = -Infinity;
@@ -148,10 +135,8 @@
     // New gap-facing surface positions
     const newRIn = mid - g / 2;
     const newROut = mid + g / 2;
-    const delta_in = newRIn - rIn;   // negative when gap grows
-    const delta_out = newROut - rOut; // positive when gap grows
 
-    // Update every concrete slot in the inner owner that equals rIn
+    // Update every concrete component sub-range slot equal to the old surface.
     function updateRangeSlot(arr, oldVal, newVal) {
       if (!Array.isArray(arr) || arr.length < 2) return;
       for (let i = 0; i < arr.length; i++) {
@@ -159,18 +144,8 @@
       }
     }
 
-    const innerSegs = ringSegments(innerOwner);
-    for (const seg of innerSegs) {
-      updateRangeSlot(seg, rIn, newRIn);
-    }
-    // Also update the ring's own rRange slot if it equals rIn
-    updateRangeSlot(innerOwner.rRange, rIn, newRIn);
-
-    const outerSegs = ringSegments(outerOwner);
-    for (const seg of outerSegs) {
-      updateRangeSlot(seg, rOut, newROut);
-    }
-    updateRangeSlot(outerOwner.rRange, rOut, newROut);
+    for (const seg of ringSegments(innerOwner)) updateRangeSlot(seg, rIn, newRIn);
+    for (const seg of ringSegments(outerOwner)) updateRangeSlot(seg, rOut, newROut);
 
     return g;
   }
@@ -242,6 +217,93 @@
   }
 
   // ---------------------------------------------------------------------------
+  //  ensureComponentForm(config) — convert a legacy/element config to the
+  //  canonical component + inner/outer + motion form in place. Idempotent.
+  // ---------------------------------------------------------------------------
+  function ensureComponentForm(config) {
+    if (!Array.isArray(config.rings)) return;
+    const needsConvert = config.rings.some(function (r) {
+      return r && (!Array.isArray(r.components) || r.member === "rotor" || r.member === "stator");
+    });
+    if (!needsConvert) return;
+    const conv = UM.ConfigSchema.toComponentConfig(config);
+    for (const k of Object.keys(config)) delete config[k];
+    for (const k of Object.keys(conv)) config[k] = conv[k];
+  }
+
+  // ---------------------------------------------------------------------------
+  //  Semantic display metadata — one table mapping component fields to
+  //  human-readable labels + units. Values are stored in SI; toDisplay/
+  //  fromDisplay convert for the input. The user never sees raw Mr/Mtheta.
+  // ---------------------------------------------------------------------------
+  const COMPONENT_FIELDS = {
+    iron: [
+      { key: "teeth", label: "Teeth", int: true },
+      { key: "muR", label: "Rel. permeability μᵣ" },
+      { key: "Bknee", label: "Saturation knee Bₖₙₑₑ", unit: "T" },
+    ],
+    magnet: [
+      { key: "poles", label: "Poles", int: true },
+      { key: "Mr", label: "Remanence Bᵣ", unit: "T",
+        toDisplay: function (m) { return m * MU0; },
+        fromDisplay: function (b) { return b / MU0; } },
+      { key: "muR", label: "Rel. permeability μᵣ" },
+    ],
+    "distributed-winding": [
+      { key: "winding.standard.Q", label: "Slots Q", int: true },
+      { key: "winding.standard.turns", label: "Turns / coil", int: true },
+      { key: "slotFraction", label: "Slot fill fraction" },
+    ],
+    "concentrated-winding": [
+      { key: "winding.standard.Q", label: "Slots / teeth Q", int: true },
+      { key: "winding.standard.turns", label: "Turns / coil", int: true },
+      { key: "spanFraction", label: "Tooth span fraction" },
+    ],
+    cage: [
+      { key: "cage.bars", label: "Bars", int: true },
+      { key: "slotFraction", label: "Bar fill fraction" },
+    ],
+  };
+
+  const KIND_LABEL = {
+    iron: "iron",
+    magnet: "magnet",
+    "distributed-winding": "distributed winding",
+    "concentrated-winding": "concentrated winding",
+    cage: "cage",
+  };
+
+  function getPath(obj, path) {
+    const parts = path.split(".");
+    let o = obj;
+    for (const p of parts) { if (o == null) return undefined; o = o[p]; }
+    return o;
+  }
+  function setPath(obj, path, val) {
+    const parts = path.split(".");
+    let o = obj;
+    for (let i = 0; i < parts.length - 1; i++) {
+      if (o[parts[i]] == null) o[parts[i]] = {};
+      o = o[parts[i]];
+    }
+    o[parts[parts.length - 1]] = val;
+  }
+
+  // A default component sized inside the ring's current radial band. Only the
+  // circuit-free kinds (iron, magnet) are offered for add — winding/cage need
+  // matching circuits, which the validator enforces and which the circuit
+  // editor owns.
+  function defaultComponent(kind, ring) {
+    const ext = ringExtents(ring);
+    const r0 = isFinite(ext.lo) ? ext.lo : 0.03;
+    const r1 = isFinite(ext.hi) ? ext.hi : 0.04;
+    if (kind === "magnet") {
+      return { kind: "magnet", rRange: [r0, r1], poles: 2, Mr: 1 / MU0, alpha: 1 };
+    }
+    return { kind: "iron", rRange: [r0, r1], muR: 1000, alpha: 1 };
+  }
+
+  // ---------------------------------------------------------------------------
   //  Public API
   // ---------------------------------------------------------------------------
   UM.GeometryPanel = {
@@ -249,6 +311,7 @@
     setSlices: setSlices,
     defaultAxial: defaultAxial,
     commitEdit: commitEdit,
+    ensureComponentForm: ensureComponentForm,
   };
 
   // ---------------------------------------------------------------------------
@@ -258,20 +321,17 @@
     id: "geometry-editor",
     zone: "shelf",
     build: function (host, ctx) {
-      // Render per-ring geometry/material controls and global gap/slice controls.
-      // Rebuilds the host DOM on each call; returns unmount to clean up listeners.
-
       const listeners = [];
-
       function addListener(el, evt, fn) {
         el.addEventListener(evt, fn);
         listeners.push({ el: el, evt: evt, fn: fn });
       }
 
-      // A status line (kept outside the rebuilt content) and the editable
-      // content container. commitEdit reverts an edit that fails validation, so
-      // the panel must report the reason and resync inputs to the reverted
-      // values — otherwise a rejected edit silently does nothing.
+      // The live config is edited in component form. Convert on build so a
+      // freshly-loaded (legacy) machine becomes editable here without a runtime
+      // shim elsewhere.
+      ensureComponentForm(ctx.config);
+
       const statusEl = document.createElement("div");
       statusEl.className = "gp-status";
       statusEl.style.cssText = "color:#ff8a65;font-size:0.8em;min-height:1em;margin:0 0 4px;";
@@ -279,9 +339,7 @@
       host.appendChild(statusEl);
       host.appendChild(contentEl);
 
-      function setError(msg) {
-        statusEl.textContent = msg || "";
-      }
+      function setError(msg) { statusEl.textContent = msg || ""; }
 
       function applyEdit(mutateFn) {
         const res = commitEdit(ctx.config, function (c) {
@@ -297,90 +355,220 @@
         }
       }
 
-      function rebuild() {
-        contentEl.innerHTML = "";
-        const config = ctx.config;
-        const rings = config.rings || [];
+      // -- small DOM builders ---------------------------------------------------
+      function buildNumberInput(parent, label, value, onChange, opts) {
+        opts = opts || {};
+        const wrap = document.createElement("label");
+        wrap.className = "gp-field";
+        wrap.style.cssText = "display:flex;justify-content:space-between;gap:6px;font-size:0.82em;margin:2px 0;";
+        wrap.textContent = label + (opts.unit ? " (" + opts.unit + ")" : "") + ": ";
+        const inp = document.createElement("input");
+        inp.type = "number";
+        inp.style.cssText = "width:5.5em;";
+        inp.step = opts.step != null ? String(opts.step) : (opts.int ? "1" : "any");
+        inp.value = value;
+        addListener(inp, "change", function () {
+          const v = opts.int ? parseInt(inp.value, 10) : parseFloat(inp.value);
+          if (opts.int ? Number.isInteger(v) : isFinite(v)) onChange(v);
+        });
+        wrap.appendChild(inp);
+        parent.appendChild(wrap);
+        return inp;
+      }
 
-        // Per-ring controls
-        rings.forEach(function (ring, ri) {
-          const section = document.createElement("div");
-          section.className = "gp-ring";
+      function buildSelect(parent, label, value, options, onChange) {
+        const wrap = document.createElement("label");
+        wrap.className = "gp-field";
+        wrap.textContent = label + ": ";
+        const sel = document.createElement("select");
+        for (const o of options) {
+          const opt = document.createElement("option");
+          opt.value = o;
+          opt.textContent = o;
+          if (o === value) opt.selected = true;
+          sel.appendChild(opt);
+        }
+        addListener(sel, "change", function () { onChange(sel.value); });
+        wrap.appendChild(sel);
+        parent.appendChild(wrap);
+        return sel;
+      }
 
-          const title = document.createElement("div");
-          title.className = "gp-ring-title";
-          title.textContent = "Ring " + ri + " [" + ring.member + " / " + ring.element + "]";
-          section.appendChild(title);
+      function buildOpacity(parent, value, onChange) {
+        const wrap = document.createElement("label");
+        wrap.className = "gp-field gp-opacity";
+        wrap.textContent = "Opacity: ";
+        const inp = document.createElement("input");
+        inp.type = "range";
+        inp.min = "0"; inp.max = "1"; inp.step = "0.01";
+        inp.value = value != null ? value : 1;
+        const read = document.createElement("span");
+        read.textContent = " " + (value != null ? value : 1).toFixed(2);
+        addListener(inp, "input", function () {
+          read.textContent = " " + parseFloat(inp.value).toFixed(2);
+        });
+        addListener(inp, "change", function () {
+          const v = parseFloat(inp.value);
+          if (isFinite(v)) onChange(Math.max(0, Math.min(1, v)));
+        });
+        wrap.appendChild(inp);
+        wrap.appendChild(read);
+        parent.appendChild(wrap);
+      }
 
-          // rRange[0]
-          buildNumberInput(section, "rRange[0]", ring.rRange[0], function (v) {
-            applyEdit(function (c) { c.rings[ri].rRange[0] = v; });
-          });
-          // rRange[1]
-          buildNumberInput(section, "rRange[1]", ring.rRange[1], function (v) {
-            applyEdit(function (c) { c.rings[ri].rRange[1] = v; });
-          });
+      // -- one component card ---------------------------------------------------
+      function buildComponentCard(parent, ri, ci) {
+        const comp = ctx.config.rings[ri].components[ci];
+        const card = document.createElement("div");
+        card.className = "gp-comp";
+        card.style.cssText = "border:1px solid var(--grid,#2a313c);border-radius:4px;padding:4px 6px;margin:4px 0;background:var(--panel2,#232932);";
 
-          if (ring.element === "I" && ring.teeth != null) {
-            buildIntInput(section, "teeth", ring.teeth, function (v) {
-              applyEdit(function (c) { c.rings[ri].teeth = v; });
-            });
-          }
-          if (ring.element === "M" && ring.magnets != null) {
-            buildIntInput(section, "magnets", ring.magnets, function (v) {
-              applyEdit(function (c) { c.rings[ri].magnets = v; });
-            });
-          }
-          if ((ring.element === "W" || ring.element === "C") &&
-              ring.winding && ring.winding.standard) {
-            buildIntInput(section, "Q (slots)", ring.winding.standard.Q, function (v) {
-              applyEdit(function (c) { c.rings[ri].winding.standard.Q = v; });
-            });
-          }
-          if (ring.muR != null) {
-            buildNumberInput(section, "muR", ring.muR, function (v) {
-              applyEdit(function (c) { c.rings[ri].muR = v; });
-            });
-          }
-          if (ring.element === "M" && ring.Mr != null) {
-            buildNumberInput(section, "Mr", ring.Mr, function (v) {
-              applyEdit(function (c) { c.rings[ri].Mr = v; });
-            });
-          }
-          if (ring.Bknee != null) {
-            buildNumberInput(section, "Bknee", ring.Bknee, function (v) {
-              applyEdit(function (c) { c.rings[ri].Bknee = v; });
-            });
-          }
+        const head = document.createElement("div");
+        head.className = "gp-comp-head";
+        head.style.cssText = "display:flex;justify-content:space-between;align-items:center;";
+        const name = document.createElement("span");
+        name.className = "gp-comp-kind";
+        name.style.cssText = "font-weight:bold;color:var(--accent,#4ea1ff);";
+        name.textContent = KIND_LABEL[comp.kind] || comp.kind;
+        head.appendChild(name);
 
-          contentEl.appendChild(section);
+        const rm = document.createElement("button");
+        rm.className = "gp-comp-rm";
+        rm.style.cssText = "background:none;border:none;color:#ff8a65;cursor:pointer;font-size:0.9em;";
+        rm.textContent = "✕";
+        rm.title = "remove component";
+        addListener(rm, "click", function () {
+          applyEdit(function (c) { c.rings[ri].components.splice(ci, 1); });
+        });
+        head.appendChild(rm);
+        card.appendChild(head);
+
+        // Radii (mm)
+        buildNumberInput(card, "R inner", (comp.rRange[0] * MM).toFixed(2), function (v) {
+          applyEdit(function (c) { c.rings[ri].components[ci].rRange[0] = v / MM; });
+        }, { unit: "mm", step: 0.1 });
+        buildNumberInput(card, "R outer", (comp.rRange[1] * MM).toFixed(2), function (v) {
+          applyEdit(function (c) { c.rings[ri].components[ci].rRange[1] = v / MM; });
+        }, { unit: "mm", step: 0.1 });
+
+        // Kind-specific semantic fields (only those the component actually has)
+        for (const f of (COMPONENT_FIELDS[comp.kind] || [])) {
+          const raw = getPath(comp, f.key);
+          if (raw == null) continue;
+          const shown = f.toDisplay ? f.toDisplay(raw) : raw;
+          buildNumberInput(card, f.label, f.int ? shown : Number(shown),
+            (function (field) {
+              return function (v) {
+                const store = field.fromDisplay ? field.fromDisplay(v) : v;
+                applyEdit(function (c) { setPath(c.rings[ri].components[ci], field.key, store); });
+              };
+            })(f), { unit: f.unit, int: f.int });
+        }
+
+        buildOpacity(card, comp.alpha, function (v) {
+          applyEdit(function (c) { c.rings[ri].components[ci].alpha = v; });
         });
 
-        // Global gap length
+        parent.appendChild(card);
+      }
+
+      // -- one ring (a list of component cards + add control) -------------------
+      function buildRing(parent, ri) {
+        const ring = ctx.config.rings[ri];
+        const section = document.createElement("div");
+        section.className = "gp-ring";
+
+        const title = document.createElement("div");
+        title.className = "gp-ring-title";
+        title.textContent = "Ring " + ri;
+        section.appendChild(title);
+
+        (ring.components || []).forEach(function (comp, ci) {
+          buildComponentCard(section, ri, ci);
+        });
+
+        // Add component (circuit-free kinds only)
+        const addWrap = document.createElement("div");
+        addWrap.className = "gp-add";
+        const sel = document.createElement("select");
+        for (const k of ["iron", "magnet"]) {
+          const opt = document.createElement("option");
+          opt.value = k;
+          opt.textContent = KIND_LABEL[k];
+          sel.appendChild(opt);
+        }
+        const addBtn = document.createElement("button");
+        addBtn.textContent = "+ add";
+        addListener(addBtn, "click", function () {
+          const kind = sel.value;
+          applyEdit(function (c) {
+            c.rings[ri].components.push(defaultComponent(kind, c.rings[ri]));
+          });
+        });
+        addWrap.appendChild(sel);
+        addWrap.appendChild(addBtn);
+        section.appendChild(addWrap);
+
+        parent.appendChild(section);
+      }
+
+      // -- a body group (inner / outer) with its motion dropdown ----------------
+      function buildBody(parent, side) {
+        const ringIdx = [];
+        ctx.config.rings.forEach(function (r, i) { if (r.member === side) ringIdx.push(i); });
+        if (!ringIdx.length) return;
+
+        const group = document.createElement("div");
+        group.className = "gp-body";
+        group.style.cssText = "margin:6px 0;padding-top:4px;border-top:1px solid var(--grid,#2a313c);";
+
+        const head = document.createElement("div");
+        head.className = "gp-body-head";
+        head.style.cssText = "display:flex;justify-content:space-between;align-items:center;";
+        const label = document.createElement("span");
+        label.className = "gp-body-name";
+        label.style.cssText = "font-weight:bold;text-transform:capitalize;";
+        label.textContent = side + " body";
+        head.appendChild(label);
+
+        const motion = ctx.config.motion || {};
+        buildSelect(head, "Motion", motion[side] === "rotating" ? "rotating" : "static",
+          ["rotating", "static"], function (v) {
+            const other = side === "inner" ? "outer" : "inner";
+            applyEdit(function (c) {
+              if (!c.motion) c.motion = {};
+              // Exactly one side rotates — set this side and flip the other.
+              c.motion[side] = v;
+              c.motion[other] = (v === "rotating") ? "static" : "rotating";
+            });
+          });
+        group.appendChild(head);
+
+        for (const i of ringIdx) buildRing(group, i);
+        parent.appendChild(group);
+      }
+
+      function buildGapAndSlices() {
+        const config = ctx.config;
+
+        // Gap length
         const gapSection = document.createElement("div");
         gapSection.className = "gp-gap";
         const gapLabel = document.createElement("label");
-        gapLabel.textContent = "Gap length (m): ";
+        gapLabel.textContent = "Gap length (mm): ";
         const gapInput = document.createElement("input");
         gapInput.type = "number";
-        gapInput.step = "0.0001";
+        gapInput.step = "0.01";
         gapInput.min = "0";
-        // Compute current gap
-        const rotorRings = config.rings.filter(function (r) { return r.member === "rotor"; });
-        const statorRings = config.rings.filter(function (r) { return r.member === "stator"; });
-        if (rotorRings.length > 0 && statorRings.length > 0) {
+        const groups = innerOuterGroups(config);
+        if (groups.inner.length && groups.outer.length) {
           let rIn = -Infinity, rOut = Infinity;
-          const meanMid = function (rs) {
-            let s = 0; for (const r of rs) s += ringMid(r); return s / rs.length;
-          };
-          const innerG = (meanMid(rotorRings) <= meanMid(statorRings)) ? rotorRings : statorRings;
-          const outerG = (meanMid(rotorRings) <= meanMid(statorRings)) ? statorRings : rotorRings;
-          for (const r of innerG) { const h = ringExtents(r).hi; if (h > rIn) rIn = h; }
-          for (const r of outerG) { const l = ringExtents(r).lo; if (l < rOut) rOut = l; }
-          gapInput.value = (rOut - rIn).toFixed(6);
+          for (const r of groups.inner) { const h = ringExtents(r).hi; if (h > rIn) rIn = h; }
+          for (const r of groups.outer) { const l = ringExtents(r).lo; if (l < rOut) rOut = l; }
+          gapInput.value = ((rOut - rIn) * MM).toFixed(3);
         }
         addListener(gapInput, "change", function () {
-          const g = parseFloat(gapInput.value);
+          const g = parseFloat(gapInput.value) / MM;
           if (isFinite(g) && g > 0) {
             applyGapLength(config, g);
             ctx.requestRebuild();
@@ -403,11 +591,7 @@
         addBtn.textContent = "+ add slice";
         addBtn.disabled = nSlices >= 4;
         addListener(addBtn, "click", function () {
-          if (nSlices < 4) {
-            setSlices(config, nSlices + 1);
-            ctx.requestRebuild();
-            rebuild();
-          }
+          if (nSlices < 4) { setSlices(config, nSlices + 1); ctx.requestRebuild(); rebuild(); }
         });
         sliceSection.appendChild(addBtn);
 
@@ -415,11 +599,7 @@
         rmBtn.textContent = "- remove slice";
         rmBtn.disabled = nSlices <= 1;
         addListener(rmBtn, "click", function () {
-          if (nSlices > 1) {
-            setSlices(config, nSlices - 1);
-            ctx.requestRebuild();
-            rebuild();
-          }
+          if (nSlices > 1) { setSlices(config, nSlices - 1); ctx.requestRebuild(); rebuild(); }
         });
         sliceSection.appendChild(rmBtn);
         contentEl.appendChild(sliceSection);
@@ -434,8 +614,6 @@
 
           const ax = stack.axial;
           const defs = ax.branches || {};
-
-          // Per-branch controls
           for (const bname of Object.keys(defs)) {
             const b = defs[bname];
             const bDiv = document.createElement("div");
@@ -443,80 +621,45 @@
             const bLabel = document.createElement("span");
             bLabel.textContent = "Branch \"" + bname + "\": ";
             bDiv.appendChild(bLabel);
-
-            const fields = ["Br", "length", "area", "muR", "reluctance", "mmf"];
-            for (const field of fields) {
+            for (const field of ["Br", "length", "area", "muR", "reluctance", "mmf"]) {
               if (b[field] != null) {
-                buildNumberInput(bDiv, field, b[field], function (fieldName) {
+                buildNumberInput(bDiv, field, b[field], (function (fieldName) {
                   return function (v) {
-                    applyEdit(function (c) {
-                      c.stack.axial.branches[bname][fieldName] = v;
-                    });
+                    applyEdit(function (c) { c.stack.axial.branches[bname][fieldName] = v; });
                   };
-                }(field));
+                })(field));
               }
             }
             axSection.appendChild(bDiv);
           }
-
-          // Per-loop controls
           ax.loops.forEach(function (loop, li) {
             const lDiv = document.createElement("div");
             lDiv.className = "gp-loop";
             const lLabel = document.createElement("span");
             lLabel.textContent = "Loop " + li + ": ";
             lDiv.appendChild(lLabel);
-
             if (loop.Raxial != null) {
               buildNumberInput(lDiv, "Raxial", loop.Raxial, function (v) {
-                applyEdit(function (c) {
-                  c.stack.axial.loops[li].Raxial = v;
-                });
+                applyEdit(function (c) { c.stack.axial.loops[li].Raxial = v; });
               });
             }
             if (loop.Fpm != null) {
               buildNumberInput(lDiv, "Fpm", loop.Fpm, function (v) {
-                applyEdit(function (c) {
-                  c.stack.axial.loops[li].Fpm = v;
-                });
+                applyEdit(function (c) { c.stack.axial.loops[li].Fpm = v; });
               });
             }
-
             axSection.appendChild(lDiv);
           });
-
           contentEl.appendChild(axSection);
         }
       }
 
-      function buildNumberInput(parent, label, value, onChange) {
-        const wrap = document.createElement("label");
-        wrap.textContent = label + ": ";
-        const inp = document.createElement("input");
-        inp.type = "number";
-        inp.step = "any";
-        inp.value = value;
-        addListener(inp, "change", function () {
-          const v = parseFloat(inp.value);
-          if (isFinite(v)) onChange(v);
-        });
-        wrap.appendChild(inp);
-        parent.appendChild(wrap);
-      }
-
-      function buildIntInput(parent, label, value, onChange) {
-        const wrap = document.createElement("label");
-        wrap.textContent = label + ": ";
-        const inp = document.createElement("input");
-        inp.type = "number";
-        inp.step = "1";
-        inp.value = value;
-        addListener(inp, "change", function () {
-          const v = parseInt(inp.value, 10);
-          if (Number.isInteger(v)) onChange(v);
-        });
-        wrap.appendChild(inp);
-        parent.appendChild(wrap);
+      function rebuild() {
+        contentEl.innerHTML = "";
+        if (!Array.isArray(ctx.config.rings)) return;
+        buildBody(contentEl, "inner");
+        buildBody(contentEl, "outer");
+        buildGapAndSlices();
       }
 
       rebuild();

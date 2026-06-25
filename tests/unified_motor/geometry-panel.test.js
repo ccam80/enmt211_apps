@@ -8,6 +8,8 @@ const assert = require("node:assert/strict");
 // ---------------------------------------------------------------------------
 //  Headless harness — no DOM required for pure-logic tests.
 //  document access lives only inside build() callbacks, not tested here.
+//  The panel edits the canonical component form, so every fixture is converted
+//  via ConfigSchema.toComponentConfig first (what the panel does on load).
 // ---------------------------------------------------------------------------
 
 if (!globalThis.window) globalThis.window = globalThis;
@@ -41,10 +43,15 @@ require(path.join(ROOT, "lessons/unified_motor/geometry-panel.js"));
 
 const { applyGapLength, setSlices, defaultAxial, commitEdit } = UM.GeometryPanel;
 
-// Helper: deep-copy the pmsm config from the MACHINES entry.
+// Helper: the pmsm config in canonical component form (what the panel edits).
 function pmsmConfig() {
   const entry = UM.MACHINES.find(function (m) { return m.id === "pmsm"; });
-  return JSON.parse(JSON.stringify(entry.config));
+  return UM.ConfigSchema.toComponentConfig(JSON.parse(JSON.stringify(entry.config)));
+}
+
+// Locate a ring's component by kind.
+function comp(ring, kind) {
+  return ring.components.find(function (c) { return c.kind === kind; });
 }
 
 // ---------------------------------------------------------------------------
@@ -53,7 +60,7 @@ function pmsmConfig() {
 
 test("applyGapLength sets a symmetric gap on an inrunner (pmsm)", function () {
   const cfg = pmsmConfig();
-  // pmsm: rotor rRange[1] = 0.042, stator rRange[0] = 0.044 (slotRRange[0] also 0.044)
+  // pmsm: inner (rotor) magnet hi = 0.042, outer (stator) winding lo = 0.044
   // mid0 = 0.043, g0 = 0.002
   const mid0 = 0.043;
 
@@ -62,20 +69,20 @@ test("applyGapLength sets a symmetric gap on an inrunner (pmsm)", function () {
   assert.ok(Math.abs(achieved - 0.003) < 1e-9,
     "returned gap must be 0.003 ±1e-9, got " + achieved);
 
-  // Rotor surface is rings[0].rRange[1] — the gap-facing hi of the inner owner
-  assert.ok(Math.abs(cfg.rings[0].rRange[1] - (mid0 - 0.0015)) < 1e-9,
-    "rings[0].rRange[1] must be mid0 - 0.0015 = " + (mid0 - 0.0015) + ", got " + cfg.rings[0].rRange[1]);
+  // Inner body gap-facing surface = the magnet component's outer radius
+  const mag = comp(cfg.rings[0], "magnet");
+  assert.ok(Math.abs(mag.rRange[1] - (mid0 - 0.0015)) < 1e-9,
+    "inner magnet rRange[1] must be mid0 - 0.0015 = " + (mid0 - 0.0015) + ", got " + mag.rRange[1]);
 
-  // Stator bore: rings[1].rRange[0] and rings[1].slotRRange[0]
-  assert.ok(Math.abs(cfg.rings[1].rRange[0] - (mid0 + 0.0015)) < 1e-9,
-    "rings[1].rRange[0] must be mid0 + 0.0015 = " + (mid0 + 0.0015) + ", got " + cfg.rings[1].rRange[0]);
-  assert.ok(Math.abs(cfg.rings[1].slotRRange[0] - (mid0 + 0.0015)) < 1e-9,
-    "rings[1].slotRRange[0] must be mid0 + 0.0015 = " + (mid0 + 0.0015) + ", got " + cfg.rings[1].slotRRange[0]);
+  // Outer body gap-facing surface = the winding component's bore (rRange + slotRRange)
+  const wnd = comp(cfg.rings[1], "distributed-winding");
+  assert.ok(Math.abs(wnd.rRange[0] - (mid0 + 0.0015)) < 1e-9,
+    "outer winding rRange[0] must be mid0 + 0.0015 = " + (mid0 + 0.0015) + ", got " + wnd.rRange[0]);
+  assert.ok(Math.abs(wnd.slotRRange[0] - (mid0 + 0.0015)) < 1e-9,
+    "outer winding slotRRange[0] must be mid0 + 0.0015 = " + (mid0 + 0.0015) + ", got " + wnd.slotRRange[0]);
 
   // Mid-gap is unchanged
-  const newRIn = cfg.rings[0].rRange[1];
-  const newROut = cfg.rings[1].rRange[0];
-  const newMid = (newRIn + newROut) / 2;
+  const newMid = (mag.rRange[1] + wnd.rRange[0]) / 2;
   assert.ok(Math.abs(newMid - mid0) < 1e-9,
     "midpoint must be unchanged at " + mid0 + ", got " + newMid);
 });
@@ -98,9 +105,9 @@ test("applyGapLength keeps the config valid and expandable", function () {
 });
 
 test("applyGapLength is topology-agnostic for an outrunner (stator inner, rotor outer)", function () {
-  // Stator is radially inside the rotor — the inner group must be detected as stator.
-  // No expand() call: the engine meshes inrunners only.
-  const cfg = {
+  // Stator is radially inside the rotor — the inner group must be detected as
+  // the radially-inner body regardless of which one rotates.
+  const cfg = UM.ConfigSchema.toComponentConfig({
     grid: { Nr: 20, Ntheta: 64, rInner: 0.02, rOuter: 0.06, ell: 0.05 },
     poles: 4,
     mechanical: { J: 1e-4 },
@@ -109,22 +116,26 @@ test("applyGapLength is topology-agnostic for an outrunner (stator inner, rotor 
       { member: "rotor",  element: "I", rRange: [0.034, 0.060] },
     ],
     circuits: [],
-  };
-  // mid0 = (0.030 + 0.034) / 2 = 0.032, g0 = 0.004
-  const mid0 = 0.032;
+  });
+  // The rotor (outer) rotates — motion must reflect the outrunner topology.
+  assert.strictEqual(cfg.motion.outer, "rotating", "outer (rotor) body must rotate");
+  assert.strictEqual(cfg.motion.inner, "static", "inner (stator) body must be static");
 
+  // mid0 = (0.030 + 0.034) / 2 = 0.032, g0 = 0.004
   const achieved = applyGapLength(cfg, 0.006);
 
   assert.ok(Math.abs(achieved - 0.006) < 1e-9,
     "returned gap must be 0.006 ±1e-9, got " + achieved);
 
-  // Inner group = stator; its upper surface should move to mid0 - 0.003 = 0.029
-  assert.ok(Math.abs(cfg.rings[0].rRange[1] - 0.029) < 1e-9,
-    "stator rRange[1] must be 0.029, got " + cfg.rings[0].rRange[1]);
+  // Inner group (member inner); its upper surface should move to mid0 - 0.003 = 0.029
+  const innerIron = comp(cfg.rings[0], "iron");
+  assert.ok(Math.abs(innerIron.rRange[1] - 0.029) < 1e-9,
+    "inner iron rRange[1] must be 0.029, got " + innerIron.rRange[1]);
 
-  // Outer group = rotor; its lower surface should move to mid0 + 0.003 = 0.035
-  assert.ok(Math.abs(cfg.rings[1].rRange[0] - 0.035) < 1e-9,
-    "rotor rRange[0] must be 0.035, got " + cfg.rings[1].rRange[0]);
+  // Outer group (member outer); its lower surface should move to mid0 + 0.003 = 0.035
+  const outerIron = comp(cfg.rings[1], "iron");
+  assert.ok(Math.abs(outerIron.rRange[0] - 0.035) < 1e-9,
+    "outer iron rRange[0] must be 0.035, got " + outerIron.rRange[0]);
 });
 
 test("applyGapLength clamps the gap to keep >= 2.5 grid cells", function () {
@@ -182,10 +193,12 @@ test("setSlices back to 1 drops stack.axial (bit-identical reduction)", function
 
 test("commitEdit applies and keeps the config valid", function () {
   const cfg = pmsmConfig();
-  const r = commitEdit(cfg, function (c) { c.rings[0].muR = 500; });
+  const iron = comp(cfg.rings[0], "iron"); // rotor back-iron component
+  const idx = cfg.rings[0].components.indexOf(iron);
+  const r = commitEdit(cfg, function (c) { c.rings[0].components[idx].muR = 500; });
 
   assert.strictEqual(r.ok, true, "commitEdit must return ok:true for a valid edit");
-  assert.strictEqual(cfg.rings[0].muR, 500, "muR must be 500 after commit");
+  assert.strictEqual(cfg.rings[0].components[idx].muR, 500, "muR must be 500 after commit");
 });
 
 test("commitEdit reverts an invalid edit in place and reports errors", function () {
@@ -193,8 +206,10 @@ test("commitEdit reverts an invalid edit in place and reports errors", function 
   const before = JSON.stringify(cfg);
   const ref = cfg;
 
-  // Q=12 violates coilPitch (6) <= Q/p = 12/8 = 1.5 — actually Q/p = 12/8 = 1.5 < coilPitch=6
-  const r = commitEdit(cfg, function (c) { c.rings[1].winding.standard.Q = 12; });
+  // Q=12 violates coilPitch (6) <= Q/p = 12/8 = 1.5
+  const wnd = comp(cfg.rings[1], "distributed-winding");
+  const idx = cfg.rings[1].components.indexOf(wnd);
+  const r = commitEdit(cfg, function (c) { c.rings[1].components[idx].winding.standard.Q = 12; });
 
   assert.strictEqual(r.ok, false, "commitEdit must return ok:false for an invalid edit");
   assert.ok(Array.isArray(r.errors) && r.errors.length > 0,
@@ -207,7 +222,9 @@ test("commitEdit reverts an invalid edit in place and reports errors", function 
 test("editing Q within range does not change the resolved circuit count", function () {
   const cfg = pmsmConfig();
   // Q=72 is valid: coilPitch=6 <= Q/p = 72/8 = 9
-  const r = commitEdit(cfg, function (c) { c.rings[1].winding.standard.Q = 72; });
+  const wnd = comp(cfg.rings[1], "distributed-winding");
+  const idx = cfg.rings[1].components.indexOf(wnd);
+  const r = commitEdit(cfg, function (c) { c.rings[1].components[idx].winding.standard.Q = 72; });
 
   assert.strictEqual(r.ok, true, "commitEdit must return ok:true for Q=72");
 

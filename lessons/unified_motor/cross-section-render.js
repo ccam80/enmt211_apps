@@ -47,6 +47,13 @@
     const distributed = [];
     const concentrated = [];
     for (const feat of conductorFeatures) {
+      // Component features carry their winding kind directly.
+      if (feat.component != null) {
+        if (feat.component === "concentrated-winding") concentrated.push(feat);
+        else distributed.push(feat);
+        continue;
+      }
+      // Element-feature fallback: classify by the owning ring's element type.
       let matched = false;
       for (const ring of rings) {
         if (ring.member !== feat.member) continue;
