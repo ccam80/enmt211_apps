@@ -65,6 +65,10 @@ test("every machine's element config and its component conversion expand identic
     for (const entry of machines) {
       const elemExp = CS.expand(entry.config);
       const compCfg = toComponentConfig(entry.config, CS);
+
+      const v = CS.validate(compCfg);
+      assert.ok(v.ok, `${entry.id}: component config must validate; errors: ${JSON.stringify(v.errors)}`);
+
       const compExp = CS.expand(compCfg);
 
       assert.strictEqual(compExp.slices.length, elemExp.slices.length, `${entry.id}: slice count`);

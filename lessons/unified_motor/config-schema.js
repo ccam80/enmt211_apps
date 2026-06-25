@@ -514,6 +514,71 @@
     return { features, nCircuits, cageInfo };
   }
 
+  // Validate one component ring's components array. Pushes messages into errors.
+  function validateComponents(ring, ri, errors, rInner, rOuter) {
+    const kinds = ["iron", "magnet", "distributed-winding", "concentrated-winding", "cage"];
+    if (!Array.isArray(ring.components) || ring.components.length === 0) {
+      errors.push(`rings[${ri}].components must be a non-empty array`);
+      return;
+    }
+    for (let ci = 0; ci < ring.components.length; ci++) {
+      const c = ring.components[ci];
+      const tag = `rings[${ri}].components[${ci}]`;
+      if (!c || typeof c !== "object") { errors.push(`${tag} must be a non-null object`); continue; }
+      if (!kinds.includes(c.kind)) errors.push(`${tag}.kind must be one of {${kinds.join(",")}}; got ${c.kind}`);
+
+      if (!Array.isArray(c.rRange) || c.rRange.length !== 2) {
+        errors.push(`${tag}.rRange must be a [r0, r1] array`);
+      } else {
+        const [r0, r1] = c.rRange;
+        if (typeof r0 !== "number" || typeof r1 !== "number" || !isFinite(r0) || !isFinite(r1)) {
+          errors.push(`${tag}.rRange values must be finite numbers`);
+        } else {
+          if (rInner !== null && r0 < rInner) errors.push(`${tag}.rRange[0] (${r0}) must be >= grid.rInner (${rInner})`);
+          if (rOuter !== null && r1 > rOuter) errors.push(`${tag}.rRange[1] (${r1}) must be <= grid.rOuter (${rOuter})`);
+          if (r0 >= r1) errors.push(`${tag}.rRange[0] (${r0}) must be < rRange[1] (${r1})`);
+        }
+      }
+      if (c.alpha != null && (typeof c.alpha !== "number" || !(c.alpha >= 0 && c.alpha <= 1))) {
+        errors.push(`${tag}.alpha must be a number in [0, 1]; got ${c.alpha}`);
+      }
+      if (c.muR != null && (typeof c.muR !== "number" || !isFinite(c.muR) || c.muR <= 0)) {
+        errors.push(`${tag}.muR must be a finite positive number; got ${c.muR}`);
+      }
+      if (c.Bknee != null && (typeof c.Bknee !== "number" || !isFinite(c.Bknee) || c.Bknee <= 0)) {
+        errors.push(`${tag}.Bknee must be a finite positive number; got ${c.Bknee}`);
+      }
+      if (c.kind === "magnet") {
+        if (c.poles != null && !isFinitePositiveInt(c.poles)) errors.push(`${tag}.poles must be an integer >= 1; got ${c.poles}`);
+        if (c.Mr != null && (typeof c.Mr !== "number" || !isFinite(c.Mr))) errors.push(`${tag}.Mr must be a finite number; got ${c.Mr}`);
+      }
+      if (c.kind === "distributed-winding" || c.kind === "concentrated-winding" || c.kind === "cage") {
+        const el = c.kind === "concentrated-winding" ? "C" : c.kind === "cage" ? "K" : "W";
+        const synth = { member: ring.member, element: el, rRange: c.rRange, slotRRange: c.slotRRange,
+          winding: c.winding, cage: c.cage, slotWidth: c.slotWidth, slotFraction: c.slotFraction,
+          spanFraction: c.spanFraction, poleTeeth: c.poleTeeth };
+        try {
+          const routing = resolveWinding(synth);
+          if (routing) {
+            const v = LIB.WindingModel.validate(routing);
+            if (!v.ok) for (const e of v.errors) errors.push(`${tag} winding: ${e}`);
+          } else {
+            errors.push(`${tag} is a winding component but has no winding/cage routing`);
+          }
+        } catch (e) {
+          errors.push(`${tag} winding resolution error: ${e.message}`);
+        }
+        if (c.poleTeeth != null) {
+          if (c.kind !== "concentrated-winding") errors.push(`${tag}.poleTeeth is only valid on a concentrated-winding component`);
+          const pt = c.poleTeeth;
+          if (!isFinitePositiveInt(pt.count)) errors.push(`${tag}.poleTeeth.count must be an integer >= 1; got ${pt.count}`);
+          if (typeof pt.pitch !== "number" || !isFinite(pt.pitch) || pt.pitch <= 0) errors.push(`${tag}.poleTeeth.pitch must be a finite positive number; got ${pt.pitch}`);
+          if (pt.span != null && (typeof pt.span !== "number" || !(pt.span > 0 && pt.span <= 1))) errors.push(`${tag}.poleTeeth.span must be in (0, 1]; got ${pt.span}`);
+        }
+      }
+    }
+  }
+
   // ---------------------------------------------------------------------------
   //  validate(config) → { ok:boolean, errors:string[] }
   // ---------------------------------------------------------------------------
@@ -630,6 +695,10 @@
         }
         if (ring.member !== "rotor" && ring.member !== "stator") {
           errors.push(`rings[${ri}].member must be "rotor" or "stator"; got ${ring.member}`);
+        }
+        if (ring.components != null) {
+          validateComponents(ring, ri, errors, rInner, rOuter);
+          continue;
         }
         const validElements = ["W", "C", "M", "I", "K"];
         if (!validElements.includes(ring.element)) {
@@ -783,6 +852,21 @@
       for (let ri = 0; ri < rings.length; ri++) {
         const ring = rings[ri];
         if (!ring || typeof ring !== "object") { resolvable = false; break; }
+        if (ring.components) {
+          for (const c of ring.components) {
+            if (c.kind !== "distributed-winding" && c.kind !== "concentrated-winding" && c.kind !== "cage") continue;
+            const el2 = c.kind === "concentrated-winding" ? "C" : c.kind === "cage" ? "K" : "W";
+            const synth = { member: ring.member, element: el2, rRange: c.rRange, slotRRange: c.slotRRange,
+              winding: c.winding, cage: c.cage, slotFraction: c.slotFraction };
+            try {
+              const routing = resolveWinding(synth);
+              if (!routing) { resolvable = false; break; }
+              resolvedTotal += LIB.WindingModel.ampereConductors(routing).nCircuits;
+            } catch (e) { resolvable = false; break; }
+          }
+          if (!resolvable) break;
+          continue;
+        }
         const el = ring.element;
         if (el === "W" || el === "C" || el === "K") {
           try {
