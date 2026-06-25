@@ -274,18 +274,72 @@
     o[parts[parts.length - 1]] = val;
   }
 
-  // A default component sized inside the ring's current radial band. Only the
-  // circuit-free kinds (iron, magnet) are offered for add — winding/cage need
-  // matching circuits, which the validator enforces and which the circuit
-  // editor owns.
-  function defaultComponent(kind, ring) {
+  // A default component sized inside the ring's current radial band. Winding and
+  // cage components also need matching circuits appended (see the add handler);
+  // their default routing is full-pitch and tied to the machine pole count so it
+  // validates immediately.
+  function defaultComponent(kind, ring, poles) {
     const ext = ringExtents(ring);
     const r0 = isFinite(ext.lo) ? ext.lo : 0.03;
     const r1 = isFinite(ext.hi) ? ext.hi : 0.04;
     if (kind === "magnet") {
-      return { kind: "magnet", rRange: [r0, r1], poles: 2, Mr: 1 / MU0, alpha: 1 };
+      return { kind: "magnet", rRange: [r0, r1], poles: poles || 2, Mr: 1 / MU0, alpha: 1 };
+    }
+    if (kind === "cage") {
+      return { kind: "cage", rRange: [r0, r1], slotRRange: [r0, r1],
+        cage: { bars: 12 }, slotFraction: 0.5, muR: 1000, alpha: 1 };
+    }
+    if (kind === "distributed-winding" || kind === "concentrated-winding") {
+      const p = (poles && poles % 2 === 0) ? poles : 2;
+      const m = 3, Q = 2 * m * p, coilPitch = 2 * m;
+      return { kind: kind, rRange: [r0, r1], slotRRange: [r0, r1],
+        winding: { standard: { m: m, p: p, Q: Q, coilPitch: coilPitch, turns: 20 } },
+        slotFraction: 0.5, muR: 1000, alpha: 1 };
     }
     return { kind: "iron", rRange: [r0, r1], muR: 1000, alpha: 1 };
+  }
+
+  // Number of circuits a winding/cage component resolves to (m phases, or one per
+  // cage bar). Iron/magnet contribute none. Used to keep config.circuits in lockstep
+  // with component add/remove so the validator's circuit-count check passes.
+  function windingCircuitCount(comp) {
+    if (comp.kind === "cage") return (comp.cage && comp.cage.bars) || 0;
+    if ((comp.kind === "distributed-winding" || comp.kind === "concentrated-winding") &&
+        comp.winding && comp.winding.standard) {
+      return comp.winding.standard.m || 0;
+    }
+    return 0;
+  }
+
+  function ringWindingCount(ring) {
+    let n = 0;
+    for (const c of (ring.components || [])) n += windingCircuitCount(c);
+    return n;
+  }
+
+  // Index into config.circuits of the first circuit of component (ri, ci), in the
+  // same ring-then-component order expand() assigns circuit indices.
+  function circuitBaseForComponent(config, ri, ci) {
+    let base = 0;
+    for (let r = 0; r < config.rings.length; r++) {
+      const comps = config.rings[r].components || [];
+      for (let c = 0; c < comps.length; c++) {
+        if (r === ri && c === ci) return base;
+        base += windingCircuitCount(comps[c]);
+      }
+    }
+    return base;
+  }
+
+  // Index into config.circuits of ring ri's first circuit.
+  function ringCircuitBase(config, ri) {
+    let base = 0;
+    for (let r = 0; r < ri; r++) base += ringWindingCount(config.rings[r]);
+    return base;
+  }
+
+  function defaultCircuit() {
+    return { terminal: { type: "OPEN" }, commutation: { mode: "none" }, R: 1.0 };
   }
 
   // ---------------------------------------------------------------------------
@@ -320,7 +374,11 @@
 
       function setError(msg) { statusEl.textContent = msg || ""; }
 
-      function applyEdit(mutateFn) {
+      // refresh=true rebuilds the panel DOM after a successful edit — required for
+      // structural changes (add/remove component or ring, motion flip) so the card
+      // list reflects the new config. Field edits leave it false to avoid
+      // disrupting the input being edited.
+      function applyEdit(mutateFn, refresh) {
         const res = commitEdit(ctx.config, function (c) {
           mutateFn(c);
           fitGridToRings(c);
@@ -328,6 +386,7 @@
         if (res.ok) {
           setError("");
           ctx.requestRebuild();
+          if (refresh) rebuild();
         } else {
           setError("Rejected: " + ((res.errors && res.errors[0]) || "invalid geometry"));
           rebuild();
@@ -417,7 +476,11 @@
         rm.textContent = "✕";
         rm.title = "remove component";
         addListener(rm, "click", function () {
-          applyEdit(function (c) { c.rings[ri].components.splice(ci, 1); });
+          applyEdit(function (c) {
+            const n = windingCircuitCount(c.rings[ri].components[ci]);
+            if (n > 0) c.circuits.splice(circuitBaseForComponent(c, ri, ci), n);
+            c.rings[ri].components.splice(ci, 1);
+          }, true);
         });
         head.appendChild(rm);
         card.appendChild(head);
@@ -456,33 +519,61 @@
         const ring = ctx.config.rings[ri];
         const section = document.createElement("div");
         section.className = "gp-ring";
+        section.style.cssText = "margin:4px 0 4px 8px;padding-left:6px;border-left:2px solid var(--grid,#2a313c);";
 
         const title = document.createElement("div");
         title.className = "gp-ring-title";
-        title.textContent = "Ring " + ri;
+        title.style.cssText = "display:flex;justify-content:space-between;align-items:center;font-size:0.85em;opacity:0.85;";
+        const titleText = document.createElement("span");
+        titleText.textContent = "Ring " + ri;
+        title.appendChild(titleText);
+
+        const rmRing = document.createElement("button");
+        rmRing.style.cssText = "background:none;border:none;color:#ff8a65;cursor:pointer;font-size:0.85em;";
+        rmRing.textContent = "✕ ring";
+        rmRing.title = "remove ring";
+        addListener(rmRing, "click", function () {
+          applyEdit(function (c) {
+            const cnt = ringWindingCount(c.rings[ri]);
+            if (cnt > 0) c.circuits.splice(ringCircuitBase(c, ri), cnt);
+            c.rings.splice(ri, 1);
+          }, true);
+        });
+        title.appendChild(rmRing);
         section.appendChild(title);
 
         (ring.components || []).forEach(function (comp, ci) {
           buildComponentCard(section, ri, ci);
         });
 
-        // Add component (circuit-free kinds only)
+        // Add component — any kind. Winding/cage components also append the
+        // circuits they resolve to so the config stays valid.
         const addWrap = document.createElement("div");
         addWrap.className = "gp-add";
+        addWrap.style.cssText = "display:flex;gap:4px;margin:4px 0;";
         const sel = document.createElement("select");
-        for (const k of ["iron", "magnet"]) {
+        for (const k of ["iron", "magnet", "distributed-winding", "concentrated-winding", "cage"]) {
           const opt = document.createElement("option");
           opt.value = k;
           opt.textContent = KIND_LABEL[k];
           sel.appendChild(opt);
         }
         const addBtn = document.createElement("button");
-        addBtn.textContent = "+ add";
+        addBtn.textContent = "+ component";
         addListener(addBtn, "click", function () {
           const kind = sel.value;
           applyEdit(function (c) {
-            c.rings[ri].components.push(defaultComponent(kind, c.rings[ri]));
-          });
+            const r = c.rings[ri];
+            const comp = defaultComponent(kind, r, c.poles);
+            const n = windingCircuitCount(comp);
+            if (n > 0) {
+              const at = ringCircuitBase(c, ri) + ringWindingCount(r);
+              const add = [];
+              for (let k2 = 0; k2 < n; k2++) add.push(defaultCircuit());
+              c.circuits.splice.apply(c.circuits, [at, 0].concat(add));
+            }
+            r.components.push(comp);
+          }, true);
         });
         addWrap.appendChild(sel);
         addWrap.appendChild(addBtn);
@@ -495,7 +586,6 @@
       function buildBody(parent, side) {
         const ringIdx = [];
         ctx.config.rings.forEach(function (r, i) { if (r.member === side) ringIdx.push(i); });
-        if (!ringIdx.length) return;
 
         const group = document.createElement("div");
         group.className = "gp-body";
@@ -519,11 +609,38 @@
               // Exactly one side rotates — set this side and flip the other.
               c.motion[side] = v;
               c.motion[other] = (v === "rotating") ? "static" : "rotating";
-            });
+            }, true);
           });
         group.appendChild(head);
 
         for (const i of ringIdx) buildRing(group, i);
+
+        // Add a ring to this body.
+        const addRingWrap = document.createElement("div");
+        addRingWrap.style.cssText = "margin:4px 0 4px 8px;";
+        const addRingBtn = document.createElement("button");
+        addRingBtn.textContent = "+ ring";
+        addRingBtn.title = "add a ring to the " + side + " body";
+        addListener(addRingBtn, "click", function () {
+          applyEdit(function (c) {
+            let lo = Infinity, hi = -Infinity;
+            for (const r of c.rings) {
+              if (r.member !== side) continue;
+              const e = ringExtents(r);
+              if (e.lo < lo) lo = e.lo;
+              if (e.hi > hi) hi = e.hi;
+            }
+            if (!isFinite(lo)) {
+              const g = c.grid, w = (g.rOuter - g.rInner) * 0.2;
+              if (side === "inner") { lo = g.rInner; hi = g.rInner + w; }
+              else { hi = g.rOuter; lo = g.rOuter - w; }
+            }
+            c.rings.push({ member: side, components: [{ kind: "iron", rRange: [lo, hi], muR: 1000, alpha: 1 }] });
+          }, true);
+        });
+        addRingWrap.appendChild(addRingBtn);
+        group.appendChild(addRingWrap);
+
         parent.appendChild(group);
       }
 

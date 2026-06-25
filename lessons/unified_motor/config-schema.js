@@ -41,27 +41,22 @@
   // ---------------------------------------------------------------------------
   //  Body identity: geometry (inner/outer) vs kinematics (rotor/stator).
   //
-  //  A ring's `member` is one of:
-  //    "inner" | "outer"  — geometric side of the air gap; motion comes from
-  //                         config.motion (the rotating side maps to "rotor").
-  //    "rotor" | "stator" — kinematic role given directly.
-  //
-  //  The engine, gap-eval, and renderers key on the kinematic role, so features
-  //  are always tagged "rotor"/"stator" (resolveRole). Gap derivation keys on
-  //  the geometric side (positionSide). The two are independent: an outrunner is
-  //  member "outer" with motion.outer === "rotating".
+  //  A ring's `member` is its geometric side of the air gap — "inner" | "outer".
+  //  `config.motion` says which side rotates. The engine, gap-eval, and renderers
+  //  key on the kinematic role, so features are always tagged "rotor"/"stator"
+  //  (resolveRole). Gap derivation keys on the geometric side (positionSide). The
+  //  two are independent: an outrunner is member "outer" with
+  //  motion.outer === "rotating".
   // ---------------------------------------------------------------------------
   function resolveRole(ring, motion) {
     const m = ring.member;
-    if (m === "rotor" || m === "stator") return m;
     const mode = (motion && motion[m]) ? motion[m]
       : (m === "inner" ? "rotating" : "static");
     return mode === "rotating" ? "rotor" : "stator";
   }
 
   function positionSide(ring) {
-    const m = ring.member;
-    return (m === "outer" || m === "stator") ? "outer" : "inner";
+    return ring.member === "outer" ? "outer" : "inner";
   }
 
   // ---------------------------------------------------------------------------
