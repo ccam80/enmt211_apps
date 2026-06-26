@@ -404,9 +404,32 @@
     if (!routing || !Array.isArray(routing.phases)) return null;
     const slotRRange = synth.slotRRange != null ? synth.slotRRange : synth.rRange;
     const nSlots = routing.nSlots;
+    const slotTheta = routing.slotTheta;
     const angularWidth = synth.slotWidth != null
       ? synth.slotWidth
       : (synth.slotFraction != null ? synth.slotFraction : 0.5) * (TWO_PI / nSlots);
+
+    // Resolve the actual per-(circuit, slot) radial sub-band the field model
+    // assigned — a double-layer slot stacks its two circuits as radial layers —
+    // so end turns land on the same bands the cap face draws. Falls back to the
+    // full slot band where a slot carries a single conductor.
+    const raw = LIB.WindingModel.conductorFeatures(routing,
+      { rRange: slotRRange, member: synth.member, angularWidth: angularWidth });
+    const bandOf = new Map();
+    for (const f of raw) {
+      const center = (f.thetaRange[0] + f.thetaRange[1]) / 2;
+      let s = 0, best = Infinity;
+      for (let i = 0; i < nSlots; i++) {
+        let d = Math.abs(slotTheta[i] - center);
+        if (d > Math.PI) d = TWO_PI - d;
+        if (d < best) { best = d; s = i; }
+      }
+      bandOf.set(f.circuit + ":" + s, f.rRange);
+    }
+    function band(circuitLocal, slot) {
+      const b = bandOf.get(circuitLocal + ":" + slot);
+      return b ? b.slice() : slotRRange.slice();
+    }
 
     const coils = [];
     let circuitIndex = 0;
@@ -419,6 +442,8 @@
               slotGo: coil.slotGo,
               slotReturn: coil.slotReturn,
               turns: coil.turns,
+              goRRange: band(circuitIndex, coil.slotGo),
+              retRRange: band(circuitIndex, coil.slotReturn),
             });
           }
         }
@@ -430,7 +455,7 @@
       member: synth.member,
       slotRRange: slotRRange.slice(),
       angularWidth: angularWidth,
-      slotTheta: routing.slotTheta.slice(),
+      slotTheta: slotTheta.slice(),
       coils: coils,
     };
   }

@@ -80,8 +80,10 @@
     for (const coil of winding.coils) {
       const goTheta  = st[coil.slotGo];
       const retTheta = st[coil.slotReturn];
-      const goWires  = distributedWireLayout({ rRange: sr, thetaRange: [goTheta - w / 2, goTheta + w / 2], turns: coil.turns });
-      const retWires = distributedWireLayout({ rRange: sr, thetaRange: [retTheta - w / 2, retTheta + w / 2], turns: coil.turns });
+      const goBand  = coil.goRRange  || sr;
+      const retBand = coil.retRRange || sr;
+      const goWires  = distributedWireLayout({ rRange: goBand,  thetaRange: [goTheta - w / 2, goTheta + w / 2], turns: coil.turns });
+      const retWires = distributedWireLayout({ rRange: retBand, thetaRange: [retTheta - w / 2, retTheta + w / 2], turns: coil.turns });
       const n = Math.min(goWires.length, retWires.length);
 
       for (let e = 0; e < 2; e++) {
@@ -688,18 +690,25 @@
       const z0full = sliceAxialBounds(0, N, ell).z0;
       const z1full = sliceAxialBounds(N - 1, N, ell).z1;
 
+      function strokeFor(circuit) {
+        const i = ((circuit % WIRE_PALETTE.length) + WIRE_PALETTE.length) % WIRE_PALETTE.length;
+        const c = hexToRgb(WIRE_PALETTE[i]);
+        return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + endCapAlpha + ")";
+      }
+
+      // Whole-arc item — for end turns that sit beyond the stack ends, where a
+      // single depth orders coherently against the body.
       function pushArc(arc, lw) {
         const ewDepth = L3.depthOf({ x: arc.points[0], y: arc.points[1], z: arc.points[2] });
         const _arc = arc, _lw = lw;
         items.push({
           depth: ewDepth,
           paint: function () {
-            const i = ((_arc.circuit % WIRE_PALETTE.length) + WIRE_PALETTE.length) % WIRE_PALETTE.length;
-            const c = hexToRgb(WIRE_PALETTE[i]);
             ctx.save();
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            ctx.strokeStyle = "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + endCapAlpha + ")";
+            ctx.strokeStyle = strokeFor(_arc.circuit);
             ctx.lineWidth = _lw;
+            ctx.lineCap = "round";
             ctx.beginPath();
             const pts = _arc.points, ns = pts.length / 3;
             for (let pi = 0; pi < ns; pi++) {
@@ -713,9 +722,39 @@
         });
       }
 
+      // Per-segment items — for the tooth helix, which threads the solid body and
+      // must depth-sort against it segment-by-segment (one depth for the whole
+      // spiral would paint it entirely in front of or behind the iron).
+      function pushArcSegmented(arc, lw) {
+        const pts = arc.points, ns = pts.length / 3;
+        for (let pi = 0; pi < ns - 1; pi++) {
+          const ax = pts[pi * 3],       ay = pts[pi * 3 + 1],       az = pts[pi * 3 + 2];
+          const bx = pts[(pi + 1) * 3], by = pts[(pi + 1) * 3 + 1], bz = pts[(pi + 1) * 3 + 2];
+          const depth = L3.depthOf({ x: (ax + bx) / 2, y: (ay + by) / 2, z: (az + bz) / 2 });
+          const _ax = ax, _ay = ay, _az = az, _bx = bx, _by = by, _bz = bz, _c = arc.circuit, _lw = lw;
+          items.push({
+            depth: depth,
+            paint: function () {
+              ctx.save();
+              ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+              ctx.strokeStyle = strokeFor(_c);
+              ctx.lineWidth = _lw;
+              ctx.lineCap = "round";
+              const p0 = L3.project({ x: _ax, y: _ay, z: _az });
+              const p1 = L3.project({ x: _bx, y: _by, z: _bz });
+              ctx.beginPath();
+              ctx.moveTo(p0.px, p0.py);
+              ctx.lineTo(p1.px, p1.py);
+              ctx.stroke();
+              ctx.restore();
+            },
+          });
+        }
+      }
+
       for (const wnd of (expanded.windings || [])) {
         if (wnd.kind === "concentrated") {
-          for (const arc of concentratedHelix(wnd, { ell: ell })) pushArc(arc, 1.5);
+          for (const arc of concentratedHelix(wnd, { ell: ell })) pushArcSegmented(arc, 1.5);
         } else {
           for (const arc of distributedEndArcs(wnd, { ell: ell, bulge: ell * 0.15 })) pushArc(arc, 2);
         }

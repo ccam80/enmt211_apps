@@ -25,6 +25,7 @@ require(path.join(ROOT, "lessons/unified_motor/config-schema.js"));
 require(path.join(ROOT, "lessons/unified_motor/machines/pmsm.js"));
 require(path.join(ROOT, "lessons/unified_motor/machines/bldc.js"));
 require(path.join(ROOT, "lessons/unified_motor/machines/induction-3ph.js"));
+require(path.join(ROOT, "lessons/unified_motor/machines/wound-field-synchronous.js"));
 
 const UM = window.UnifiedMotor;
 function cfg(id) {
@@ -65,6 +66,25 @@ test("concentrated winding is tagged for the helical wrap", function () {
   assert.ok(e.windings.length >= 1);
   assert.ok(e.windings.every(function (w) { return w.kind === "concentrated"; }),
     "bldc windings drive the concentrated tooth helix");
+});
+
+test("double-layer slots resolve end-turn wires to per-circuit sub-bands", function () {
+  // wound-field-synchronous stacks two circuits in shared slots; the end turns
+  // must land on the radial sub-band the field model assigned (so they register
+  // with the cap discs), not on the full slot band.
+  const e = UM.ConfigSchema.expand(cfg("wound-field-synchronous"));
+  const w = e.windings.filter(function (x) { return x.kind === "distributed"; })
+    .sort(function (a, b) { return b.coils.length - a.coils.length; })[0];
+  const sr = w.slotRRange, full = sr[1] - sr[0];
+
+  const subbanded = w.coils.filter(function (c) {
+    return (c.goRRange[1] - c.goRRange[0]) < full - 1e-9 || (c.retRRange[1] - c.retRRange[0]) < full - 1e-9;
+  });
+  assert.ok(subbanded.length > 0, "a double-layer winding resolves sub-bands");
+  for (const c of w.coils) {
+    assert.ok(c.goRRange[0] >= sr[0] - 1e-12 && c.goRRange[1] <= sr[1] + 1e-12, "go band inside slot band");
+    assert.ok(c.retRRange[0] >= sr[0] - 1e-12 && c.retRRange[1] <= sr[1] + 1e-12, "return band inside slot band");
+  }
 });
 
 test("endCapAlpha defaults to 1 and passes through from config", function () {
