@@ -663,6 +663,29 @@
         title.textContent = "Transparency";
         sec.appendChild(title);
 
+        // End-cap (end-winding + cage-ring) opacity — one render-only alpha,
+        // separate from the physical layer opacities below.
+        (function () {
+          const wrap = document.createElement("label");
+          wrap.style.cssText = "display:flex;align-items:center;gap:6px;font-size:0.82em;margin:2px 0;";
+          const lab = document.createElement("span");
+          lab.style.cssText = "flex:1;";
+          lab.textContent = "end caps";
+          const cur = ctx.config.endCapAlpha != null ? ctx.config.endCapAlpha : 1;
+          const inp = document.createElement("input");
+          inp.type = "range"; inp.min = "0"; inp.max = "1"; inp.step = "0.01"; inp.value = cur;
+          const read = document.createElement("span");
+          read.style.cssText = "width:2.5em;text-align:right;";
+          read.textContent = cur.toFixed(2);
+          addListener(inp, "input", function () { read.textContent = parseFloat(inp.value).toFixed(2); });
+          addListener(inp, "change", function () {
+            const v = Math.max(0, Math.min(1, parseFloat(inp.value)));
+            applyEdit(function (c) { c.endCapAlpha = v; }, false);
+          });
+          wrap.appendChild(lab); wrap.appendChild(inp); wrap.appendChild(read);
+          sec.appendChild(wrap);
+        })();
+
         for (const side of ["inner", "outer"]) {
           bodyComponents(ctx.config, side).forEach(function (comp) {
             const wrap = document.createElement("label");

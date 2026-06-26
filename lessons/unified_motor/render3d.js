@@ -52,105 +52,120 @@
     };
   }
 
-  // ---------------------------------------------------------------------------
-  //  endWindingArcs(conductorFeatures, opts) → arc[]
-  //
-  //  Groups features by circuit; within each circuit pairs go-slot (turns>0) with
-  //  return-slot (turns<0) by nearest angle. Returns arc objects with 3-D points
-  //  tracing a smooth curve from go-slot to return-slot, bulging axially beyond
-  //  the stack end at z = sign*(|zEnd| + bulge).
-  // ---------------------------------------------------------------------------
-  function endWindingArcs(conductorFeatures, opts) {
-    if (!conductorFeatures || conductorFeatures.length === 0) return [];
-    opts = opts || {};
-    const zEnd    = opts.zEnd   != null ? opts.zEnd   : 0;
-    const bulge   = opts.bulge  != null ? opts.bulge  : 0.005;
-    const sign    = opts.sign   != null ? opts.sign   : 1;
-    const samples = opts.samples != null ? opts.samples : 8;
+  function angleDelta(from, to) {
+    let d = to - from;
+    if (d >  Math.PI) d -= 2 * Math.PI;
+    if (d < -Math.PI) d += 2 * Math.PI;
+    return d;
+  }
 
-    const byCircuit = new Map();
-    for (const feat of conductorFeatures) {
-      const circuit = feat.circuit != null ? feat.circuit : 0;
-      if (!byCircuit.has(circuit)) byCircuit.set(circuit, []);
-      byCircuit.get(circuit).push(feat);
-    }
+  // ---------------------------------------------------------------------------
+  //  distributedEndArcs(winding, opts) → arc[]
+  //
+  //  Real lap-winding end turns: for each coil (slotGo→slotReturn from the true
+  //  routing) connect wire k of the go slot to wire k of the return slot — one
+  //  arc per wire, not per slot — bulging axially past both stack ends. Wire
+  //  layout reuses the cap-face layout so the turns land on the cap discs.
+  // ---------------------------------------------------------------------------
+  function distributedEndArcs(winding, opts) {
+    opts = opts || {};
+    const ell     = opts.ell != null ? opts.ell : 0.05;
+    const bulge   = opts.bulge != null ? opts.bulge : ell * 0.15;
+    const samples = opts.samples != null ? opts.samples : 10;
+    const w  = winding.angularWidth;
+    const sr = winding.slotRRange;
+    const st = winding.slotTheta;
 
     const arcs = [];
+    for (const coil of winding.coils) {
+      const goTheta  = st[coil.slotGo];
+      const retTheta = st[coil.slotReturn];
+      const goWires  = distributedWireLayout({ rRange: sr, thetaRange: [goTheta - w / 2, goTheta + w / 2], turns: coil.turns });
+      const retWires = distributedWireLayout({ rRange: sr, thetaRange: [retTheta - w / 2, retTheta + w / 2], turns: coil.turns });
+      const n = Math.min(goWires.length, retWires.length);
 
-    for (const [circuit, feats] of byCircuit) {
-      const goSlots     = feats.filter(function (f) { return f.turns > 0; });
-      const returnSlots = feats.filter(function (f) { return f.turns < 0; });
-      if (goSlots.length === 0 || returnSlots.length === 0) continue;
-
-      function meanAngle(feat) {
-        const [t0, t1] = feat.thetaRange;
-        return (t0 + t1) / 2;
-      }
-      function meanRadius(feat) {
-        const [r0, r1] = feat.rRange;
-        return (r0 + r1) / 2;
-      }
-
-      const sortedGo = goSlots.slice().sort(function (a, b) {
-        return meanAngle(a) - meanAngle(b);
-      });
-
-      const usedReturn = new Set();
-
-      for (const go of sortedGo) {
-        const goAngle = meanAngle(go);
-        let bestIdx = -1;
-        let bestDist = Infinity;
-        for (let ri = 0; ri < returnSlots.length; ri++) {
-          if (usedReturn.has(ri)) continue;
-          const retAngle = meanAngle(returnSlots[ri]);
-          let diff = Math.abs(retAngle - goAngle);
-          if (diff > Math.PI) diff = 2 * Math.PI - diff;
-          if (diff < bestDist) {
-            bestDist = diff;
-            bestIdx = ri;
+      for (let e = 0; e < 2; e++) {
+        const sign  = e === 0 ? -1 : 1;
+        const zBase = sign * (ell / 2);
+        const zPeak = sign * (ell / 2 + bulge);
+        for (let k = 0; k < n; k++) {
+          const gW = goWires[k], rW = retWires[k];
+          const gR = Math.hypot(gW.x, gW.y), gT = Math.atan2(gW.y, gW.x);
+          const rR = Math.hypot(rW.x, rW.y), rT = Math.atan2(rW.y, rW.x);
+          const dT = angleDelta(gT, rT);
+          const points = new Float64Array(samples * 3);
+          for (let si = 0; si < samples; si++) {
+            const t = si / (samples - 1);
+            const theta = gT + t * dT;
+            const r = gR + t * (rR - gR);
+            const z = zBase + (zPeak - zBase) * Math.sin(Math.PI * t);
+            points[si * 3 + 0] = r * Math.cos(theta);
+            points[si * 3 + 1] = r * Math.sin(theta);
+            points[si * 3 + 2] = z;
           }
+          arcs.push({ circuit: coil.circuit, points });
         }
-        if (bestIdx < 0) continue;
-        usedReturn.add(bestIdx);
-
-        const ret = returnSlots[bestIdx];
-        const goTheta  = meanAngle(go);
-        const retTheta = meanAngle(ret);
-        const goR      = meanRadius(go);
-        const retR     = meanRadius(ret);
-
-        const zBase   = sign * Math.abs(zEnd);
-        const zPeak   = sign * (Math.abs(zEnd) + bulge);
-        const points  = new Float64Array(samples * 3);
-
-        const midIdx = Math.floor((samples - 1) / 2);
-        for (let si = 0; si < samples; si++) {
-          const t = si / (samples - 1);
-          let dTheta = retTheta - goTheta;
-          if (dTheta >  Math.PI) dTheta -= 2 * Math.PI;
-          if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
-          const theta = goTheta + t * dTheta;
-
-          let zFrac;
-          if (si === midIdx) {
-            zFrac = 1;
-          } else {
-            zFrac = Math.sin(Math.PI * t);
-          }
-          const z = zBase + (zPeak - zBase) * zFrac;
-          const r = goR + t * (retR - goR);
-
-          points[si * 3 + 0] = r * Math.cos(theta);
-          points[si * 3 + 1] = r * Math.sin(theta);
-          points[si * 3 + 2] = z;
-        }
-
-        arcs.push({ circuit, points });
       }
     }
-
     return arcs;
+  }
+
+  // ---------------------------------------------------------------------------
+  //  concentratedHelix(winding, opts) → arc[]
+  //
+  //  Concentrated (tooth) coils wrap a single tooth. Each coil is drawn as one
+  //  helix that spirals around the tooth between its two slots, advancing along
+  //  the axial length: θ swings across the slot pair and r bows over the tooth's
+  //  inner/outer faces while z runs the stack. Turns are capped for legibility.
+  // ---------------------------------------------------------------------------
+  function concentratedHelix(winding, opts) {
+    opts = opts || {};
+    const ell   = opts.ell != null ? opts.ell : 0.05;
+    const bulge = opts.bulge != null ? opts.bulge : ell * 0.06;
+    const sr = winding.slotRRange;
+    const st = winding.slotTheta;
+    const rMid = 0.5 * (sr[0] + sr[1]);
+    const half = 0.5 * (sr[1] - sr[0]);
+
+    const arcs = [];
+    for (const coil of winding.coils) {
+      const dT = angleDelta(st[coil.slotGo], st[coil.slotReturn]);
+      const thetaTooth = st[coil.slotGo] + dT / 2;
+      const turns = Math.min(6, Math.max(2, Math.abs(Math.round(coil.turns))));
+      const segs = turns * 24;
+      const points = new Float64Array((segs + 1) * 3);
+      for (let i = 0; i <= segs; i++) {
+        const u   = i / segs;
+        const phi = u * turns * 2 * Math.PI;
+        const theta = thetaTooth + (dT / 2) * Math.cos(phi);
+        const r     = rMid + (half + bulge) * Math.sin(phi);
+        const z     = -ell / 2 + u * ell;
+        points[i * 3 + 0] = r * Math.cos(theta);
+        points[i * 3 + 1] = r * Math.sin(theta);
+        points[i * 3 + 2] = z;
+      }
+      arcs.push({ circuit: coil.circuit, points });
+    }
+    return arcs;
+  }
+
+  // ---------------------------------------------------------------------------
+  //  cageEndRing(features) → { member, rRange } | null
+  //
+  //  A cage shorts every bar with a solid conducting end ring at each axial end.
+  //  The ring spans the bars' radial band; it is rendered as a flat filled
+  //  annulus on the end faces.
+  // ---------------------------------------------------------------------------
+  function cageEndRing(features) {
+    let r0 = Infinity, r1 = -Infinity, member = null;
+    for (const f of features) {
+      if (f.kind !== "conductor" || f.component !== "cage" || !f.rRange) continue;
+      if (f.rRange[0] < r0) r0 = f.rRange[0];
+      if (f.rRange[1] > r1) r1 = f.rRange[1];
+      member = f.member;
+    }
+    if (member === null) return null;
+    return { member: member, rRange: [r0, r1] };
   }
 
   // ---------------------------------------------------------------------------
@@ -663,40 +678,72 @@
         });
       }
 
-      // End-winding arcs at the two outer ends only.
-      const conductorFeats = features.filter(function (f) { return f.kind === "conductor"; });
-      if (conductorFeats.length > 0) {
-        const ends = [];
-        if (k === 0)     ends.push({ zEnd: z0, sign: -1 });
-        if (k === N - 1) ends.push({ zEnd: z1, sign:  1 });
-        for (const end of ends) {
-          const ewArcs = endWindingArcs(conductorFeats, {
-            zEnd: end.zEnd, bulge: ell * 0.15, sign: end.sign, samples: 8,
+    }
+
+    // --- End caps: real end windings (per-wire distributed turns / concentrated
+    //     tooth helices) + cage shorting rings. Driven by the true coil
+    //     connectivity in expanded.windings; modulated by the end-cap alpha.
+    const endCapAlpha = expanded.endCapAlpha != null ? expanded.endCapAlpha : 1;
+    if (endCapAlpha > 0) {
+      const z0full = sliceAxialBounds(0, N, ell).z0;
+      const z1full = sliceAxialBounds(N - 1, N, ell).z1;
+
+      function pushArc(arc, lw) {
+        const ewDepth = L3.depthOf({ x: arc.points[0], y: arc.points[1], z: arc.points[2] });
+        const _arc = arc, _lw = lw;
+        items.push({
+          depth: ewDepth,
+          paint: function () {
+            const i = ((_arc.circuit % WIRE_PALETTE.length) + WIRE_PALETTE.length) % WIRE_PALETTE.length;
+            const c = hexToRgb(WIRE_PALETTE[i]);
+            ctx.save();
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.strokeStyle = "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + endCapAlpha + ")";
+            ctx.lineWidth = _lw;
+            ctx.beginPath();
+            const pts = _arc.points, ns = pts.length / 3;
+            for (let pi = 0; pi < ns; pi++) {
+              const pp = L3.project({ x: pts[pi * 3], y: pts[pi * 3 + 1], z: pts[pi * 3 + 2] });
+              if (pi === 0) ctx.moveTo(pp.px, pp.py);
+              else          ctx.lineTo(pp.px, pp.py);
+            }
+            ctx.stroke();
+            ctx.restore();
+          },
+        });
+      }
+
+      for (const wnd of (expanded.windings || [])) {
+        if (wnd.kind === "concentrated") {
+          for (const arc of concentratedHelix(wnd, { ell: ell })) pushArc(arc, 1.5);
+        } else {
+          for (const arc of distributedEndArcs(wnd, { ell: ell, bulge: ell * 0.15 })) pushArc(arc, 2);
+        }
+      }
+
+      // Cage shorting rings — a flat filled annulus on each end face.
+      const ring = cageEndRing(expanded.slices[0].section.features);
+      if (ring) {
+        const COPPER = [184, 115, 51];
+        for (const zEnd of [z0full, z1full]) {
+          const _z = zEnd;
+          const _ring = ring;
+          const depth = L3.depthOf({ x: _ring.rRange[1], y: 0, z: _z });
+          items.push({
+            depth: depth,
+            paint: function () {
+              ctx.save();
+              ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+              const A = faceAffine(L3, _z, _ring.rRange[1]);
+              ctx.transform(A.a, A.b, A.c, A.d, A.e, A.f);
+              ctx.beginPath();
+              ctx.arc(0, 0, _ring.rRange[1], 0, 2 * Math.PI, false);
+              ctx.arc(0, 0, _ring.rRange[0], 0, 2 * Math.PI, true);
+              ctx.fillStyle = "rgba(" + COPPER[0] + "," + COPPER[1] + "," + COPPER[2] + "," + endCapAlpha + ")";
+              ctx.fill("evenodd");
+              ctx.restore();
+            },
           });
-          for (const arc of ewArcs) {
-            const ewDepth = L3.depthOf({ x: arc.points[0], y: arc.points[1], z: arc.points[2] });
-            const _arc = arc;
-            items.push({
-              depth: ewDepth,
-              paint: function () {
-                const color = WIRE_PALETTE[_arc.circuit % WIRE_PALETTE.length];
-                ctx.save();
-                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-                ctx.strokeStyle = color;
-                ctx.lineWidth   = 2;
-                ctx.beginPath();
-                const pts = _arc.points;
-                const ns  = pts.length / 3;
-                for (let pi = 0; pi < ns; pi++) {
-                  const pp = L3.project({ x: pts[pi * 3], y: pts[pi * 3 + 1], z: pts[pi * 3 + 2] });
-                  if (pi === 0) ctx.moveTo(pp.px, pp.py);
-                  else          ctx.lineTo(pp.px, pp.py);
-                }
-                ctx.stroke();
-                ctx.restore();
-              },
-            });
-          }
         }
       }
     }
@@ -718,7 +765,8 @@
     }
   }
 
-  UM.Render3D = { paint, register, sliceAxialBounds, faceAffine, endWindingArcs };
+  UM.Render3D = { paint, register, sliceAxialBounds, faceAffine,
+    distributedEndArcs, concentratedHelix, cageEndRing };
 
   if (UM.registerRender3D) register(UM);
 })();

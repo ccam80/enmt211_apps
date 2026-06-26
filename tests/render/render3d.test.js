@@ -158,51 +158,75 @@ describe("render3d", () => {
     assert.ok(Math.abs(p01.py - Pv.py) < 1e-9, "ap(0,R).py ≈ Pv.py");
   });
 
-  it("endWindingArcs groups by circuit and bulges beyond the stack end", () => {
-    const feats = [
-      // circuit 0 go/return pair
-      { circuit: 0, turns:  5, rRange: [0.05, 0.055], thetaRange: [0,            0.05],         kind: "conductor", member: "stator" },
-      { circuit: 0, turns: -5, rRange: [0.05, 0.055], thetaRange: [Math.PI / 4,  Math.PI / 4 + 0.05], kind: "conductor", member: "stator" },
-      // circuit 1 go/return pair
-      { circuit: 1, turns:  5, rRange: [0.05, 0.055], thetaRange: [Math.PI,            Math.PI + 0.05],         kind: "conductor", member: "stator" },
-      { circuit: 1, turns: -5, rRange: [0.05, 0.055], thetaRange: [Math.PI + Math.PI / 4, Math.PI + Math.PI / 4 + 0.05], kind: "conductor", member: "stator" },
-    ];
+  it("distributedEndArcs connects wire-by-wire along true coils and bulges past both ends", () => {
+    const winding = {
+      kind: "distributed", member: "stator",
+      slotRRange: [0.05, 0.055], angularWidth: 0.05,
+      slotTheta: [0, Math.PI / 4, Math.PI, Math.PI + Math.PI / 4],
+      coils: [
+        { circuit: 0, slotGo: 0, slotReturn: 1, turns: 4 },
+        { circuit: 1, slotGo: 2, slotReturn: 3, turns: 4 },
+      ],
+    };
 
-    const arcs = UM.Render3D.endWindingArcs(feats, {
-      zEnd: 0.04, bulge: 0.01, sign: 1, samples: 8,
-    });
+    const arcs = UM.Render3D.distributedEndArcs(winding, { ell: 0.08, bulge: 0.01, samples: 8 });
 
-    assert.strictEqual(arcs.length, 2, "should have 2 arcs (one per circuit)");
-
+    // 4 wires per coil (turns=4) × 2 coils × 2 ends = 16 per-wire arcs.
+    assert.strictEqual(arcs.length, 16, "one arc per wire per end, not per slot");
     const circuits = new Set(arcs.map(function (a) { return a.circuit; }));
-    assert.ok(circuits.has(0), "circuit 0 should have an arc");
-    assert.ok(circuits.has(1), "circuit 1 should have an arc");
+    assert.ok(circuits.has(0) && circuits.has(1), "both circuits wired");
 
+    let zmax = -Infinity, zmin = Infinity;
     for (const arc of arcs) {
-      assert.strictEqual(arc.points.length, 8 * 3,
-        "arc.points.length should be 8*3 = 24");
-
-      const ns = arc.points.length / 3;
-      for (let pi = 0; pi < ns; pi++) {
+      assert.strictEqual(arc.points.length, 8 * 3, "samples honoured (8*3)");
+      for (let pi = 0; pi < arc.points.length / 3; pi++) {
         const z = arc.points[pi * 3 + 2];
-        assert.ok(z >= 0.04 - 1e-9,
-          "every point z should be >= 0.04, got " + z);
+        if (z > zmax) zmax = z;
+        if (z < zmin) zmin = z;
       }
-
-      // At least one point at the peak (zEnd + bulge = 0.05).
-      let hasPeak = false;
-      for (let pi = 0; pi < ns; pi++) {
-        if (arc.points[pi * 3 + 2] >= 0.05 - 1e-9) hasPeak = true;
-      }
-      assert.ok(hasPeak, "at least one point should have z >= 0.05 (the bulge)");
     }
+    // ell/2 = 0.04, bulge 0.01 → turns rise past each end toward ±0.05.
+    assert.ok(zmax > 0.048 && zmax <= 0.05 + 1e-9, "near-end turns bulge past +0.04 toward +0.05, got " + zmax);
+    assert.ok(zmin < -0.048 && zmin >= -0.05 - 1e-9, "far-end turns bulge past -0.04 toward -0.05, got " + zmin);
+  });
 
-    // Single-polarity input returns empty array.
-    const noArcs = UM.Render3D.endWindingArcs(
-      [{ circuit: 0, turns: 5, rRange: [0.05, 0.055], thetaRange: [0, 0.05], kind: "conductor", member: "stator" }],
-      { zEnd: 0.04, bulge: 0.01, sign: 1, samples: 8 }
-    );
-    assert.strictEqual(noArcs.length, 0, "single-polarity input should return []");
+  it("concentratedHelix emits one tooth-wrapping helix per coil spanning the stack", () => {
+    const winding = {
+      kind: "concentrated", member: "stator",
+      slotRRange: [0.05, 0.06], angularWidth: 0.2,
+      slotTheta: [0, Math.PI / 6],
+      coils: [{ circuit: 0, slotGo: 0, slotReturn: 1, turns: 5 }],
+    };
+
+    const arcs = UM.Render3D.concentratedHelix(winding, { ell: 0.08 });
+    assert.strictEqual(arcs.length, 1, "one helix per coil");
+
+    let zmax = -Infinity, zmin = Infinity, rmax = 0, rmin = Infinity;
+    const pts = arcs[0].points;
+    for (let pi = 0; pi < pts.length / 3; pi++) {
+      const x = pts[pi * 3], y = pts[pi * 3 + 1], z = pts[pi * 3 + 2];
+      const r = Math.hypot(x, y);
+      if (z > zmax) zmax = z; if (z < zmin) zmin = z;
+      if (r > rmax) rmax = r; if (r < rmin) rmin = r;
+    }
+    // Helix runs the full stack length…
+    assert.ok(Math.abs(zmax - 0.04) < 1e-6 && Math.abs(zmin + 0.04) < 1e-6, "spans -ell/2..ell/2");
+    // …and bows over both faces of the tooth (r past the slot band on each side).
+    assert.ok(rmax > 0.06 && rmin < 0.05, "wraps over the tooth's inner and outer faces");
+  });
+
+  it("cageEndRing spans the bar band, and is null without a cage", () => {
+    const ring = UM.Render3D.cageEndRing([
+      { kind: "conductor", component: "cage", member: "rotor", rRange: [0.042, 0.054] },
+      { kind: "conductor", component: "cage", member: "rotor", rRange: [0.042, 0.054] },
+      { kind: "iron", member: "rotor", rRange: [0, 0.042] },
+    ]);
+    assert.deepStrictEqual(ring, { member: "rotor", rRange: [0.042, 0.054] });
+
+    const none = UM.Render3D.cageEndRing([
+      { kind: "conductor", component: "distributed-winding", member: "stator", rRange: [0.05, 0.055] },
+    ]);
+    assert.strictEqual(none, null, "no cage features → no ring");
   });
 
   it("paint draws the extruded cross-section through the sprite primitives", async () => {

@@ -177,3 +177,21 @@ test("removing a layer splices its circuits and stays valid", function () {
     assert.strictEqual(CS.expand(ctx.config).nCircuits, 0, "expand resolves 0 circuits");
   } finally { shim.uninstall(); }
 });
+
+test("the end-cap transparency slider writes config.endCapAlpha", function () {
+  const { shim, CS, ctx, host } = mountPanel("pmsm");
+  try {
+    const labelSpan = walk(host, []).find(function (e) {
+      return e.tagName === "SPAN" && e.textContent === "end caps";
+    });
+    assert.ok(labelSpan, "Transparency section exposes an 'end caps' control");
+    const row = labelSpan.parentNode;
+    const range = walk(row, []).find(function (e) { return e.tagName === "INPUT" && e.type === "range"; });
+    range.value = "0.4";
+    range.dispatch("change");
+
+    assert.ok(Math.abs(ctx.config.endCapAlpha - 0.4) < 1e-9, "endCapAlpha set to 0.4");
+    assert.ok(CS.validate(ctx.config).ok, "still valid");
+    assert.strictEqual(CS.expand(ctx.config).endCapAlpha, 0.4, "value reaches the renderer via expand");
+  } finally { shim.uninstall(); }
+});

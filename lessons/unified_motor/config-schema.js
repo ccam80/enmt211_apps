@@ -394,14 +394,57 @@
     };
   }
 
-  // Build features for one component ring. Returns { features, nCircuits, cageInfo }.
-  // sliceSign flips magnet magnetization for fluxSource-driven slices. config is
-  // needed only for cage R derivation (pass null when not building cage geometry).
-  // motion (config.motion) resolves the ring's inner/outer side to its kinematic
-  // role; features are always tagged "rotor"/"stator".
+  // Per-component end-winding connectivity for the 3-D renderer: the real coil
+  // list (slotGo→slotReturn) that the field model collapses into per-slot net
+  // turns. kind ∈ {"distributed","concentrated"}; coils carry absolute circuit
+  // indices. Cage bars (slotReturn null) close through the end ring, so they
+  // contribute no coil here.
+  function buildWindingMeta(synth, circuitBase, kind) {
+    const routing = resolveWinding(synth);
+    if (!routing || !Array.isArray(routing.phases)) return null;
+    const slotRRange = synth.slotRRange != null ? synth.slotRRange : synth.rRange;
+    const nSlots = routing.nSlots;
+    const angularWidth = synth.slotWidth != null
+      ? synth.slotWidth
+      : (synth.slotFraction != null ? synth.slotFraction : 0.5) * (TWO_PI / nSlots);
+
+    const coils = [];
+    let circuitIndex = 0;
+    for (const phase of routing.phases) {
+      for (const branch of phase.branches) {
+        for (const coil of branch.coils) {
+          if (coil.slotReturn != null) {
+            coils.push({
+              circuit: circuitBase + circuitIndex,
+              slotGo: coil.slotGo,
+              slotReturn: coil.slotReturn,
+              turns: coil.turns,
+            });
+          }
+        }
+        circuitIndex++;
+      }
+    }
+    return {
+      kind: kind,
+      member: synth.member,
+      slotRRange: slotRRange.slice(),
+      angularWidth: angularWidth,
+      slotTheta: routing.slotTheta.slice(),
+      coils: coils,
+    };
+  }
+
+  // Build features for one component ring. Returns { features, nCircuits,
+  // cageInfo, windings }. sliceSign flips magnet magnetization for fluxSource-
+  // driven slices. config is needed only for cage R derivation (pass null when
+  // not building cage geometry). motion (config.motion) resolves the ring's
+  // inner/outer side to its kinematic role; features are always tagged
+  // "rotor"/"stator".
   function buildComponentRingFeatures(ring, circuitBase, sliceSign, config, motion) {
     const member = resolveRole(ring, motion);
     const features = [];
+    const windings = [];
     let nCircuits = 0;
     let cageInfo = null;
 
@@ -430,6 +473,9 @@
         feats = buildWoundFeatures(synth, circuitBase + nCircuits, mode);
         if (comp.kind === "cage" && comp.cage && config) {
           cageInfo = computeCageInfo(synth, comp, circuitBase + nCircuits, config);
+        } else if (comp.kind !== "cage") {
+          const meta = buildWindingMeta(synth, circuitBase + nCircuits, mode);
+          if (meta) windings.push(meta);
         }
         nCircuits += LIB.WindingModel.ampereConductors(resolveWinding(synth)).nCircuits;
       }
@@ -441,7 +487,7 @@
       }
     }
 
-    return { features, nCircuits, cageInfo };
+    return { features, nCircuits, cageInfo, windings };
   }
 
   // Validate one component ring's components array. Pushes messages into errors.
@@ -851,6 +897,7 @@
 
     // Build the base feature list with global circuit indexing
     const baseFeatures = [];
+    const windings = [];
     let circuitBase = 0;
     let cageInfo = null;
 
@@ -861,6 +908,7 @@
       for (const f of cr.features) baseFeatures.push(f);
       circuitBase += cr.nCircuits;
       if (cr.cageInfo) cageInfo = cr.cageInfo;
+      if (cr.windings) for (const w of cr.windings) windings.push(w);
     }
 
     const nCircuits = circuitBase;
@@ -913,6 +961,8 @@
       nCircuits,
       circuits: config.circuits.slice(),
       slices,
+      windings,
+      endCapAlpha: config.endCapAlpha != null ? config.endCapAlpha : 1,
       Rcoupling,
       cage,
       axial: buildAxial(stack, config.grid.ell),
