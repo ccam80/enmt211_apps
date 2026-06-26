@@ -219,31 +219,14 @@
   }
 
   // ===========================================================================
-  //  Cutaway + extruded body geometry
+  //  Extruded body geometry
   //
-  //  The casing is solid: the outer member (larger-radius body) encloses the
-  //  inner one, so a full extrusion would hide the teeth and windings inside it.
-  //  The rig removes a fixed angular wedge from the OUTER member only — the inner
-  //  member is drawn whole and free to spin — so the cut reveals the toothed
-  //  core, the conductor bars in the slots, the gap, and the inner member along
-  //  the full axial length. The wedge is world-fixed; the camera orbits into it.
+  //  Each member is extruded as a full solid along the stack; the outer member
+  //  encloses the inner one. Per-feature opacity (feat.alpha) reveals the teeth,
+  //  windings, gap, and inner member — set a layer translucent to see past it.
   // ===========================================================================
 
-  const CUT_CENTER = Math.PI / 2;   // wedge centre angle (world frame, +y)
-  const CUT_HALF   = 1.05;          // half-width of the removed wedge (radians)
-  const ARC_SEG    = 0.18;          // max arc segment width for tessellation (rad)
-
-  // Kept angular arc [KEEP_A0, KEEP_A1] = the complement of the removed wedge.
-  const KEEP_A0 = CUT_CENTER + CUT_HALF;
-  const KEEP_A1 = CUT_CENTER - CUT_HALF + 2 * Math.PI;
-
-  // True when angle `a` lies inside the removed wedge.
-  function inWedge(a) {
-    let d = a - CUT_CENTER;
-    while (d >  Math.PI) d -= 2 * Math.PI;
-    while (d < -Math.PI) d += 2 * Math.PI;
-    return Math.abs(d) < CUT_HALF;
-  }
+  const ARC_SEG = 0.18;   // max arc segment width for tessellation (rad)
 
   function hexToRgb(hex) {
     const h = hex.replace("#", "");
@@ -259,7 +242,6 @@
     yoke: [92, 92, 106],
     magN: [224, 80, 80],
     magS: [80, 128, 224],
-    cut:  [120, 120, 134],   // freshly-cut radial faces, lighter steel
   };
 
   // Push one quad face (world, unrotated) with an outward normal, base rgb, and
@@ -276,7 +258,6 @@
   // overlay) on the camera-near side.
   function extrudeSector(faces, r0, r1, a0, a1, z0, z1, rgb, rotor, opts) {
     opts = opts || {};
-    const cutFlanks = opts.cutFlanks || null;
     const a = opts.alpha != null ? opts.alpha : 1;
     const span = a1 - a0;
     const nSeg = Math.max(1, Math.ceil(span / ARC_SEG));
@@ -297,33 +278,25 @@
     }
 
     if (span < 2 * Math.PI - 1e-6) {
-      const flankRgb = cutFlanks || rgb;
       pushQuad(faces, P(r0, a0, z0), P(r1, a0, z0), P(r1, a0, z1), P(r0, a0, z1),
-        Math.sin(a0), -Math.cos(a0), 0, flankRgb, rotor, a);
+        Math.sin(a0), -Math.cos(a0), 0, rgb, rotor, a);
       pushQuad(faces, P(r1, a1, z0), P(r0, a1, z0), P(r0, a1, z1), P(r1, a1, z1),
-        -Math.sin(a1), Math.cos(a1), 0, flankRgb, rotor, a);
+        -Math.sin(a1), Math.cos(a1), 0, rgb, rotor, a);
     }
   }
 
-  // Extrude one feature honouring the cutaway. Full-annulus features become the
-  // kept arc (with cut-coloured flanks); narrow features inside the wedge drop,
-  // those outside are kept whole.
-  function extrudeFeature(faces, feat, z0, z1, rgb, rotor, cut) {
+  // Extrude one feature as a full solid: a full-annulus feature becomes a
+  // complete annular band; a narrow feature becomes its own sector.
+  function extrudeFeature(faces, feat, z0, z1, rgb, rotor) {
     const [r0, r1] = feat.rRange;
     const [t0, t1] = feat.thetaRange;
     const span = t1 - t0;
     const a = feat.alpha != null ? feat.alpha : 1;
 
     if (span >= 2 * Math.PI - 1e-6) {
-      if (cut) {
-        extrudeSector(faces, r0, r1, KEEP_A0, KEEP_A1, z0, z1, rgb, rotor, { cutFlanks: COLOR.cut, alpha: a });
-      } else {
-        extrudeSector(faces, r0, r1, 0, 2 * Math.PI, z0, z1, rgb, rotor, { alpha: a });
-      }
+      extrudeSector(faces, r0, r1, 0, 2 * Math.PI, z0, z1, rgb, rotor, { alpha: a });
       return;
     }
-
-    if (cut && inWedge((t0 + t1) / 2)) return;
     extrudeSector(faces, r0, r1, t0, t1, z0, z1, rgb, rotor, { alpha: a });
   }
 
@@ -355,9 +328,7 @@
   }
 
   // Extrude each conductor's individual wires as square bars along the stack.
-  function extrudeWires(faces, feat, z0, z1, rgb, rotor, cut) {
-    const [t0, t1] = feat.thetaRange;
-    if (cut && inWedge((t0 + t1) / 2)) return;
+  function extrudeWires(faces, feat, z0, z1, rgb, rotor) {
     const alpha = feat.alpha != null ? feat.alpha : 1;
     const wires = distributedWireLayout(feat);
     const normals = [[0, -1], [1, 0], [0, 1], [-1, 0]];
@@ -373,29 +344,19 @@
     }
   }
 
-  // Build the extruded body face list for one slice. The radially-outer member
-  // gets the cutaway; the inner member is whole. Pure: world-space faces only.
+  // Build the extruded body face list for one slice. Pure: world-space faces only.
   function buildSliceBody(features, z0, z1) {
-    let rotorMax = 0, statorMax = 0;
-    for (const f of features) {
-      if (!f.rRange) continue;
-      if (f.member === "rotor"  && f.rRange[1] > rotorMax)  rotorMax  = f.rRange[1];
-      if (f.member === "stator" && f.rRange[1] > statorMax) statorMax = f.rRange[1];
-    }
-    const outerMember = statorMax >= rotorMax ? "stator" : "rotor";
-
     const faces = [];
     for (const f of features) {
       const rotor = (f.member === "rotor");
-      const cut = (f.member === outerMember);
       if (f.kind === "iron") {
         const full = (f.thetaRange[1] - f.thetaRange[0]) >= 2 * Math.PI - 1e-6;
-        extrudeFeature(faces, f, z0, z1, full ? COLOR.yoke : COLOR.iron, rotor, cut);
+        extrudeFeature(faces, f, z0, z1, full ? COLOR.yoke : COLOR.iron, rotor);
       } else if (f.kind === "magnet") {
-        extrudeFeature(faces, f, z0, z1, (f.Mr >= 0) ? COLOR.magN : COLOR.magS, rotor, cut);
+        extrudeFeature(faces, f, z0, z1, (f.Mr >= 0) ? COLOR.magN : COLOR.magS, rotor);
       } else if (f.kind === "conductor") {
         const idx = (((f.circuit | 0) % WIRE_PALETTE.length) + WIRE_PALETTE.length) % WIRE_PALETTE.length;
-        extrudeWires(faces, f, z0, z1, hexToRgb(WIRE_PALETTE[idx]), rotor, cut);
+        extrudeWires(faces, f, z0, z1, hexToRgb(WIRE_PALETTE[idx]), rotor);
       }
     }
     return faces;
@@ -420,21 +381,9 @@
     return out;
   }
 
-  // Clip the 2-D context (under the installed face affine, world metres) to the
-  // kept angular sector so a cap opening matches the body cutaway.
-  function clipToKept(ctx, rMax) {
-    const RBIG = rMax * 1.4 + 0.02;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.arc(0, 0, RBIG, KEEP_A0, KEEP_A1, false);
-    ctx.closePath();
-    ctx.clip();
-  }
-
   // ---------------------------------------------------------------------------
   //  drawCapSprite — draws one cross-section face through the installed affine
-  //  transform. The outer (cut) member is clipped to the kept sector so the cap
-  //  opening matches the body cutaway; the inner member is drawn whole.
+  //  transform. Both members are drawn whole; the rotor rotates by phi.
   // ---------------------------------------------------------------------------
   function drawCapSprite(ctx, features, rings, field, phi, runtime) {
     const CSP = window.LIB && window.LIB.CrossSectionSprite;
@@ -452,15 +401,6 @@
 
     const currents = (runtime && runtime.state && runtime.state.i) ? runtime.state.i : null;
 
-    let rotorMax = 0, statorMax = 0;
-    for (const f of features) {
-      if (!f.rRange) continue;
-      if (f.member === "rotor"  && f.rRange[1] > rotorMax)  rotorMax  = f.rRange[1];
-      if (f.member === "stator" && f.rRange[1] > statorMax) statorMax = f.rRange[1];
-    }
-    const outerIsStator = statorMax >= rotorMax;
-    const rMax = Math.max(rotorMax, statorMax);
-
     let shaftR    = 0;
     let gapInnerR = 0;
     let gapOuterR = 0;
@@ -472,9 +412,8 @@
 
     const viz = (typeof UM !== "undefined" && UM.fieldViz) ? UM.fieldViz : {};
 
-    // Rotor body inside rotate(phi); clipped only when the rotor is the cut member.
+    // Rotor body inside rotate(phi).
     ctx.save();
-    if (!outerIsStator) clipToKept(ctx, rMax);
     ctx.rotate(phi);
 
     CSP.drawIron(ctx, rotorIron, { gapEdge: "outer" });
@@ -493,10 +432,8 @@
     CSP.drawShaftAndGap(ctx, { shaftR, gapInnerR, gapOuterR }, {});
     ctx.restore();
 
-    // Stator body (lab frame); clipped only when the stator is the cut member.
+    // Stator body (lab frame).
     ctx.save();
-    if (outerIsStator) clipToKept(ctx, rMax);
-
     CSP.drawIron(ctx, statorIron, { gapEdge: "inner" });
     CSP.drawMagnet(ctx, statorMag, {});
 
@@ -516,7 +453,7 @@
   // ---------------------------------------------------------------------------
   //  drawCapFieldOverlays — draws field overlays on the cap face.
   // ---------------------------------------------------------------------------
-  function drawCapFieldOverlays(ctx, k, field, phi, lastSolve, rMax) {
+  function drawCapFieldOverlays(ctx, k, field, phi, lastSolve) {
     const MMV     = window.LIB && window.LIB.MotorMeshView;
     const GapEval = window.LIB && window.LIB.GapEval;
     if (!MMV) return;
@@ -526,11 +463,8 @@
     const Nr     = 12;
     const Ntheta = 64;
 
-    // Clip every overlay group to the kept sector in the lab frame so the field
-    // is cut away with the body. The rotor group rotates inside the clip, so the
-    // pattern spins behind a fixed cutaway window instead of spilling past it.
+    // Rotor overlays rotate by phi; stator/gap overlays stay in the lab frame.
     ctx.save();
-    clipToKept(ctx, rMax || 0.1);
     ctx.rotate(phi);
 
     const rf = field.rotor;
@@ -554,9 +488,8 @@
 
     ctx.restore();
 
-    // Stator + cross-gap overlays (lab frame), clipped to the same kept sector.
+    // Stator + cross-gap overlays (lab frame).
     ctx.save();
-    clipToKept(ctx, rMax || 0.1);
 
     const sf = field.stator;
     if (viz.fluxLines) {
@@ -722,7 +655,7 @@
             drawCapSprite(ctx, _features, rings, _field, _phi, runtime);
 
             if (_field) {
-              drawCapFieldOverlays(ctx, _k, _field, _phi, lastSolve, _rMax);
+              drawCapFieldOverlays(ctx, _k, _field, _phi, lastSolve);
             }
 
             ctx.restore();
@@ -741,12 +674,6 @@
             zEnd: end.zEnd, bulge: ell * 0.15, sign: end.sign, samples: 8,
           });
           for (const arc of ewArcs) {
-            // Drop arcs whose midpoint sits in the cut wedge so the end windings
-            // match the body cutaway.
-            const mid = Math.floor((arc.points.length / 3) / 2);
-            const mAng = Math.atan2(arc.points[mid * 3 + 1], arc.points[mid * 3]);
-            if (inWedge(mAng)) continue;
-
             const ewDepth = L3.depthOf({ x: arc.points[0], y: arc.points[1], z: arc.points[2] });
             const _arc = arc;
             items.push({
