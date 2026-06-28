@@ -60,14 +60,18 @@
   }
 
   // ---------------------------------------------------------------------------
-  //  distributedEndArcs(winding, opts) → arc[]
+  //  endTurnArcs(winding, opts) → arc[]
   //
-  //  Real lap-winding end turns: for each coil (slotGo→slotReturn from the true
-  //  routing) connect wire k of the go slot to wire k of the return slot — one
-  //  arc per wire, not per slot — bulging axially past both stack ends. Wire
-  //  layout reuses the cap-face layout so the turns land on the cap discs.
+  //  The end turns that close every coil. The in-slot conductors run axially
+  //  (extruded as bars in the body); here we draw only the connections at the
+  //  two stack ends. For each coil (slotGo→slotReturn from the true routing)
+  //  connect wire k of the go slot to wire k of the return slot — one arc per
+  //  wire, not per slot — at the slot radius, crossing tangentially over the
+  //  intervening tooth/teeth and bulging only axially just past the stack face.
+  //  Concentrated and distributed differ only in how far apart the two slots
+  //  are. Each arc is tagged with `end` (−1 / +1) for near/far paint layering.
   // ---------------------------------------------------------------------------
-  function distributedEndArcs(winding, opts) {
+  function endTurnArcs(winding, opts) {
     opts = opts || {};
     const ell     = opts.ell != null ? opts.ell : 0.05;
     const bulge   = opts.bulge != null ? opts.bulge : ell * 0.15;
@@ -105,48 +109,9 @@
             points[si * 3 + 1] = r * Math.sin(theta);
             points[si * 3 + 2] = z;
           }
-          arcs.push({ circuit: coil.circuit, points });
+          arcs.push({ circuit: coil.circuit, end: sign, points: points });
         }
       }
-    }
-    return arcs;
-  }
-
-  // ---------------------------------------------------------------------------
-  //  concentratedHelix(winding, opts) → arc[]
-  //
-  //  Concentrated (tooth) coils wrap a single tooth. Each coil is drawn as one
-  //  helix that spirals around the tooth between its two slots, advancing along
-  //  the axial length: θ swings across the slot pair and r bows over the tooth's
-  //  inner/outer faces while z runs the stack. Turns are capped for legibility.
-  // ---------------------------------------------------------------------------
-  function concentratedHelix(winding, opts) {
-    opts = opts || {};
-    const ell   = opts.ell != null ? opts.ell : 0.05;
-    const bulge = opts.bulge != null ? opts.bulge : ell * 0.06;
-    const sr = winding.slotRRange;
-    const st = winding.slotTheta;
-    const rMid = 0.5 * (sr[0] + sr[1]);
-    const half = 0.5 * (sr[1] - sr[0]);
-
-    const arcs = [];
-    for (const coil of winding.coils) {
-      const dT = angleDelta(st[coil.slotGo], st[coil.slotReturn]);
-      const thetaTooth = st[coil.slotGo] + dT / 2;
-      const turns = Math.min(6, Math.max(2, Math.abs(Math.round(coil.turns))));
-      const segs = turns * 24;
-      const points = new Float64Array((segs + 1) * 3);
-      for (let i = 0; i <= segs; i++) {
-        const u   = i / segs;
-        const phi = u * turns * 2 * Math.PI;
-        const theta = thetaTooth + (dT / 2) * Math.cos(phi);
-        const r     = rMid + (half + bulge) * Math.sin(phi);
-        const z     = -ell / 2 + u * ell;
-        points[i * 3 + 0] = r * Math.cos(theta);
-        points[i * 3 + 1] = r * Math.sin(theta);
-        points[i * 3 + 2] = z;
-      }
-      arcs.push({ circuit: coil.circuit, points });
     }
     return arcs;
   }
@@ -682,13 +647,28 @@
 
     }
 
-    // --- End caps: real end windings (per-wire distributed turns / concentrated
-    //     tooth helices) + cage shorting rings. Driven by the true coil
-    //     connectivity in expanded.windings; modulated by the end-cap alpha.
+    // --- End caps: real end windings (per-wire end turns) + cage shorting rings.
+    //     Driven by the true coil connectivity in expanded.windings; modulated by
+    //     the end-cap alpha.
+    //
+    //  End-turns bulge axially beyond the iron end-face, so at the camera-facing
+    //  ("near") end they are the frontmost geometry in the scene and at the far
+    //  end the backmost — but each is a thin stroke whose depth key sits on the
+    //  face plane, so leaving them in the body's depth-sort lets the end-face
+    //  paint over the bulge at some angles. Instead collect them into near/far
+    //  layers (by the end's outward normal vs the view) and paint the far layer
+    //  behind the body and the near layer on top of it. This is exact: a turn
+    //  beyond the near face is in front of all the iron; one beyond the far face
+    //  is behind all of it.
     const endCapAlpha = expanded.endCapAlpha != null ? expanded.endCapAlpha : 1;
+    const nearCaps = [];
+    const farCaps  = [];
     if (endCapAlpha > 0) {
       const z0full = sliceAxialBounds(0, N, ell).z0;
       const z1full = sliceAxialBounds(N - 1, N, ell).z1;
+      // An end (outward normal ±z) is "near" when that normal points toward the
+      // camera, i.e. sign * forward.z < 0.
+      function layerFor(sign) { return (sign * fwd.z < 0) ? nearCaps : farCaps; }
 
       function strokeFor(circuit) {
         const i = ((circuit % WIRE_PALETTE.length) + WIRE_PALETTE.length) % WIRE_PALETTE.length;
@@ -696,13 +676,13 @@
         return "rgba(" + c[0] + "," + c[1] + "," + c[2] + "," + endCapAlpha + ")";
       }
 
-      // Whole-arc item — for end turns that sit beyond the stack ends, where a
-      // single depth orders coherently against the body.
-      function pushArc(arc, lw) {
-        const ewDepth = L3.depthOf({ x: arc.points[0], y: arc.points[1], z: arc.points[2] });
+      function addArc(arc, lw) {
+        const pts = arc.points, ns = pts.length / 3;
+        const m = Math.floor(ns / 2);
+        const depth = L3.depthOf({ x: pts[m * 3], y: pts[m * 3 + 1], z: pts[m * 3 + 2] });
         const _arc = arc, _lw = lw;
-        items.push({
-          depth: ewDepth,
+        layerFor(arc.end).push({
+          depth: depth,
           paint: function () {
             ctx.save();
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -710,9 +690,9 @@
             ctx.lineWidth = _lw;
             ctx.lineCap = "round";
             ctx.beginPath();
-            const pts = _arc.points, ns = pts.length / 3;
-            for (let pi = 0; pi < ns; pi++) {
-              const pp = L3.project({ x: pts[pi * 3], y: pts[pi * 3 + 1], z: pts[pi * 3 + 2] });
+            const p = _arc.points, np = p.length / 3;
+            for (let pi = 0; pi < np; pi++) {
+              const pp = L3.project({ x: p[pi * 3], y: p[pi * 3 + 1], z: p[pi * 3 + 2] });
               if (pi === 0) ctx.moveTo(pp.px, pp.py);
               else          ctx.lineTo(pp.px, pp.py);
             }
@@ -722,53 +702,20 @@
         });
       }
 
-      // Per-segment items — for the tooth helix, which threads the solid body and
-      // must depth-sort against it segment-by-segment (one depth for the whole
-      // spiral would paint it entirely in front of or behind the iron).
-      function pushArcSegmented(arc, lw) {
-        const pts = arc.points, ns = pts.length / 3;
-        for (let pi = 0; pi < ns - 1; pi++) {
-          const ax = pts[pi * 3],       ay = pts[pi * 3 + 1],       az = pts[pi * 3 + 2];
-          const bx = pts[(pi + 1) * 3], by = pts[(pi + 1) * 3 + 1], bz = pts[(pi + 1) * 3 + 2];
-          const depth = L3.depthOf({ x: (ax + bx) / 2, y: (ay + by) / 2, z: (az + bz) / 2 });
-          const _ax = ax, _ay = ay, _az = az, _bx = bx, _by = by, _bz = bz, _c = arc.circuit, _lw = lw;
-          items.push({
-            depth: depth,
-            paint: function () {
-              ctx.save();
-              ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-              ctx.strokeStyle = strokeFor(_c);
-              ctx.lineWidth = _lw;
-              ctx.lineCap = "round";
-              const p0 = L3.project({ x: _ax, y: _ay, z: _az });
-              const p1 = L3.project({ x: _bx, y: _by, z: _bz });
-              ctx.beginPath();
-              ctx.moveTo(p0.px, p0.py);
-              ctx.lineTo(p1.px, p1.py);
-              ctx.stroke();
-              ctx.restore();
-            },
-          });
-        }
-      }
-
       for (const wnd of (expanded.windings || [])) {
-        if (wnd.kind === "concentrated") {
-          for (const arc of concentratedHelix(wnd, { ell: ell })) pushArcSegmented(arc, 1.5);
-        } else {
-          for (const arc of distributedEndArcs(wnd, { ell: ell, bulge: ell * 0.15 })) pushArc(arc, 2);
-        }
+        for (const arc of endTurnArcs(wnd, { ell: ell, bulge: ell * 0.15 })) addArc(arc, 2);
       }
 
-      // Cage shorting rings — a flat filled annulus on each end face.
+      // Cage shorting rings — a flat filled annulus on each end face, layered the
+      // same way (near ring in front of its cross-section, far ring behind).
       const ring = cageEndRing(expanded.slices[0].section.features);
       if (ring) {
         const COPPER = [184, 115, 51];
-        for (const zEnd of [z0full, z1full]) {
-          const _z = zEnd;
+        for (const sign of [-1, 1]) {
+          const _z = sign < 0 ? z0full : z1full;
           const _ring = ring;
           const depth = L3.depthOf({ x: _ring.rRange[1], y: 0, z: _z });
-          items.push({
+          layerFor(sign).push({
             depth: depth,
             paint: function () {
               ctx.save();
@@ -787,11 +734,17 @@
       }
     }
 
-    // Depth-sort farthest first (painter's algorithm) then paint.
-    const sorted = LIB.Layout3D.depthSort(items, function (it) { return it.depth; });
-    for (const item of sorted) {
-      item.paint();
+    // Paint: far end-caps (behind the body) → depth-sorted body/caps/overlays →
+    // near end-caps (on top). Each end-cap layer is itself farthest-first so the
+    // turns occlude each other correctly within the layer.
+    function paintLayer(layer) {
+      layer.sort(function (a, b) { return b.depth - a.depth; });
+      for (const it of layer) it.paint();
     }
+    paintLayer(farCaps);
+    const sorted = LIB.Layout3D.depthSort(items, function (it) { return it.depth; });
+    for (const item of sorted) item.paint();
+    paintLayer(nearCaps);
   }
 
   // ---------------------------------------------------------------------------
@@ -805,7 +758,7 @@
   }
 
   UM.Render3D = { paint, register, sliceAxialBounds, faceAffine,
-    distributedEndArcs, concentratedHelix, cageEndRing };
+    endTurnArcs, cageEndRing };
 
   if (UM.registerRender3D) register(UM);
 })();

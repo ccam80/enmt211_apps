@@ -158,7 +158,7 @@ describe("render3d", () => {
     assert.ok(Math.abs(p01.py - Pv.py) < 1e-9, "ap(0,R).py ≈ Pv.py");
   });
 
-  it("distributedEndArcs connects wire-by-wire along true coils and bulges past both ends", () => {
+  it("endTurnArcs connects wire-by-wire along true coils, bulges past both ends, and tags the end", () => {
     const winding = {
       kind: "distributed", member: "stator",
       slotRRange: [0.05, 0.055], angularWidth: 0.05,
@@ -169,12 +169,16 @@ describe("render3d", () => {
       ],
     };
 
-    const arcs = UM.Render3D.distributedEndArcs(winding, { ell: 0.08, bulge: 0.01, samples: 8 });
+    const arcs = UM.Render3D.endTurnArcs(winding, { ell: 0.08, bulge: 0.01, samples: 8 });
 
     // 4 wires per coil (turns=4) × 2 coils × 2 ends = 16 per-wire arcs.
     assert.strictEqual(arcs.length, 16, "one arc per wire per end, not per slot");
     const circuits = new Set(arcs.map(function (a) { return a.circuit; }));
     assert.ok(circuits.has(0) && circuits.has(1), "both circuits wired");
+
+    // Each arc is tagged with the end it belongs to (for near/far paint layering).
+    assert.strictEqual(arcs.filter(function (a) { return a.end === 1; }).length, 8, "8 arcs at the +z end");
+    assert.strictEqual(arcs.filter(function (a) { return a.end === -1; }).length, 8, "8 arcs at the -z end");
 
     let zmax = -Infinity, zmin = Infinity;
     for (const arc of arcs) {
@@ -190,7 +194,10 @@ describe("render3d", () => {
     assert.ok(zmin < -0.048 && zmin >= -0.05 - 1e-9, "far-end turns bulge past -0.04 toward -0.05, got " + zmin);
   });
 
-  it("concentratedHelix emits one tooth-wrapping helix per coil spanning the stack", () => {
+  it("concentrated coils route through the same end turns and never leave the slot band", () => {
+    // Concentrated = the two slots flank one tooth; the end turn crosses over it.
+    // The wire must stay within [slotInner, slotOuter] radially — it must not dip
+    // toward the gap/rotor or rise into the yoke (the old radial helix bug).
     const winding = {
       kind: "concentrated", member: "stator",
       slotRRange: [0.05, 0.06], angularWidth: 0.2,
@@ -198,21 +205,17 @@ describe("render3d", () => {
       coils: [{ circuit: 0, slotGo: 0, slotReturn: 1, turns: 5 }],
     };
 
-    const arcs = UM.Render3D.concentratedHelix(winding, { ell: 0.08 });
-    assert.strictEqual(arcs.length, 1, "one helix per coil");
+    const arcs = UM.Render3D.endTurnArcs(winding, { ell: 0.08, bulge: 0.012 });
+    // 5 wires (turns=5) × 2 ends = 10 per-wire end turns.
+    assert.strictEqual(arcs.length, 10, "concentrated coils produce per-wire end turns, no helix");
 
-    let zmax = -Infinity, zmin = Infinity, rmax = 0, rmin = Infinity;
-    const pts = arcs[0].points;
-    for (let pi = 0; pi < pts.length / 3; pi++) {
-      const x = pts[pi * 3], y = pts[pi * 3 + 1], z = pts[pi * 3 + 2];
-      const r = Math.hypot(x, y);
-      if (z > zmax) zmax = z; if (z < zmin) zmin = z;
-      if (r > rmax) rmax = r; if (r < rmin) rmin = r;
+    for (const arc of arcs) {
+      for (let pi = 0; pi < arc.points.length / 3; pi++) {
+        const r = Math.hypot(arc.points[pi * 3], arc.points[pi * 3 + 1]);
+        assert.ok(r >= 0.05 - 1e-9 && r <= 0.06 + 1e-9,
+          "wire stays in the slot band [0.05, 0.06], got r=" + r);
+      }
     }
-    // Helix runs the full stack length…
-    assert.ok(Math.abs(zmax - 0.04) < 1e-6 && Math.abs(zmin + 0.04) < 1e-6, "spans -ell/2..ell/2");
-    // …and bows over both faces of the tooth (r past the slot band on each side).
-    assert.ok(rmax > 0.06 && rmin < 0.05, "wraps over the tooth's inner and outer faces");
   });
 
   it("cageEndRing spans the bar band, and is null without a cage", () => {
