@@ -37,11 +37,12 @@ test("zero-current detent is a single high-order cogging harmonic with no net to
   for (let k = 0; k < N; k++) thetas.push((k / N) * 2 * Math.PI);
   const dts = sweepTorque(stack, new Float64Array([0, 0]), thetas);
 
-  // Detent is the magnet<->stator-slot cogging: a single high spatial order
-  // (order 24 for this 24-pole / 48-slot machine) carrying NO net or low-order
-  // torque at zero current. A DFT isolates the cogging order from the high-
-  // frequency mesh ripple that a raw sign-change count cannot.
-  const COG_ORDER = 24;
+  // Detent is the magnet<->stator-slot cogging at the genuine slot-passing order
+  // LCM(Q, 2p) = LCM(48, 24) = 48 for this 48-slot / 24-pole machine: a single
+  // high spatial order carrying NO net or low-order torque at zero current. A DFT
+  // isolates the cogging order from the high-frequency mesh ripple that a raw
+  // sign-change count cannot.
+  const COG_ORDER = 48;
   assert.ok(ripple(dts) > 1e-6, `ripple=${ripple(dts)} not > 1e-6 (no detent present)`);
 
   let dom = 1, domAmp = 0;

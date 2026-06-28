@@ -302,7 +302,9 @@
         const span  = ring.poleTeeth.span != null ? ring.poleTeeth.span : 0.5;
         const h = span * pitch / 2;
         for (let s = 0; s < nSlots; s++) {
-          const base = slotTheta[s];
+          // The wound pole sits BETWEEN the coil's two slots (the coil wraps it),
+          // so the fine-tooth cluster is centred at the inter-slot midpoint.
+          const base = slotTheta[s] + 0.5 * (TWO_PI / nSlots);
           for (let j = 0; j < count; j++) {
             const centre = base + (j - (count - 1) / 2) * pitch;
             features.push({
@@ -316,18 +318,27 @@
           }
         }
       } else {
-        const spanFraction = ring.spanFraction != null ? ring.spanFraction : 0.5;
-        for (let s = 0; s < nSlots; s++) {
-          const centre = slotTheta[s];
-          const h = spanFraction * (Math.PI / nSlots);
-          features.push({
-            kind: "iron",
-            member,
-            rRange: ring.rRange,
-            thetaRange: [centre - h, centre + h],
-            muR,
-            Bknee: BkneeWound,
-          });
+        // Salient teeth, one per slot, sitting BETWEEN the conductor slots — the
+        // coil wraps the tooth. The tooth half-width defaults to the slot's
+        // angular complement so tooth and coil tile the pitch (no overlap, which
+        // is what restores the saliency); spanFraction overrides it. Full radial
+        // depth so the tooth reads as a salient pole.
+        const pitch = TWO_PI / nSlots;
+        const h = ring.spanFraction != null
+          ? ring.spanFraction * (Math.PI / nSlots)
+          : 0.5 * Math.max(0, pitch - angularWidth);
+        if (h > 0) {
+          for (let s = 0; s < nSlots; s++) {
+            const centre = slotTheta[s] + 0.5 * pitch;
+            features.push({
+              kind: "iron",
+              member,
+              rRange: ring.rRange,
+              thetaRange: [centre - h, centre + h],
+              muR,
+              Bknee: BkneeWound,
+            });
+          }
         }
       }
     } else if (teethMode === "distributed") {
