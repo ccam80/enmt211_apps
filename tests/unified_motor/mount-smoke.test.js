@@ -125,7 +125,7 @@ test("each field overlay renders without throwing", async () => {
     const { LIB, UnifiedMotor } = loadApp();
     await LIB.FeaSolver.init();
 
-    const keys = ["fluxLines", "modulusB", "saturation", "magnetization", "currentDensity", "gapLoop"];
+    const keys = ["fluxLines", "modulusB", "saturation", "magnetization", "currentDensity", "gapLoop", "currentDots"];
     const prev = Object.assign({}, UnifiedMotor.fieldViz);
     try {
       for (const k of keys) {

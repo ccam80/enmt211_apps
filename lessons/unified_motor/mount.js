@@ -46,6 +46,7 @@
     magnetization: false,
     currentDensity: false,
     gapLoop: false,
+    currentDots: false,
   };
 
   UM.registerPanel = function (entry) {

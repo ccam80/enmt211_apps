@@ -12,6 +12,7 @@
       magnetization: false,
       currentDensity: false,
       gapLoop: false,
+      currentDots: false,
     };
   }
 
@@ -345,6 +346,7 @@
       { key: "magnetization",  label: "M" },
       { key: "currentDensity", label: "J" },
       { key: "gapLoop",        label: "gap loop" },
+      { key: "currentDots",    label: "I dots" },
     ];
 
     const wrap = document.createElement("span");

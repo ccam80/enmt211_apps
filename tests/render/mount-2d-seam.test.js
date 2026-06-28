@@ -39,6 +39,7 @@ describe("mount.js 2-D-render seam", () => {
       magnetization: false,
       currentDensity: false,
       gapLoop: false,
+      currentDots: false,
     });
   });
 

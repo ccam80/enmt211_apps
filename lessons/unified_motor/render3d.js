@@ -520,6 +520,30 @@
   }
 
   // ---------------------------------------------------------------------------
+  //  Current-flow dot phase — one accumulated offset per circuit, advanced by
+  //  the live current each frame off SIM time (so dots freeze when paused and
+  //  reverse with current sign). Module-scoped; re-zeroed when the runtime
+  //  changes or its clock rewinds (Reset).
+  // ---------------------------------------------------------------------------
+  let _dotPhase = null, _dotRt = null, _dotT = 0;
+  function advanceDots(runtime, currents) {
+    const m = currents.length;
+    const t = (runtime.state && runtime.state.t != null) ? runtime.state.t : 0;
+    if (_dotRt !== runtime || !_dotPhase || _dotPhase.length !== m || t < _dotT) {
+      _dotPhase = new Float64Array(m); _dotRt = runtime; _dotT = t;
+      return _dotPhase;
+    }
+    let dt = t - _dotT; _dotT = t;
+    if (dt < 0) dt = 0; else if (dt > 0.05) dt = 0.05;
+    const viz = (typeof UM !== "undefined" && UM.fieldViz) ? UM.fieldViz : {};
+    LIB.CurrentDots.step(_dotPhase, currents, dt, {
+      speedScale: viz.currentDotSpeed != null ? viz.currentDotSpeed : LIB.CurrentDots.DEFAULTS.speedScale,
+      mode: viz.currentDotLog ? "logarithmic" : "linear",
+    });
+    return _dotPhase;
+  }
+
+  // ---------------------------------------------------------------------------
   //  paint(mountCtx, L3, rctx) — the 3-D render seam entry.
   // ---------------------------------------------------------------------------
   function paint(mountCtx, L3, rctx) {
@@ -552,6 +576,28 @@
     const nearCaps = [];
     const farCaps  = [];
     function layerFor(sign) { return (sign * fwd.z < 0) ? nearCaps : farCaps; }
+
+    // Current-flow dots (yellow) ride the winding conductors. One accumulated
+    // phase per circuit; each dot is placed along a conductor polyline and either
+    // layered with its end turn (near/far) or depth-sorted with the body (bars).
+    const vizDots = (typeof UM !== "undefined" && UM.fieldViz) ? UM.fieldViz : {};
+    const currents = (runtime.state && runtime.state.i) ? runtime.state.i : null;
+    const showDots = !!(vizDots.currentDots && currents && LIB.CurrentDots);
+    const dotPhase = showDots ? advanceDots(runtime, currents) : null;
+    const DOT_SPACING = (LIB.CurrentDots && LIB.CurrentDots.DEFAULTS.spacing) || 0.006;
+    function dotItem(p, depthBias) {
+      const depth = L3.depthOf({ x: p[0], y: p[1], z: p[2] }) - (depthBias || 0);
+      return { depth: depth, kind: "dot", paint: function () {
+        const pp = L3.project({ x: p[0], y: p[1], z: p[2] });
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.beginPath();
+        ctx.arc(pp.px, pp.py, 2.6, 0, 2 * Math.PI);
+        ctx.fillStyle = "#ffd633";
+        ctx.fill();
+        ctx.restore();
+      } };
+    }
 
     // --- Extruded body faces (one item per face, shaded + back-face culled).
     for (let k = 0; k < N; k++) {
@@ -712,7 +758,14 @@
       }
 
       for (const wnd of (expanded.windings || [])) {
-        for (const arc of endTurnArcs(wnd, { ell: ell, bulge: ell * 0.15 })) addArc(arc, 2);
+        for (const arc of endTurnArcs(wnd, { ell: ell, bulge: ell * 0.15 })) {
+          addArc(arc, 2);
+          if (showDots) {
+            const off = (dotPhase[arc.circuit] || 0) * arc.end;   // flow sign = end
+            const layer = layerFor(arc.end);
+            for (const d of LIB.CurrentDots.placeDots(arc.points, off, DOT_SPACING)) layer.push(dotItem(d, 0));
+          }
+        }
       }
 
       // Cage shorting rings — a flat filled annulus on each end face, layered the
@@ -744,6 +797,29 @@
       }
     }
 
+    // Current-flow dots along the in-slot conductor bars, depth-sorted with the
+    // body so the iron occludes them correctly (a small bias keeps them on top
+    // of their own bar). Rotor bars rotate by phi.
+    if (showDots) {
+      for (let k = 0; k < N; k++) {
+        const fld = (lastSolve && lastSolve.perSliceField && lastSolve.perSliceField[k]) ? lastSolve.perSliceField[k] : null;
+        const phi = fld ? fld.gap.phi : ((runtime.state ? runtime.state.theta : 0) + expanded.slices[k].offset);
+        const cphi = Math.cos(phi), sphi = Math.sin(phi);
+        const bnd = sliceAxialBounds(k, N, ell);
+        for (const f of expanded.slices[k].section.features) {
+          if (f.kind !== "conductor" || f.circuit == null || !f.thetaRange) continue;
+          const off = (dotPhase[f.circuit] || 0) * (f.turns >= 0 ? 1 : -1);
+          const wires = distributedWireLayout({ rRange: f.rRange, thetaRange: f.thetaRange, turns: f.turns });
+          for (let wi = 0; wi < wires.length; wi++) {
+            let x = wires[wi].x, y = wires[wi].y;
+            if (f.member === "rotor") { const rx = x * cphi - y * sphi; y = x * sphi + y * cphi; x = rx; }
+            const pts = new Float64Array([x, y, bnd.z0, x, y, bnd.z1]);
+            for (const d of LIB.CurrentDots.placeDots(pts, off, DOT_SPACING)) items.push(dotItem(d, 1e-4));
+          }
+        }
+      }
+    }
+
     // Paint back→front at each end:
     //   far end-turns/rings → far end face → body → near end face → near end-turns/rings
     // The end face sorts behind its own bulged turns (so it never hides them) and
@@ -755,12 +831,14 @@
     }
     function ofKind(list, kind) { return list.filter(function (it) { return it.kind === kind; }); }
 
+    paintSorted(ofKind(farCaps, "dot"));
     paintSorted(ofKind(farCaps, "wind"));
     paintSorted(ofKind(farCaps, "face"));
     const sorted = LIB.Layout3D.depthSort(items, function (it) { return it.depth; });
     for (const item of sorted) item.paint();
     paintSorted(ofKind(nearCaps, "face"));
     paintSorted(ofKind(nearCaps, "wind"));
+    paintSorted(ofKind(nearCaps, "dot"));
   }
 
   // ---------------------------------------------------------------------------

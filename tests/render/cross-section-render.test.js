@@ -67,6 +67,7 @@ describe("cross-section-render 2-D seam", () => {
       assert.deepStrictEqual(UM.fieldViz, {
         fluxLines: true, modulusB: false, saturation: false,
         magnetization: false, currentDensity: false, gapLoop: false,
+        currentDots: false,
       });
       const cb = findFirst(host, function (el) { return el.tagName === "INPUT" && el.type === "checkbox"; });
       assert.ok(cb, "expected at least one checkbox built");
