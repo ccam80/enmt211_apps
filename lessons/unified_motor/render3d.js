@@ -82,12 +82,17 @@
 
     const arcs = [];
     for (const coil of winding.coils) {
-      const goTheta  = st[coil.slotGo];
-      const retTheta = st[coil.slotReturn];
+      // Land on the actual conductor bundles — for concentrated coils these are
+      // the flank bundles (offset angle + narrower width), so the end turns meet
+      // the in-slot bars rather than the slot centre.
+      const goTheta  = coil.goThetaC  != null ? coil.goThetaC  : st[coil.slotGo];
+      const retTheta = coil.retThetaC != null ? coil.retThetaC : st[coil.slotReturn];
+      const goW  = coil.goW  != null ? coil.goW  : w;
+      const retW = coil.retW != null ? coil.retW : w;
       const goBand  = coil.goRRange  || sr;
       const retBand = coil.retRRange || sr;
-      const goWires  = distributedWireLayout({ rRange: goBand,  thetaRange: [goTheta - w / 2, goTheta + w / 2], turns: coil.turns });
-      const retWires = distributedWireLayout({ rRange: retBand, thetaRange: [retTheta - w / 2, retTheta + w / 2], turns: coil.turns });
+      const goWires  = distributedWireLayout({ rRange: goBand,  thetaRange: [goTheta - goW / 2, goTheta + goW / 2], turns: coil.turns });
+      const retWires = distributedWireLayout({ rRange: retBand, thetaRange: [retTheta - retW / 2, retTheta + retW / 2], turns: coil.turns });
       const n = Math.min(goWires.length, retWires.length);
 
       for (let e = 0; e < 2; e++) {

@@ -265,6 +265,7 @@
       rRange: slotRRange,
       member,
       angularWidth,
+      flankPlacement: teethMode === "concentrated",
     };
 
     // Build conductor features and offset circuit index
@@ -420,13 +421,15 @@
       ? synth.slotWidth
       : (synth.slotFraction != null ? synth.slotFraction : 0.5) * (TWO_PI / nSlots);
 
-    // Resolve the actual per-(circuit, slot) radial sub-band the field model
-    // assigned — a double-layer slot stacks its two circuits as radial layers —
-    // so end turns land on the same bands the cap face draws. Falls back to the
-    // full slot band where a slot carries a single conductor.
+    // Resolve the actual per-(circuit, slot) conductor geometry the field model
+    // assigned — concentrated coils split each slot into two angular flank
+    // bundles, double-layer distributed slots stack radial sub-bands — so the
+    // end turns land on the same conductors the cap face and in-slot bars draw.
+    // Falls back to the full centred slot band where a slot is unresolved.
     const raw = LIB.WindingModel.conductorFeatures(routing,
-      { rRange: slotRRange, member: synth.member, angularWidth: angularWidth });
-    const bandOf = new Map();
+      { rRange: slotRRange, member: synth.member, angularWidth: angularWidth,
+        flankPlacement: kind === "concentrated" });
+    const geomOf = new Map();
     for (const f of raw) {
       const center = (f.thetaRange[0] + f.thetaRange[1]) / 2;
       let s = 0, best = Infinity;
@@ -435,11 +438,7 @@
         if (d > Math.PI) d = TWO_PI - d;
         if (d < best) { best = d; s = i; }
       }
-      bandOf.set(f.circuit + ":" + s, f.rRange);
-    }
-    function band(circuitLocal, slot) {
-      const b = bandOf.get(circuitLocal + ":" + slot);
-      return b ? b.slice() : slotRRange.slice();
+      geomOf.set(f.circuit + ":" + s, { rRange: f.rRange, thetaRange: f.thetaRange });
     }
 
     const coils = [];
@@ -448,13 +447,19 @@
       for (const branch of phase.branches) {
         for (const coil of branch.coils) {
           if (coil.slotReturn != null) {
+            const gg = geomOf.get(circuitIndex + ":" + coil.slotGo);
+            const rg = geomOf.get(circuitIndex + ":" + coil.slotReturn);
             coils.push({
               circuit: circuitBase + circuitIndex,
               slotGo: coil.slotGo,
               slotReturn: coil.slotReturn,
               turns: coil.turns,
-              goRRange: band(circuitIndex, coil.slotGo),
-              retRRange: band(circuitIndex, coil.slotReturn),
+              goRRange:  gg ? gg.rRange.slice() : slotRRange.slice(),
+              retRRange: rg ? rg.rRange.slice() : slotRRange.slice(),
+              goThetaC:  gg ? 0.5 * (gg.thetaRange[0] + gg.thetaRange[1]) : slotTheta[coil.slotGo],
+              retThetaC: rg ? 0.5 * (rg.thetaRange[0] + rg.thetaRange[1]) : slotTheta[coil.slotReturn],
+              goW:  gg ? (gg.thetaRange[1] - gg.thetaRange[0]) : angularWidth,
+              retW: rg ? (rg.thetaRange[1] - rg.thetaRange[0]) : angularWidth,
             });
           }
         }
