@@ -797,9 +797,13 @@
       }
     }
 
-    // Current-flow dots along the in-slot conductor bars, depth-sorted with the
-    // body so the iron occludes them correctly (a small bias keeps them on top
-    // of their own bar). Rotor bars rotate by phi.
+    // Current-flow dots along the in-slot conductor bars. Bars run the full
+    // stack length, so depth-sorting their dots against the coarse full-length
+    // body faces makes a dot wink out halfway down the body where the face
+    // centroid crosses it. Instead keep only the camera-facing bars (the back
+    // half is genuinely behind the body) and paint them as a final overlay, so a
+    // dot stays visible along the whole bar. Rotor bars rotate by phi.
+    const barDots = [];
     if (showDots) {
       for (let k = 0; k < N; k++) {
         const fld = (lastSolve && lastSolve.perSliceField && lastSolve.perSliceField[k]) ? lastSolve.perSliceField[k] : null;
@@ -813,8 +817,9 @@
           for (let wi = 0; wi < wires.length; wi++) {
             let x = wires[wi].x, y = wires[wi].y;
             if (f.member === "rotor") { const rx = x * cphi - y * sphi; y = x * sphi + y * cphi; x = rx; }
+            if (x * fwd.x + y * fwd.y >= 0) continue;          // skip the camera-far half
             const pts = new Float64Array([x, y, bnd.z0, x, y, bnd.z1]);
-            for (const d of LIB.CurrentDots.placeDots(pts, off, DOT_SPACING)) items.push(dotItem(d, 1e-4));
+            for (const d of LIB.CurrentDots.placeDots(pts, off, DOT_SPACING)) barDots.push(dotItem(d, 0));
           }
         }
       }
@@ -839,6 +844,7 @@
     paintSorted(ofKind(nearCaps, "face"));
     paintSorted(ofKind(nearCaps, "wind"));
     paintSorted(ofKind(nearCaps, "dot"));
+    paintSorted(barDots);   // camera-facing in-slot bar dots, on top
   }
 
   // ---------------------------------------------------------------------------
