@@ -538,6 +538,16 @@
 
     const items = [];
 
+    // The body's two end faces (cap sprites) and the winding end caps sit on the
+    // frontmost / backmost surfaces of the body. A single coarse depth key on a
+    // cap lets teeth bodies sort in front of the end face at shallow angles, so
+    // these are layered around the body's depth-sort rather than mixed into it:
+    // the far layer paints behind the body, the near layer on top. An end is
+    // "near" when its outward normal (±z) points toward the camera (sign·fwd.z<0).
+    const nearCaps = [];
+    const farCaps  = [];
+    function layerFor(sign) { return (sign * fwd.z < 0) ? nearCaps : farCaps; }
+
     // --- Extruded body faces (one item per face, shaded + back-face culled).
     for (let k = 0; k < N; k++) {
       const field = (lastSolve && lastSolve.perSliceField && lastSolve.perSliceField[k])
@@ -626,8 +636,14 @@
         const _phi      = phi;
         const _k        = k;
 
-        items.push({
+        // The two outermost faces are the true end faces — layer them near/far so
+        // the end cross-section (back-iron included) is never occluded by teeth
+        // bodies. Interior slice-boundary caps (multi-slice skew) stay in the sort.
+        const isEndFace = (k === 0 && ci === 0) || (k === N - 1 && ci === 1);
+        const target = isEndFace ? layerFor(ci === 0 ? -1 : 1) : items;
+        target.push({
           depth,
+          kind: "face",
           paint: function () {
             ctx.save();
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -647,28 +663,15 @@
 
     }
 
-    // --- End caps: real end windings (per-wire end turns) + cage shorting rings.
-    //     Driven by the true coil connectivity in expanded.windings; modulated by
-    //     the end-cap alpha.
-    //
-    //  End-turns bulge axially beyond the iron end-face, so at the camera-facing
-    //  ("near") end they are the frontmost geometry in the scene and at the far
-    //  end the backmost — but each is a thin stroke whose depth key sits on the
-    //  face plane, so leaving them in the body's depth-sort lets the end-face
-    //  paint over the bulge at some angles. Instead collect them into near/far
-    //  layers (by the end's outward normal vs the view) and paint the far layer
-    //  behind the body and the near layer on top of it. This is exact: a turn
-    //  beyond the near face is in front of all the iron; one beyond the far face
-    //  is behind all of it.
+    // --- Winding end caps: per-wire end turns + cage shorting rings, from the
+    //     true coil connectivity in expanded.windings (modulated by the end-cap
+    //     alpha). They bulge axially beyond the iron end face, so they join the
+    //     same near/far layers as the end faces — near turns paint on top of the
+    //     body, far turns behind it.
     const endCapAlpha = expanded.endCapAlpha != null ? expanded.endCapAlpha : 1;
-    const nearCaps = [];
-    const farCaps  = [];
     if (endCapAlpha > 0) {
       const z0full = sliceAxialBounds(0, N, ell).z0;
       const z1full = sliceAxialBounds(N - 1, N, ell).z1;
-      // An end (outward normal ±z) is "near" when that normal points toward the
-      // camera, i.e. sign * forward.z < 0.
-      function layerFor(sign) { return (sign * fwd.z < 0) ? nearCaps : farCaps; }
 
       function strokeFor(circuit) {
         const i = ((circuit % WIRE_PALETTE.length) + WIRE_PALETTE.length) % WIRE_PALETTE.length;
@@ -683,6 +686,7 @@
         const _arc = arc, _lw = lw;
         layerFor(arc.end).push({
           depth: depth,
+          kind: "wind",
           paint: function () {
             ctx.save();
             ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -717,6 +721,7 @@
           const depth = L3.depthOf({ x: _ring.rRange[1], y: 0, z: _z });
           layerFor(sign).push({
             depth: depth,
+            kind: "wind",
             paint: function () {
               ctx.save();
               ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -734,17 +739,23 @@
       }
     }
 
-    // Paint: far end-caps (behind the body) → depth-sorted body/caps/overlays →
-    // near end-caps (on top). Each end-cap layer is itself farthest-first so the
-    // turns occlude each other correctly within the layer.
-    function paintLayer(layer) {
-      layer.sort(function (a, b) { return b.depth - a.depth; });
-      for (const it of layer) it.paint();
+    // Paint back→front at each end:
+    //   far end-turns/rings → far end face → body → near end face → near end-turns/rings
+    // The end face sorts behind its own bulged turns (so it never hides them) and
+    // the body never hides the near end face (so the back-iron stays visible).
+    // Each sub-list is itself farthest-first for correct self-occlusion.
+    function paintSorted(list) {
+      list.sort(function (a, b) { return b.depth - a.depth; });
+      for (const it of list) it.paint();
     }
-    paintLayer(farCaps);
+    function ofKind(list, kind) { return list.filter(function (it) { return it.kind === kind; }); }
+
+    paintSorted(ofKind(farCaps, "wind"));
+    paintSorted(ofKind(farCaps, "face"));
     const sorted = LIB.Layout3D.depthSort(items, function (it) { return it.depth; });
     for (const item of sorted) item.paint();
-    paintLayer(nearCaps);
+    paintSorted(ofKind(nearCaps, "face"));
+    paintSorted(ofKind(nearCaps, "wind"));
   }
 
   // ---------------------------------------------------------------------------
