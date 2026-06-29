@@ -680,7 +680,8 @@
           addListener(inp, "input", function () { read.textContent = parseFloat(inp.value).toFixed(2); });
           addListener(inp, "change", function () {
             const v = Math.max(0, Math.min(1, parseFloat(inp.value)));
-            applyEdit(function (c) { c.endCapAlpha = v; }, false);
+            ctx.config.endCapAlpha = v;          // render-only: no recompile, no sim reset
+            ctx.requestRenderUpdate();
           });
           wrap.appendChild(lab); wrap.appendChild(inp); wrap.appendChild(read);
           sec.appendChild(wrap);
@@ -702,11 +703,11 @@
             addListener(inp, "input", function () { read.textContent = parseFloat(inp.value).toFixed(2); });
             addListener(inp, "change", function () {
               const v = Math.max(0, Math.min(1, parseFloat(inp.value)));
-              applyEdit(function (c) {
-                const ring = bodyRing(c, side);
-                const t = ring.components[ring.components.indexOf(comp)];
-                if (t) t.alpha = v;
-              }, false);
+              // render-only: set the layer alpha and re-skin without recompiling
+              // the geometry or resetting the running simulation.
+              const ring = bodyRing(ctx.config, side);
+              const t = ring && ring.components[ring.components.indexOf(comp)];
+              if (t) { t.alpha = v; ctx.requestRenderUpdate(); }
             });
             wrap.appendChild(lab); wrap.appendChild(inp); wrap.appendChild(read);
             sec.appendChild(wrap);
@@ -780,7 +781,18 @@
 
       rebuild();
 
+      // A structural rebuild (e.g. the machine picker loading a new fixture)
+      // replaces config.rings wholesale. Collapse its multi-ring bodies to the
+      // single-stack editor model BEFORE expand (normalize), then rebind every
+      // layer/transparency control to the new components AFTER expand (refresh).
+      const unregisterNormalize = ctx.registerNormalize
+        ? ctx.registerNormalize(function () { consolidateBodies(ctx.config); }) : null;
+      const unregisterRefresh = ctx.registerRefresh
+        ? ctx.registerRefresh(function () { rebuild(); }) : null;
+
       return function unmount() {
+        if (unregisterNormalize) unregisterNormalize();
+        if (unregisterRefresh) unregisterRefresh();
         for (const { el, evt, fn } of listeners) el.removeEventListener(evt, fn);
         listeners.length = 0;
         host.innerHTML = "";

@@ -22,7 +22,7 @@
     for (const k of Object.keys(copy)) {
       target[k] = copy[k];
     }
-    ctx.requestRebuild();
+    ctx.requestRebuild({ rebuildPanels: true });
   }
 
   UM.MachinePicker = { loadMachine: loadMachine };

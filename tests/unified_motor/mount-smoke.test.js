@@ -34,6 +34,13 @@ function allCanvases(node, out) {
   return out;
 }
 
+function findByTag(node, tag) {
+  if (!node) return null;
+  if (node.tagName === tag) return node;
+  for (const c of node.children || []) { const h = findByTag(c, tag); if (h) return h; }
+  return null;
+}
+
 // Mount, tick frames, unmount — returns the host so callers can assert on it.
 function mountAndTick(UM, shim, frames) {
   const host = shim.makeEl("div");
@@ -138,6 +145,37 @@ test("each field overlay renders without throwing", async () => {
     } finally {
       Object.assign(UnifiedMotor.fieldViz, prev);
     }
+  } finally {
+    shim.uninstall();
+  }
+});
+
+test("switching machines via the picker rebuilds without throwing", async () => {
+  const shim = installShims();
+  try {
+    const { LIB, UnifiedMotor } = loadApp();
+    await LIB.FeaSolver.init();
+
+    const host = shim.makeEl("div");
+    const unmount = UnifiedMotor.mount(host);
+    shim.flushFrames(4);
+
+    const select = findByTag(host, "SELECT");
+    assert.ok(select, "machine-picker <select> present in the mount");
+
+    // The picker's change handler runs the structural rebuild path that
+    // machine-switching depends on: normalize (consolidate) → expand → fresh
+    // runtime → readout rebuild → panel refresh. A ReferenceError/TypeError in
+    // that plumbing (the bug class this file guards) fails here.
+    const ids = ["pmsm", "switched-reluctance", "induction-3ph", "bldc"]
+      .filter((id) => (UnifiedMotor.MACHINES || []).some((m) => m.id === id));
+    assert.ok(ids.length >= 2, "expected several known machines to switch between");
+    for (const id of ids) {
+      select.value = id;
+      assert.doesNotThrow(() => select.dispatch("change"), `switch to '${id}' must not throw`);
+      assert.doesNotThrow(() => shim.flushFrames(3), `frames after '${id}' must not throw`);
+    }
+    if (typeof unmount === "function") unmount();
   } finally {
     shim.uninstall();
   }

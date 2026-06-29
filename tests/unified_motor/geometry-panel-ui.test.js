@@ -51,7 +51,11 @@ function mountPanel(machineId) {
   const { UnifiedMotor } = loadApp();
   const CS = UnifiedMotor.ConfigSchema;
   const entry = UnifiedMotor.MACHINES.find(function (m) { return m.id === machineId; });
-  const ctx = { config: JSON.parse(JSON.stringify(entry.config)), requestRebuild: function () {} };
+  const ctx = {
+    config: JSON.parse(JSON.stringify(entry.config)),
+    requestRebuild: function () {},
+    requestRenderUpdate: function () {},   // render-only path (transparency)
+  };
   let captured = null;
   const orig = UnifiedMotor.registerPanel;
   UnifiedMotor.registerPanel = function (e) { if (e.id === "geometry-editor") captured = e; };

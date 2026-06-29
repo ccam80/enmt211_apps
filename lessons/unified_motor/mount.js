@@ -420,12 +420,51 @@
     let orbitDrag = null;
 
     // -----------------------------------------------------------------------
-    //  8. requestRebuild — re-expands config and rebuilds runtime
+    //  8. Rebuild paths
+    //
+    //  Panels whose DOM depends on config STRUCTURE register a refresh here. A
+    //  structural rebuild runs them only when asked (loading a different
+    //  machine) — in-panel edits manage their own DOM via their own refresh
+    //  flag, so a slider drag never tears down the panel it lives in.
     // -----------------------------------------------------------------------
-    function requestRebuild() {
+    const normalizers = [];   // mutate config into canonical form BEFORE expand
+    const refreshers  = [];    // rebuild config-dependent DOM AFTER expand
+    function registerNormalize(fn) {
+      normalizers.push(fn);
+      return function () { const i = normalizers.indexOf(fn); if (i >= 0) normalizers.splice(i, 1); };
+    }
+    function registerRefresh(fn) {
+      refreshers.push(fn);
+      return function () { const i = refreshers.indexOf(fn); if (i >= 0) refreshers.splice(i, 1); };
+    }
+
+    // Structural rebuild — geometry/topology changed. Fresh runtime (state
+    // reset), plot history cleared (so no line is drawn from the old tail back
+    // to t=0), per-circuit readouts rebuilt if the circuit count changed, and —
+    // when asked — the config normalized then the config-dependent panels
+    // rebuilt against it. Normalizing (e.g. collapsing a freshly loaded fixture's
+    // multi-ring bodies, which can reorder config.circuits) runs BEFORE expand so
+    // the runtime and drive are built from the same canonical config the panels
+    // show.
+    function requestRebuild(opts) {
+      opts = opts || {};
+      if (opts.rebuildPanels) for (const fn of normalizers.slice()) fn();
+      const prevN = expanded ? expanded.nCircuits : -1;
       expanded = expand(config);
       runtime  = LIB.MotorRun.create(expanded);
       reapplyDrive();
+      history.clear();
+      if (expanded.nCircuits !== prevN) rebuildReadouts();
+      if (opts.rebuildPanels) for (const fn of refreshers.slice()) fn();
+    }
+
+    // Render-only update — a pure render attribute changed (layer/end-cap
+    // transparency). Re-expand so the new alpha reaches the renderer, but leave
+    // the running runtime, plot history and panels untouched: the simulation and
+    // plots continue uninterrupted. Alpha never affects physics, so the live
+    // runtime's geometry stays valid.
+    function requestRenderUpdate() {
+      expanded = expand(config);
     }
 
     function buildCtx() {
@@ -434,6 +473,9 @@
         config:  config,
         view:    { yaw: orbitYaw, pitch: orbitPitch, dist: ORBIT_DIST },
         requestRebuild: requestRebuild,
+        requestRenderUpdate: requestRenderUpdate,
+        registerNormalize: registerNormalize,
+        registerRefresh: registerRefresh,
       };
     }
 
@@ -490,14 +532,14 @@
     // -----------------------------------------------------------------------
     //  7. Readout builder
     // -----------------------------------------------------------------------
-    function buildReadoutRow(label) {
+    function buildReadoutRow(label, parent) {
       const row = el("div", "", { display: "flex", justifyContent: "space-between", gap: "4px" });
       const lbl = el("span", "", { color: "var(--muted,#8a93a3)" });
       lbl.textContent = label;
       const val = el("span", "", { fontVariantNumeric: "tabular-nums" });
       val.textContent = "—";
       row.append(lbl, val);
-      readoutCol.appendChild(row);
+      (parent || readoutCol).appendChild(row);
       return val;
     }
 
@@ -505,15 +547,20 @@
     const rdOmega   = buildReadoutRow("ω (rad/s)");
     const rdTheta   = buildReadoutRow("θ (rad)");
 
-    // Per-circuit current readouts — built once, updated every frame
-    const rdCurrents = [];
-    for (let k = 0; k < expanded.nCircuits; k++) {
-      rdCurrents.push(buildReadoutRow("i_" + k + " (A)"));
+    // Per-circuit current + flux readouts — rebuilt when the circuit count
+    // changes (e.g. loading a different machine) so they track the live motor.
+    const circuitReadoutHost = el("div");
+    readoutCol.appendChild(circuitReadoutHost);
+    let rdCurrents = [];
+    let rdFlux = [];
+    function rebuildReadouts() {
+      circuitReadoutHost.innerHTML = "";
+      rdCurrents = [];
+      rdFlux = [];
+      for (let k = 0; k < expanded.nCircuits; k++) rdCurrents.push(buildReadoutRow("i_" + k + " (A)", circuitReadoutHost));
+      for (let k = 0; k < expanded.nCircuits; k++) rdFlux.push(buildReadoutRow("λ_" + k + " (Wb)", circuitReadoutHost));
     }
-    const rdFlux = [];
-    for (let k = 0; k < expanded.nCircuits; k++) {
-      rdFlux.push(buildReadoutRow("λ_" + k + " (Wb)"));
-    }
+    rebuildReadouts();
 
     // -----------------------------------------------------------------------
     //  9. Reset handler
@@ -601,8 +648,11 @@
         LIB.Plot.drawGrid(ctx2, 0, 0, W, H, -1, 1, 0, HIST_WIN, title, 11);
         return;
       }
+      // x-axis tracks the buffered span: the oldest sample still held → now.
+      // Once the buffer is full this equals tNow − HIST_WIN; before then the
+      // data fills the axis instead of crowding into the right edge.
       const tNow  = pts[pts.length - 1].t;
-      const tMin  = tNow - HIST_WIN;
+      const tMin  = tNow - Math.max(tNow - pts[0].t, 1e-6);
       const ys    = pts.map(p => p.y).filter(Number.isFinite);
       let yMin = ys.length ? Math.min(...ys) : -1;
       let yMax = ys.length ? Math.max(...ys) :  1;
