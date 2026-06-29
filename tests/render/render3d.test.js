@@ -165,13 +165,13 @@ describe("render3d", () => {
       slotTheta: [0, Math.PI / 4, Math.PI, Math.PI + Math.PI / 4],
       coils: [
         { circuit: 0, slotGo: 0, slotReturn: 1, turns: 4 },
-        { circuit: 1, slotGo: 2, slotReturn: 3, turns: 4 },
+        { circuit: 1, slotGo: 2, slotReturn: 3, turns: -4 },   // reverse-wound coil
       ],
     };
 
     const arcs = UM.Render3D.endTurnArcs(winding, { ell: 0.08, bulge: 0.01, samples: 8 });
 
-    // 4 wires per coil (turns=4) × 2 coils × 2 ends = 16 per-wire arcs.
+    // 4 wires per coil (turns=±4) × 2 coils × 2 ends = 16 per-wire arcs.
     assert.strictEqual(arcs.length, 16, "one arc per wire per end, not per slot");
     const circuits = new Set(arcs.map(function (a) { return a.circuit; }));
     assert.ok(circuits.has(0) && circuits.has(1), "both circuits wired");
@@ -179,6 +179,12 @@ describe("render3d", () => {
     // Each arc is tagged with the end it belongs to (for near/far paint layering).
     assert.strictEqual(arcs.filter(function (a) { return a.end === 1; }).length, 8, "8 arcs at the +z end");
     assert.strictEqual(arcs.filter(function (a) { return a.end === -1; }).length, 8, "8 arcs at the -z end");
+
+    // Coil polarity is tagged so dot flow can reverse on a reverse-wound coil.
+    assert.ok(arcs.filter(function (a) { return a.circuit === 0; }).every(function (a) { return a.turnsSign === 1; }),
+      "forward coil tagged +1");
+    assert.ok(arcs.filter(function (a) { return a.circuit === 1; }).every(function (a) { return a.turnsSign === -1; }),
+      "reverse-wound coil tagged -1");
 
     let zmax = -Infinity, zmin = Infinity;
     for (const arc of arcs) {

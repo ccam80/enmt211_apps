@@ -114,7 +114,7 @@
             points[si * 3 + 1] = r * Math.sin(theta);
             points[si * 3 + 2] = z;
           }
-          arcs.push({ circuit: coil.circuit, end: sign, points: points });
+          arcs.push({ circuit: coil.circuit, end: sign, turnsSign: coil.turns >= 0 ? 1 : -1, points: points });
         }
       }
     }
@@ -761,7 +761,11 @@
         for (const arc of endTurnArcs(wnd, { ell: ell, bulge: ell * 0.15 })) {
           addArc(arc, 2);
           if (showDots) {
-            const off = (dotPhase[arc.circuit] || 0) * arc.end;   // flow sign = end
+            // Flow direction = end (near/far) × coil polarity, so a reverse-wound
+            // coil's dots circulate the opposite way (a phase with mixed-polarity
+            // coils, e.g. a distributed induction stator, otherwise reads as
+            // mis-routed). The per-circuit current sign is already in the phase.
+            const off = (dotPhase[arc.circuit] || 0) * arc.end * (arc.turnsSign || 1);
             const layer = layerFor(arc.end);
             for (const d of LIB.CurrentDots.placeDots(arc.points, off, DOT_SPACING)) layer.push(dotItem(d, 0));
           }
@@ -797,33 +801,12 @@
       }
     }
 
-    // Current-flow dots along the in-slot conductor bars. Bars run the full
-    // stack length, so depth-sorting their dots against the coarse full-length
-    // body faces makes a dot wink out halfway down the body where the face
-    // centroid crosses it. Instead keep only the camera-facing bars (the back
-    // half is genuinely behind the body) and paint them as a final overlay, so a
-    // dot stays visible along the whole bar. Rotor bars rotate by phi.
-    const barDots = [];
-    if (showDots) {
-      for (let k = 0; k < N; k++) {
-        const fld = (lastSolve && lastSolve.perSliceField && lastSolve.perSliceField[k]) ? lastSolve.perSliceField[k] : null;
-        const phi = fld ? fld.gap.phi : ((runtime.state ? runtime.state.theta : 0) + expanded.slices[k].offset);
-        const cphi = Math.cos(phi), sphi = Math.sin(phi);
-        const bnd = sliceAxialBounds(k, N, ell);
-        for (const f of expanded.slices[k].section.features) {
-          if (f.kind !== "conductor" || f.circuit == null || !f.thetaRange) continue;
-          const off = (dotPhase[f.circuit] || 0) * (f.turns >= 0 ? 1 : -1);
-          const wires = distributedWireLayout({ rRange: f.rRange, thetaRange: f.thetaRange, turns: f.turns });
-          for (let wi = 0; wi < wires.length; wi++) {
-            let x = wires[wi].x, y = wires[wi].y;
-            if (f.member === "rotor") { const rx = x * cphi - y * sphi; y = x * sphi + y * cphi; x = rx; }
-            if (x * fwd.x + y * fwd.y >= 0) continue;          // skip the camera-far half
-            const pts = new Float64Array([x, y, bnd.z0, x, y, bnd.z1]);
-            for (const d of LIB.CurrentDots.placeDots(pts, off, DOT_SPACING)) barDots.push(dotItem(d, 0));
-          }
-        }
-      }
-    }
+    // Current dots ride only the end turns. The in-slot conductor bars sit
+    // inside the iron and are hidden by the back-iron from any external view, so
+    // there is nothing to honestly draw there: an overlay would show through the
+    // iron and a depth-sorted dot would wink out mid-stack against the body's
+    // coarse full-length faces. (In-slot flow under a transparent-iron view would
+    // need a proper per-fragment depth pass.)
 
     // Paint back→front at each end:
     //   far end-turns/rings → far end face → body → near end face → near end-turns/rings
@@ -844,7 +827,6 @@
     paintSorted(ofKind(nearCaps, "face"));
     paintSorted(ofKind(nearCaps, "wind"));
     paintSorted(ofKind(nearCaps, "dot"));
-    paintSorted(barDots);   // camera-facing in-slot bar dots, on top
   }
 
   // ---------------------------------------------------------------------------
