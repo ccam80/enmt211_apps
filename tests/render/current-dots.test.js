@@ -53,6 +53,19 @@ test("step advances each circuit's phase by signed current (linear)", function (
   assert.ok(Math.abs(phase[1] + 0.08) < 1e-12, "-4A → -0.08 (reverses)");
 });
 
+test("autoScale normalises speed to the live current envelope", function () {
+  const a = CD.autoScale(new Float64Array([2, -10, 0]), 0, { target: 0.02, floor: 0.05 });
+  assert.equal(a.peak, 10, "peak tracks max |I|");
+  assert.ok(Math.abs(a.scale - 0.002) < 1e-12, "scale = target / peak");
+
+  const z = CD.autoScale(new Float64Array([0, 0]), 0, { target: 0.02, floor: 0.05 });
+  assert.equal(z.peak, 0.05, "floor prevents a zero-current blow-up");
+
+  // A prior envelope decays slowly so an AC zero-crossing doesn't spike the scale.
+  const d = CD.autoScale(new Float64Array([0]), 10, { target: 0.02, decay: 0.98, floor: 0.05 });
+  assert.ok(Math.abs(d.peak - 9.8) < 1e-9, "envelope decays, not collapses");
+});
+
 test("step logarithmic mode compresses magnitude but keeps sign", function () {
   const phase = new Float64Array([0]);
   CD.step(phase, new Float64Array([10]), 1.0, { speedScale: 1, mode: "logarithmic", logRef: 1 });

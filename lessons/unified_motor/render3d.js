@@ -91,8 +91,17 @@
       const retW = coil.retW != null ? coil.retW : w;
       const goBand  = coil.goRRange  || sr;
       const retBand = coil.retRRange || sr;
-      const goWires  = distributedWireLayout({ rRange: goBand,  thetaRange: [goTheta - goW / 2, goTheta + goW / 2], turns: coil.turns });
-      const retWires = distributedWireLayout({ rRange: retBand, thetaRange: [retTheta - retW / 2, retTheta + retW / 2], turns: coil.turns });
+      // centerline mode → one arc per coil (the bundle centre), for current dots;
+      // otherwise one arc per wire, for the drawn end turns.
+      let goWires, retWires;
+      if (opts.centerline) {
+        const gm = 0.5 * (goBand[0] + goBand[1]), rm = 0.5 * (retBand[0] + retBand[1]);
+        goWires  = [{ x: gm * Math.cos(goTheta),  y: gm * Math.sin(goTheta)  }];
+        retWires = [{ x: rm * Math.cos(retTheta), y: rm * Math.sin(retTheta) }];
+      } else {
+        goWires  = distributedWireLayout({ rRange: goBand,  thetaRange: [goTheta - goW / 2, goTheta + goW / 2], turns: coil.turns });
+        retWires = distributedWireLayout({ rRange: retBand, thetaRange: [retTheta - retW / 2, retTheta + retW / 2], turns: coil.turns });
+      }
       const n = Math.min(goWires.length, retWires.length);
 
       for (let e = 0; e < 2; e++) {
@@ -525,21 +534,24 @@
   //  reverse with current sign). Module-scoped; re-zeroed when the runtime
   //  changes or its clock rewinds (Reset).
   // ---------------------------------------------------------------------------
-  let _dotPhase = null, _dotRt = null, _dotT = 0;
+  let _dotPhase = null, _dotRt = null, _dotT = 0, _dotPeak = 0;
   function advanceDots(runtime, currents) {
     const m = currents.length;
     const t = (runtime.state && runtime.state.t != null) ? runtime.state.t : 0;
     if (_dotRt !== runtime || !_dotPhase || _dotPhase.length !== m || t < _dotT) {
-      _dotPhase = new Float64Array(m); _dotRt = runtime; _dotT = t;
+      _dotPhase = new Float64Array(m); _dotRt = runtime; _dotT = t; _dotPeak = 0;
       return _dotPhase;
     }
     let dt = t - _dotT; _dotT = t;
     if (dt < 0) dt = 0; else if (dt > 0.05) dt = 0.05;
     const viz = (typeof UM !== "undefined" && UM.fieldViz) ? UM.fieldViz : {};
-    LIB.CurrentDots.step(_dotPhase, currents, dt, {
-      speedScale: viz.currentDotSpeed != null ? viz.currentDotSpeed : LIB.CurrentDots.DEFAULTS.speedScale,
-      mode: viz.currentDotLog ? "logarithmic" : "linear",
+    // Speed normalised to the live current envelope so weak and strong machines
+    // both animate visibly; currentDotSpeed tunes the target path-units/sec.
+    const as = LIB.CurrentDots.autoScale(currents, _dotPeak, {
+      target: viz.currentDotSpeed != null ? viz.currentDotSpeed : 0.02,
     });
+    _dotPeak = as.peak;
+    LIB.CurrentDots.step(_dotPhase, currents, dt, { speedScale: as.scale });
     return _dotPhase;
   }
 
@@ -577,14 +589,26 @@
     const farCaps  = [];
     function layerFor(sign) { return (sign * fwd.z < 0) ? nearCaps : farCaps; }
 
-    // Current-flow dots (yellow) ride the winding conductors. One accumulated
-    // phase per circuit; each dot is placed along a conductor polyline and either
-    // layered with its end turn (near/far) or depth-sorted with the body (bars).
+    // Current-flow dots (yellow), one stream per wire group. End-turn dots ride
+    // one centreline arc per coil, layered near/far with the turns. The in-slot
+    // bar dots (one per conductor group) are the more useful view but sit inside
+    // the iron — shown as a camera-near overlay only when the iron is dialled
+    // transparent enough to look inside (otherwise the back-iron hides them).
     const vizDots = (typeof UM !== "undefined" && UM.fieldViz) ? UM.fieldViz : {};
     const currents = (runtime.state && runtime.state.i) ? runtime.state.i : null;
     const showDots = !!(vizDots.currentDots && currents && LIB.CurrentDots);
     const dotPhase = showDots ? advanceDots(runtime, currents) : null;
     const DOT_SPACING = (LIB.CurrentDots && LIB.CurrentDots.DEFAULTS.spacing) || 0.006;
+    const slotDots = [];
+    let minIronAlpha = 1;
+    if (showDots) {
+      for (let k = 0; k < N; k++) {
+        for (const f of expanded.slices[k].section.features) {
+          if (f.kind === "iron" && f.alpha != null && f.alpha < minIronAlpha) minIronAlpha = f.alpha;
+        }
+      }
+    }
+    const slotVisible = showDots && minIronAlpha < 0.9;   // iron see-through enough
     function dotItem(p, depthBias) {
       const depth = L3.depthOf({ x: p[0], y: p[1], z: p[2] }) - (depthBias || 0);
       return { depth: depth, kind: "dot", paint: function () {
@@ -758,13 +782,14 @@
       }
 
       for (const wnd of (expanded.windings || [])) {
-        for (const arc of endTurnArcs(wnd, { ell: ell, bulge: ell * 0.15 })) {
-          addArc(arc, 2);
-          if (showDots) {
-            // Flow direction = end (near/far) × coil polarity, so a reverse-wound
-            // coil's dots circulate the opposite way (a phase with mixed-polarity
-            // coils, e.g. a distributed induction stator, otherwise reads as
-            // mis-routed). The per-circuit current sign is already in the phase.
+        for (const arc of endTurnArcs(wnd, { ell: ell, bulge: ell * 0.15 })) addArc(arc, 2);
+        if (showDots) {
+          // One dot stream per coil (centreline arc), not per wire. Flow
+          // direction = end (near/far) × coil polarity, so a reverse-wound coil's
+          // dots circulate the opposite way (a phase with mixed-polarity coils,
+          // e.g. a distributed induction stator, otherwise reads as mis-routed).
+          // The per-circuit current sign is already in the phase.
+          for (const arc of endTurnArcs(wnd, { ell: ell, bulge: ell * 0.15, centerline: true })) {
             const off = (dotPhase[arc.circuit] || 0) * arc.end * (arc.turnsSign || 1);
             const layer = layerFor(arc.end);
             for (const d of LIB.CurrentDots.placeDots(arc.points, off, DOT_SPACING)) layer.push(dotItem(d, 0));
@@ -801,12 +826,31 @@
       }
     }
 
-    // Current dots ride only the end turns. The in-slot conductor bars sit
-    // inside the iron and are hidden by the back-iron from any external view, so
-    // there is nothing to honestly draw there: an overlay would show through the
-    // iron and a depth-sorted dot would wink out mid-stack against the body's
-    // coarse full-length faces. (In-slot flow under a transparent-iron view would
-    // need a proper per-fragment depth pass.)
+    // In-slot conductor dots — one stream per conductor group (slot bundle),
+    // along the bar centreline. These sit inside the iron, so they only render
+    // when the iron is dialled transparent enough to look inside (otherwise the
+    // back-iron correctly hides them); on the camera-near half only, as a final
+    // overlay (the back half is genuinely behind the body). Rotor bars rotate by
+    // phi. This is the more useful "see the current in the slots" view.
+    if (slotVisible) {
+      for (let k = 0; k < N; k++) {
+        const fld = (lastSolve && lastSolve.perSliceField && lastSolve.perSliceField[k]) ? lastSolve.perSliceField[k] : null;
+        const phi = fld ? fld.gap.phi : ((runtime.state ? runtime.state.theta : 0) + expanded.slices[k].offset);
+        const cphi = Math.cos(phi), sphi = Math.sin(phi);
+        const bnd = sliceAxialBounds(k, N, ell);
+        for (const f of expanded.slices[k].section.features) {
+          if (f.kind !== "conductor" || f.circuit == null || !f.thetaRange) continue;
+          const rm = 0.5 * (f.rRange[0] + f.rRange[1]);
+          const th = 0.5 * (f.thetaRange[0] + f.thetaRange[1]);
+          let x = rm * Math.cos(th), y = rm * Math.sin(th);
+          if (f.member === "rotor") { const rx = x * cphi - y * sphi; y = x * sphi + y * cphi; x = rx; }
+          if (x * fwd.x + y * fwd.y >= 0) continue;          // camera-far half: behind the body
+          const off = (dotPhase[f.circuit] || 0) * (f.turns >= 0 ? 1 : -1);
+          const pts = new Float64Array([x, y, bnd.z0, x, y, bnd.z1]);
+          for (const d of LIB.CurrentDots.placeDots(pts, off, DOT_SPACING)) slotDots.push(dotItem(d, 0));
+        }
+      }
+    }
 
     // Paint back→front at each end:
     //   far end-turns/rings → far end face → body → near end face → near end-turns/rings
@@ -827,6 +871,7 @@
     paintSorted(ofKind(nearCaps, "face"));
     paintSorted(ofKind(nearCaps, "wind"));
     paintSorted(ofKind(nearCaps, "dot"));
+    paintSorted(slotDots);   // in-slot conductor dots (transparent-iron view), on top
   }
 
   // ---------------------------------------------------------------------------

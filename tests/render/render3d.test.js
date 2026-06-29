@@ -198,6 +198,11 @@ describe("render3d", () => {
     // ell/2 = 0.04, bulge 0.01 → turns rise past each end toward ±0.05.
     assert.ok(zmax > 0.048 && zmax <= 0.05 + 1e-9, "near-end turns bulge past +0.04 toward +0.05, got " + zmax);
     assert.ok(zmin < -0.048 && zmin >= -0.05 - 1e-9, "far-end turns bulge past -0.04 toward -0.05, got " + zmin);
+
+    // centerline mode → one arc per coil per end (the dot stream rides the bundle
+    // centre, not each wire), so 2 coils × 2 ends = 4.
+    const center = UM.Render3D.endTurnArcs(winding, { ell: 0.08, bulge: 0.01, samples: 8, centerline: true });
+    assert.strictEqual(center.length, 4, "centerline: one arc per coil per end");
   });
 
   it("concentrated coils route through the same end turns and never leave the slot band", () => {
