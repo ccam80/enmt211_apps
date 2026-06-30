@@ -542,16 +542,19 @@
     let lastTime = null;
 
     // Timing. The ordered rate (`speed`, sim-s/real-s) is the CEILING. To keep
-    // sim-time advancing smoothly across commutation spikes, each frame advances
-    // at min(ordered, floor), where `floor` is the slowest solve-capacity seen
-    // over the last half-window of real time — so one expensive solve drops the
-    // rate briefly and it recovers as that frame ages out, instead of the sim
-    // lurching to catch up. Capacity = FRAME_BUDGET_MS × achievedΔt / solveMs:
-    // what the wall budget could solve this frame, measurable even while we
-    // advance less, so the floor never ratchets down. runtime.step(dt, budget)
-    // is the step-to-time-with-early-exit the tests drive (without the budget).
-    const HALF_WINDOW_MS = (REAL_WINDOW / 2) * 1000;
-    const capWin = [];             // { t: wallMs, rate: sim-s/real-s } over the half-window
+    // sim-time advancing smoothly, each frame caps its advance so the solve fits
+    // ~TARGET_SOLVE_MS, using the WORST solve cost (ms per sim-second) seen over
+    // the last half-window. A commutation edge spikes that cost; holding the cap
+    // at the worst case for the whole window makes the advance uniform instead of
+    // hitching at every edge, and it recovers as the costly frame ages out. The
+    // cost is keyed to solve TIME (a frame-rate hitch), not budget-overrun — an
+    // edge that takes 20 ms still lurches the frame without ever hitting the
+    // 30 ms runtime.step budget, so a budget-based floor never caught it.
+    // runtime.step(dt, budget) is the step-to-time-with-early-exit the tests
+    // drive (without the budget); the budget here is just a hard anti-stall cap.
+    const HALF_WINDOW_MS  = (REAL_WINDOW / 2) * 1000;
+    const TARGET_SOLVE_MS = 10;    // per-frame solve target the advance is capped to
+    const capWin = [];             // { t: wallMs, cost: ms-per-sim-second } over the half-window
     let effRate = speed;           // smoothed achieved rate, for the header badge
 
     // -----------------------------------------------------------------------
@@ -740,29 +743,29 @@
       const dtFrame = Math.min((now - lastTime) / 1000, 0.05);
       lastTime = now;
 
-      // Physics — advance min(ordered, floor)·dtFrame of sim-time, spending at
-      // most FRAME_BUDGET_MS of wall-time (runtime.step bails after the budget,
-      // always after ≥1 solve). The floor is the slowest sustainable rate over
-      // the last half-window, so commutation spikes don't lurch the playback.
+      // Physics — advance min(ordered·dtFrame, sustainable) of sim-time, where
+      // `sustainable` caps the solve to ~TARGET_SOLVE_MS at the worst cost over
+      // the half-window, so commutation edges don't hitch the frame. The
+      // FRAME_BUDGET_MS arg to runtime.step is a hard anti-stall cap on top.
       let solveMs = 0;
       if (!paused) {
+        // Worst solve cost (ms per sim-second) over the half-window → cap the
+        // advance so this frame's solve fits ~TARGET_SOLVE_MS.
         while (capWin.length && now - capWin[0].t > HALF_WINDOW_MS) capWin.shift();
-        let floorRate = speed;
-        for (let q = 0; q < capWin.length; q++) if (capWin[q].rate < floorRate) floorRate = capWin[q].rate;
+        let maxCost = 0;
+        for (let q = 0; q < capWin.length; q++) if (capWin[q].cost > maxCost) maxCost = capWin[q].cost;
+        const sustainableDt = maxCost > 0 ? TARGET_SOLVE_MS / maxCost : Infinity;
 
-        const advanceDt = Math.min(speed, floorRate) * dtFrame;
+        const advanceDt = Math.min(speed * dtFrame, sustainableDt);
         const before = runtime.state.t;
         const tSolve = nowMs();
         runtime.step(advanceDt, FRAME_BUDGET_MS);
         solveMs = nowMs() - tSolve;
         const advanced = runtime.state.t - before;
 
-        // Measure this frame's solve capacity (sim-s/real-s the budget could
-        // sustain), independent of how much we chose to advance, so the floor can
-        // recover once a heavy frame ages out of the window.
-        if (solveMs > 0.05 && advanced > 0 && dtFrame > 0) {
-          capWin.push({ t: now, rate: (FRAME_BUDGET_MS * (advanced / solveMs)) / dtFrame });
-        }
+        // Record this frame's solve cost so a costly edge lowers the cap for the
+        // whole window (and ages out of it on recovery).
+        if (advanced > 1e-12 && solveMs > 0) capWin.push({ t: now, cost: solveMs / advanced });
         const frameRate = dtFrame > 0 ? advanced / dtFrame : speed;
         effRate += (frameRate - effRate) * 0.2;   // smooth for the badge
 
