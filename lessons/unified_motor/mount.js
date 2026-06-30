@@ -541,20 +541,13 @@
     let rafId = null;
     let lastTime = null;
 
-    // Timing. The ordered rate (`speed`, sim-s/real-s) is the CEILING. To keep
-    // sim-time advancing smoothly, each frame caps its advance so the solve fits
-    // ~TARGET_SOLVE_MS, using the WORST solve cost (ms per sim-second) seen over
-    // the last half-window. A commutation edge spikes that cost; holding the cap
-    // at the worst case for the whole window makes the advance uniform instead of
-    // hitching at every edge, and it recovers as the costly frame ages out. The
-    // cost is keyed to solve TIME (a frame-rate hitch), not budget-overrun — an
-    // edge that takes 20 ms still lurches the frame without ever hitting the
-    // 30 ms runtime.step budget, so a budget-based floor never caught it.
-    // runtime.step(dt, budget) is the step-to-time-with-early-exit the tests
-    // drive (without the budget); the budget here is just a hard anti-stall cap.
-    const HALF_WINDOW_MS  = (REAL_WINDOW / 2) * 1000;
-    const TARGET_SOLVE_MS = 10;    // per-frame solve target the advance is capped to
-    const capWin = [];             // { t: wallMs, cost: ms-per-sim-second } over the half-window
+    // Timing. Each frame advances `speed × dtFrame` of sim-time (speed is
+    // sim-s/real-s) AND caps the integrator's step to that same per-frame
+    // advance, so a smooth phase takes exactly one solve per frame and scrolls at
+    // the ordered rate — instead of the controller taking a big step that
+    // overshoots and then freezes the next frames. FRAME_BUDGET_MS on
+    // runtime.step stays as a hard anti-stall cap; when solves can't keep up the
+    // frame lands short and the plot fills less of its fixed window.
     let effRate = speed;           // smoothed achieved rate, for the header badge
 
     // -----------------------------------------------------------------------
@@ -743,29 +736,18 @@
       const dtFrame = Math.min((now - lastTime) / 1000, 0.05);
       lastTime = now;
 
-      // Physics — advance min(ordered·dtFrame, sustainable) of sim-time, where
-      // `sustainable` caps the solve to ~TARGET_SOLVE_MS at the worst cost over
-      // the half-window, so commutation edges don't hitch the frame. The
-      // FRAME_BUDGET_MS arg to runtime.step is a hard anti-stall cap on top.
+      // Physics — advance speed·dtFrame of sim-time, capping the integrator step
+      // to that same amount so a smooth phase takes one solve per frame (uniform
+      // scroll) rather than overshooting then freezing. FRAME_BUDGET_MS is the
+      // hard anti-stall cap.
       let solveMs = 0;
       if (!paused) {
-        // Worst solve cost (ms per sim-second) over the half-window → cap the
-        // advance so this frame's solve fits ~TARGET_SOLVE_MS.
-        while (capWin.length && now - capWin[0].t > HALF_WINDOW_MS) capWin.shift();
-        let maxCost = 0;
-        for (let q = 0; q < capWin.length; q++) if (capWin[q].cost > maxCost) maxCost = capWin[q].cost;
-        const sustainableDt = maxCost > 0 ? TARGET_SOLVE_MS / maxCost : Infinity;
-
-        const advanceDt = Math.min(speed * dtFrame, sustainableDt);
+        const advanceDt = speed * dtFrame;
         const before = runtime.state.t;
         const tSolve = nowMs();
-        runtime.step(advanceDt, FRAME_BUDGET_MS);
+        runtime.step(advanceDt, FRAME_BUDGET_MS, advanceDt);
         solveMs = nowMs() - tSolve;
         const advanced = runtime.state.t - before;
-
-        // Record this frame's solve cost so a costly edge lowers the cap for the
-        // whole window (and ages out of it on recovery).
-        if (advanced > 1e-12 && solveMs > 0) capWin.push({ t: now, cost: solveMs / advanced });
         const frameRate = dtFrame > 0 ? advanced / dtFrame : speed;
         effRate += (frameRate - effRate) * 0.2;   // smooth for the badge
 
