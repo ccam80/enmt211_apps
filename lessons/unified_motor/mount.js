@@ -542,12 +542,10 @@
     let lastTime = null;
 
     // Timing. Each frame advances `speed × dtFrame` of sim-time (speed is
-    // sim-s/real-s) AND caps the integrator's step to that same per-frame
-    // advance, so a smooth phase takes exactly one solve per frame and scrolls at
-    // the ordered rate — instead of the controller taking a big step that
-    // overshoots and then freezes the next frames. FRAME_BUDGET_MS on
-    // runtime.step stays as a hard anti-stall cap; when solves can't keep up the
-    // frame lands short and the plot fills less of its fixed window.
+    // sim-s/real-s); the integrator's own LTE controller sizes the sub-steps.
+    // FRAME_BUDGET_MS on runtime.step is a hard anti-stall cap so a heavy solve
+    // never freezes the frame; when solves can't keep up the frame lands short
+    // and the plot fills less of its fixed window.
     let effRate = speed;           // smoothed achieved rate, for the header badge
 
     // -----------------------------------------------------------------------
@@ -736,16 +734,15 @@
       const dtFrame = Math.min((now - lastTime) / 1000, 0.05);
       lastTime = now;
 
-      // Physics — advance speed·dtFrame of sim-time, capping the integrator step
-      // to that same amount so a smooth phase takes one solve per frame (uniform
-      // scroll) rather than overshooting then freezing. FRAME_BUDGET_MS is the
-      // hard anti-stall cap.
+      // Physics — advance speed·dtFrame of sim-time; the integrator's LTE
+      // controller sizes the sub-steps. FRAME_BUDGET_MS is the hard anti-stall
+      // cap (runtime.step bails after the budget, always after ≥1 solve).
       let solveMs = 0;
       if (!paused) {
         const advanceDt = speed * dtFrame;
         const before = runtime.state.t;
         const tSolve = nowMs();
-        runtime.step(advanceDt, FRAME_BUDGET_MS, advanceDt);
+        runtime.step(advanceDt, FRAME_BUDGET_MS);
         solveMs = nowMs() - tSolve;
         const advanced = runtime.state.t - before;
         const frameRate = dtFrame > 0 ? advanced / dtFrame : speed;
