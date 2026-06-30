@@ -394,21 +394,42 @@
 
     // Wall-time ceiling per render frame: runtime.step bails after this many ms
     // of solve time so a heavy commutation transient never stalls rendering.
-    // Declared here (ahead of the stepping loop that enforces it) because the
-    // Playback slider tip below references it.
+    // Declared here, ahead of both the playback control and the stepping loop.
     const FRAME_BUDGET_MS = 30;
 
-    // Playback control — sim-time advanced per render frame ("ordered speed").
-    // Independent of the FRAME_BUDGET_MS wall cap: this sets the target; the cap
-    // sets the ceiling on solve time. Higher = faster playback when solves are
-    // cheap; when they aren't the header flags slow-motion.
+    // Playback control — the ordered rate as a fraction of real time (sim-seconds
+    // per real-second). This is the CEILING; the frame loop drops below it
+    // (smoothly) when a machine can't solve fast enough. Never faster than real
+    // time. Free-text for an arbitrary fraction, plus /1 /10 /100 /1000 presets.
+    let speed = 0.1;   // sim-s per real-s, in (0, 1]
     const playbackLabel = el("div", "", { fontWeight: "600", margin: "8px 0 4px", fontSize: "12px", color: "var(--muted,#8a93a3)" });
-    playbackLabel.textContent = "Playback";
+    playbackLabel.textContent = "Playback (× real time)";
     shelf.appendChild(playbackLabel);
-    buildSliders(shelf, [
-      { key: "stepMs", label: "step/frame (ms)", min: 2, max: 33, step: 0.1, value: 1000 / 240, log: true,
-        tip: "Sim-time advanced per render frame; capped by the " + FRAME_BUDGET_MS + " ms wall budget." },
-    ], function (key, v) { orderedStepDt = v / 1000; });
+    const speedRow = el("div", "", { display: "flex", alignItems: "center", gap: "4px", flexWrap: "wrap", margin: "0 0 8px" });
+    const speedInput = document.createElement("input");
+    speedInput.type = "text";
+    speedInput.style.cssText = "width:4.5em;font-variant-numeric:tabular-nums;";
+    const speedSuffix = el("span", "", { color: "var(--muted,#8a93a3)", fontSize: "0.82em", marginRight: "4px" });
+    speedSuffix.textContent = "×";
+    function syncSpeedInput() { speedInput.value = String(+speed.toPrecision(4)); }
+    function setSpeed(v) {
+      if (!Number.isFinite(v) || v <= 0) { syncSpeedInput(); return; }
+      speed = Math.min(1, v);   // never faster than real time
+      syncSpeedInput();
+    }
+    speedInput.addEventListener("change", function () { setSpeed(parseFloat(speedInput.value)); });
+    speedRow.appendChild(speedInput);
+    speedRow.appendChild(speedSuffix);
+    for (const denom of [1, 10, 100, 1000]) {
+      const b = document.createElement("button");
+      b.textContent = "/" + denom;
+      b.style.cssText = "font-size:0.78em;padding:1px 5px;cursor:pointer;";
+      b.title = "Set playback to 1/" + denom + " of real time";
+      b.addEventListener("click", function () { setSpeed(1 / denom); });
+      speedRow.appendChild(b);
+    }
+    shelf.appendChild(speedRow);
+    syncSpeedInput();
 
     // -----------------------------------------------------------------------
     //  5. Orbit-camera tool state
@@ -510,24 +531,28 @@
     // -----------------------------------------------------------------------
     //  6. Plot history + timing
     // -----------------------------------------------------------------------
-    const HIST_HZ   = 60;
-    const HIST_WIN  = 8;
-    const history   = makePlotHistory(HIST_WIN, HIST_HZ);
+    // Plots show a fixed REAL_WINDOW seconds of playback; the on-screen sim-time
+    // span is REAL_WINDOW × speed (fixed while playing → uniform scroll, no
+    // expanding axis). Buffer sized to cover the window even on a 144 Hz display.
+    const REAL_WINDOW = 8;            // real seconds of playback shown
+    const history     = makePlotHistory(REAL_WINDOW, 144);
 
     let paused = false;
     let rafId = null;
     let lastTime = null;
 
-    // Stepping budget. Each render frame advances the sim by `orderedStepDt` of
-    // SIM-time (the "ordered speed", set by the Playback slider), spending at most
-    // FRAME_BUDGET_MS of WALL-time on solves — runtime.step bails after the budget,
-    // so a heavy commutation transient (where one solve can exceed the budget)
-    // never stalls rendering. When the cap lands the frame short of orderedStepDt
-    // the sim is playing slower than ordered; slowMo drives the header warning.
-    // (FRAME_BUDGET_MS is declared above, before the Playback slider tip uses it.)
-    let orderedStepDt = 1 / 240;   // sim-seconds per frame
-    let slowMo   = false;
-    let slowFrac = 1;
+    // Timing. The ordered rate (`speed`, sim-s/real-s) is the CEILING. To keep
+    // sim-time advancing smoothly across commutation spikes, each frame advances
+    // at min(ordered, floor), where `floor` is the slowest solve-capacity seen
+    // over the last half-window of real time — so one expensive solve drops the
+    // rate briefly and it recovers as that frame ages out, instead of the sim
+    // lurching to catch up. Capacity = FRAME_BUDGET_MS × achievedΔt / solveMs:
+    // what the wall budget could solve this frame, measurable even while we
+    // advance less, so the floor never ratchets down. runtime.step(dt, budget)
+    // is the step-to-time-with-early-exit the tests drive (without the budget).
+    const HALF_WINDOW_MS = (REAL_WINDOW / 2) * 1000;
+    const capWin = [];             // { t: wallMs, rate: sim-s/real-s } over the half-window
+    let effRate = speed;           // smoothed achieved rate, for the header badge
 
     // -----------------------------------------------------------------------
     //  7. Readout builder
@@ -639,28 +664,51 @@
     //  12. Main rAF + accumulator loop
     // -----------------------------------------------------------------------
 
+    function niceStep(x) {
+      if (!(x > 0)) return 1;
+      const p = Math.pow(10, Math.floor(Math.log10(x)));
+      const f = x / p;
+      const n = f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10;
+      return n * p;
+    }
+
     function drawPlot(canvas, history, title, color, yFmt) {
       const { W, H } = fitCanvas(canvas);
       if (W <= 0 || H <= 0) return;
       const ctx2 = canvas.getContext("2d");
       const pts = history;
-      if (!pts || pts.length === 0) {
-        LIB.Plot.drawGrid(ctx2, 0, 0, W, H, -1, 1, 0, HIST_WIN, title, 11);
+      // Fixed window: REAL_WINDOW seconds of playback at the ordered speed. The
+      // span is constant while playing (no expanding axis); data fills from the
+      // right and the grid scrolls left with it.
+      const W_sim = Math.max(REAL_WINDOW * speed, 1e-9);
+      const tNow  = pts.length ? pts[pts.length - 1].t : 0;
+      const tMin  = tNow - W_sim;
+      const tStep = niceStep(W_sim / 5);
+      if (!pts.length) {
+        LIB.Plot.drawGrid(ctx2, 0, 0, W, H, -1, 1, tMin, tNow, title, 11, { tStep });
         return;
       }
-      // x-axis tracks the buffered span: the oldest sample still held → now.
-      // Once the buffer is full this equals tNow − HIST_WIN; before then the
-      // data fills the axis instead of crowding into the right edge.
-      const tNow  = pts[pts.length - 1].t;
-      const tMin  = tNow - Math.max(tNow - pts[0].t, 1e-6);
-      const ys    = pts.map(p => p.y).filter(Number.isFinite);
-      let yMin = ys.length ? Math.min(...ys) : -1;
-      let yMax = ys.length ? Math.max(...ys) :  1;
+      // y-range from the samples currently inside the window.
+      let yMin = Infinity, yMax = -Infinity;
+      for (const p of pts) {
+        if (p.t < tMin || !Number.isFinite(p.y)) continue;
+        if (p.y < yMin) yMin = p.y;
+        if (p.y > yMax) yMax = p.y;
+      }
+      if (!(yMin <= yMax)) { yMin = -1; yMax = 1; }
       if (yMax - yMin < 1e-9) { yMin -= 0.5; yMax += 0.5; }
-      const pad  = (yMax - yMin) * 0.1 || 0.1;
+      const pad = (yMax - yMin) * 0.1 || 0.1;
       yMin -= pad; yMax += pad;
-      LIB.Plot.drawGrid(ctx2, 0, 0, W, H, yMin, yMax, tMin, tNow, title, 11, { yFmt });
+      LIB.Plot.drawGrid(ctx2, 0, 0, W, H, yMin, yMax, tMin, tNow, title, 11, { yFmt, tStep });
+      // Clip the trace to the data rect so samples scrolling off the left edge
+      // don't spill into the y-gutter / axis labels.
+      const yGutter = Math.max(28, Math.round(11 * 2.6));
+      ctx2.save();
+      ctx2.beginPath();
+      ctx2.rect(yGutter, 0, Math.max(0, W - yGutter - 4), H);
+      ctx2.clip();
       LIB.Plot.drawLine(ctx2, 0, 0, W, H, yMin, yMax, tMin, tNow, pts, color, 2);
+      ctx2.restore();
     }
 
     // Fill a 2-D cross-section canvas with the panel background and a centred
@@ -692,21 +740,32 @@
       const dtFrame = Math.min((now - lastTime) / 1000, 0.05);
       lastTime = now;
 
-      // Physics — the adaptive solver advances orderedStepDt of sim-time this
-      // frame, spending at most FRAME_BUDGET_MS of wall-time (runtime.step bails
-      // after the budget, always after ≥1 solve). The full nonlinear air-gap solve
-      // is exact on every sub-step; when a transient is too heavy to cover
-      // orderedStepDt inside the budget the frame lands short and the sim plays in
-      // slow-motion (flagged in the header) rather than dropping the frame.
+      // Physics — advance min(ordered, floor)·dtFrame of sim-time, spending at
+      // most FRAME_BUDGET_MS of wall-time (runtime.step bails after the budget,
+      // always after ≥1 solve). The floor is the slowest sustainable rate over
+      // the last half-window, so commutation spikes don't lurch the playback.
       let solveMs = 0;
       if (!paused) {
+        while (capWin.length && now - capWin[0].t > HALF_WINDOW_MS) capWin.shift();
+        let floorRate = speed;
+        for (let q = 0; q < capWin.length; q++) if (capWin[q].rate < floorRate) floorRate = capWin[q].rate;
+
+        const advanceDt = Math.min(speed, floorRate) * dtFrame;
         const before = runtime.state.t;
         const tSolve = nowMs();
-        runtime.step(orderedStepDt, FRAME_BUDGET_MS);
+        runtime.step(advanceDt, FRAME_BUDGET_MS);
         solveMs = nowMs() - tSolve;
         const advanced = runtime.state.t - before;
-        slowMo   = advanced < orderedStepDt - 1e-12;
-        slowFrac = orderedStepDt > 0 ? advanced / orderedStepDt : 1;
+
+        // Measure this frame's solve capacity (sim-s/real-s the budget could
+        // sustain), independent of how much we chose to advance, so the floor can
+        // recover once a heavy frame ages out of the window.
+        if (solveMs > 0.05 && advanced > 0 && dtFrame > 0) {
+          capWin.push({ t: now, rate: (FRAME_BUDGET_MS * (advanced / solveMs)) / dtFrame });
+        }
+        const frameRate = dtFrame > 0 ? advanced / dtFrame : speed;
+        effRate += (frameRate - effRate) * 0.2;   // smooth for the badge
+
         // Plot history — one sample per frame, on the sim-time axis.
         const st  = runtime.state;
         const tau = runtime.lastSolve ? runtime.lastSolve.torque : 0;
@@ -788,10 +847,11 @@
         }
       }
 
-      // Slow-motion warning — the wall budget capped this frame below the ordered step.
-      if (slowMo && !paused) {
+      // Below-ordered warning — the machine can't sustain the ordered rate, so
+      // the floor holds playback below it (the plot fills less of the window).
+      if (!paused && effRate < speed * 0.9) {
         warnBadge.style.display = "";
-        warnBadge.textContent = "⚠ slow-motion · " + Math.round(slowFrac * 100) + "% of ordered";
+        warnBadge.textContent = "⚠ playing " + (+effRate.toPrecision(2)) + "× · ordered " + (+speed.toPrecision(3)) + "×";
       } else {
         warnBadge.style.display = "none";
       }
