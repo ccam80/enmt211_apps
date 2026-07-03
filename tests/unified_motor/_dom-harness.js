@@ -286,6 +286,8 @@ function loadApp() {
   lib("motor-slice.js");
   lib("motor-stack.js");
   lib("motor-run.js");
+  lib("snapshot-buffer.js");
+  lib("sim-source.js");
   lesson("mount.js");
   lesson("cross-section-render.js");
   lesson("render3d.js");

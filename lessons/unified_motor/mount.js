@@ -174,6 +174,28 @@
   }
 
   // ---------------------------------------------------------------------------
+  //  makeSimSource(deps) — construct the SimSource backing the runtime.
+  //
+  //  Prefers a Web Worker (solver off the render thread) when opted in
+  //  (UM.USE_SIM_WORKER) and a Worker + a same-origin worker URL are available
+  //  and the page is not on file:// (workers can't load there). Otherwise, and
+  //  automatically on any worker failure, runs in-process. Every node test
+  //  drives the in-process path (no Worker global, no location).
+  // ---------------------------------------------------------------------------
+  function makeSimSource(deps) {
+    const canWorker =
+      typeof Worker !== "undefined" &&
+      typeof UM.SIM_WORKER_URL === "string" &&
+      typeof location !== "undefined" && location.protocol !== "file:";
+    if (UM.USE_SIM_WORKER && canWorker) {
+      try {
+        return LIB.SimSource.createWorker({ url: UM.SIM_WORKER_URL, fallbackDeps: deps });
+      } catch (e) { /* construction failed → in-process below */ }
+    }
+    return LIB.SimSource.createInline(deps);
+  }
+
+  // ---------------------------------------------------------------------------
   //  UnifiedMotor.mount(host) → unmount
   // ---------------------------------------------------------------------------
 
@@ -184,12 +206,68 @@
     const config = UM.defaultConfig || makeDefaultConfig();
 
     // -----------------------------------------------------------------------
-    //  2. Expand config + create runtime
+    //  2. Expand config + wire the sim source (off-thread-capable)
     // -----------------------------------------------------------------------
+    // The numeric runtime lives behind a SimSource (in-process here; a Web
+    // Worker in the browser) so an atomic 20-50 ms solve never hitches the
+    // render thread. `expanded` stays main-side — renderers and readouts read it
+    // — and is the pure expand(config) the source also computes, so both sides
+    // agree by construction (WORKER-SPEC §4). The source streams SNAPSHOTS; the
+    // render loop interpolates them at a smooth `simClock` (WORKER-SPEC §7).
     const expand = UM.ConfigSchema.expand.bind(UM.ConfigSchema);
 
     let expanded = expand(config);
-    let runtime  = LIB.MotorRun.create(expanded);
+
+    const Snap = LIB.Snapshot;
+    const buffer = new Snap.Buffer();
+    const source = makeSimSource({ MotorRun: LIB.MotorRun, expand: expand });
+
+    let geom = null;          // latest static geometry (meshes + counts) per epoch
+    let curEpoch = -1;        // epoch of `geom`/`dispRuntime`; snapshots gate on it
+    let dispRuntime = null;   // display proxy the renderers read (stable per epoch)
+    let simClock = 0;         // smooth render clock (sim-seconds)
+    let behind = false;       // solver can't sustain the ordered rate (badge)
+
+    // Build the display-runtime proxy for an epoch's geometry. Stable object
+    // identity across frames (the current-dot animator keys on it); its nested
+    // arrays are written in place each frame by Snap.writeInterp. sliceMesh and
+    // each per-slice field's `.mesh` reference the cached static meshes — the
+    // renderers read exactly the shape a real runtime exposes.
+    function buildDispRuntime(g) {
+      const perSlice = new Array(g.nSlices);
+      for (let k = 0; k < g.nSlices; k++) {
+        perSlice[k] = {
+          gap: { phi: 0 },
+          rotor:  { mesh: g.slices[k].rotor,  Anode: null, Belem: { mag: null, Bx: null, By: null } },
+          stator: { mesh: g.slices[k].stator, Anode: null, Belem: { mag: null, Bx: null, By: null } },
+        };
+      }
+      return {
+        stack: { sliceMesh: function (k) { return g.slices[k]; } },
+        state: { theta: 0, omega: 0, t: 0, i: new Float64Array(g.nCircuits) },
+        lastSolve: { torque: 0, fluxLinkages: new Float64Array(g.nCircuits), perSliceField: perSlice },
+      };
+    }
+
+    // Geometry (once per epoch): swap the cached meshes + display proxy, clear
+    // the snapshot buffer, reseed the render clock, and rebuild per-circuit
+    // readouts if the circuit count changed. `expanded` is refreshed to the same
+    // epoch's config before any rebuild posts, so rebuildReadouts sees it.
+    source.onGeometry(function (g) {
+      curEpoch = g.epoch;
+      geom = g;
+      dispRuntime = buildDispRuntime(g);
+      buffer.clear();
+      simClock = 0;
+      behind = false;
+      if (rdCurrents.length !== g.nCircuits) rebuildReadouts();
+    });
+
+    // Snapshots stream in; keep only those for the live epoch (in-flight
+    // snapshots from before a rebuild are dropped — WORKER-SPEC §9).
+    source.onSnapshot(function (s) {
+      if (s.epoch === curEpoch) buffer.push(s);
+    });
 
     // -----------------------------------------------------------------------
     //  3. Build bespoke DOM interior
@@ -242,8 +320,9 @@
       display: "none", whiteSpace: "nowrap",
     });
 
-    // Per-frame timing split: solve (runtime.step) vs render (3-D + 2-D + plots).
-    // Pause stops the solve but keeps rendering, so pausing isolates render cost.
+    // Per-frame timing split: solve (the pace command's in-process cost — ≈0
+    // once the sim runs in a Worker) vs render (3-D + 2-D + plots). Pause stops
+    // the solve but keeps rendering, so pausing isolates render cost.
     const perfBadge = el("span", "um-perf-badge", {
       fontSize: "11px", fontFamily: "ui-monospace, monospace", color: "#8a93a3",
       padding: "2px 6px", whiteSpace: "nowrap", marginLeft: "auto",
@@ -371,13 +450,13 @@
     function applyDrive(key, v) {
       drive[key] = v;
       if (key === "amp") {
-        for (const c of runtime.circuits) c.terminal.amp = v;
+        source.post({ type: "drive", amp: v });
       } else if (key === "freq") {
-        for (const c of runtime.circuits) c.terminal.freq = v;
+        source.post({ type: "drive", freq: v });
       } else if (key === "loadTorque") {
-        runtime.mechanical.loadTorque = v;
+        source.post({ type: "mechanical", loadTorque: v });
       } else if (key === "damping") {
-        runtime.mechanical.damping = v;
+        source.post({ type: "mechanical", damping: v });
       }
     }
     function reapplyDrive() {
@@ -392,10 +471,15 @@
     // tiny damping left the rotor with no sane steady state).
     for (const d of sliderDefs) applyDrive(d.key, d.value);
 
-    // Wall-time ceiling per render frame: runtime.step bails after this many ms
-    // of solve time so a heavy commutation transient never stalls rendering.
-    // Declared here, ahead of both the playback control and the stepping loop.
-    const FRAME_BUDGET_MS = 30;
+    // Pacing (WORKER-SPEC §8). Each frame the source is told to free-run the
+    // solver up to simClock + LEAD_FRAMES worth of per-frame advance, so a
+    // bracket ahead of the render clock always exists (covers Worker latency).
+    // If the clock outruns the newest solve by more than MAX_LAG_FRAMES the
+    // solver can't keep up: drop the backlog (render at latest, pull the clock
+    // back) and flag `behind`. Both are expressed as multiples of a nominal
+    // frame's sim-advance (speed / 60) so they scale with the ordered speed.
+    const LEAD_FRAMES = 3;
+    const MAX_LAG_FRAMES = 30;
 
     // Playback control — the ordered rate as a fraction of real time (sim-seconds
     // per real-second). This is the CEILING; the frame loop drops below it
@@ -459,23 +543,23 @@
       return function () { const i = refreshers.indexOf(fn); if (i >= 0) refreshers.splice(i, 1); };
     }
 
-    // Structural rebuild — geometry/topology changed. Fresh runtime (state
-    // reset), plot history cleared (so no line is drawn from the old tail back
-    // to t=0), per-circuit readouts rebuilt if the circuit count changed, and —
-    // when asked — the config normalized then the config-dependent panels
-    // rebuilt against it. Normalizing (e.g. collapsing a freshly loaded fixture's
-    // multi-ring bodies, which can reorder config.circuits) runs BEFORE expand so
-    // the runtime and drive are built from the same canonical config the panels
-    // show.
+    // Structural rebuild — geometry/topology changed. Posts a rebuild to the
+    // source (bumps epoch, builds a fresh runtime worker-side, ships new
+    // geometry); the onGeometry handler swaps the display proxy, clears the
+    // snapshot buffer, reseeds the clock, and rebuilds per-circuit readouts if
+    // the count changed. Drive/mechanical are re-pushed to the new runtime, plot
+    // history is cleared (no line from the old tail back to t=0), and — when
+    // asked — the config is normalized (BEFORE expand, so the runtime and drive
+    // build from the same canonical config the panels show) then the
+    // config-dependent panels rebuilt. `expanded` is refreshed here so the
+    // main-side renderers/readouts match the epoch the source is building.
     function requestRebuild(opts) {
       opts = opts || {};
       if (opts.rebuildPanels) for (const fn of normalizers.slice()) fn();
-      const prevN = expanded ? expanded.nCircuits : -1;
       expanded = expand(config);
-      runtime  = LIB.MotorRun.create(expanded);
+      source.post({ type: "rebuild", config: config });
       reapplyDrive();
       history.clear();
-      if (expanded.nCircuits !== prevN) rebuildReadouts();
       if (opts.rebuildPanels) for (const fn of refreshers.slice()) fn();
     }
 
@@ -490,7 +574,10 @@
 
     function buildCtx() {
       return {
-        runtime: runtime,
+        // The interpolated display proxy — what renderers read. The real
+        // numeric runtime lives behind `source` (off-thread-capable) and is
+        // never handed to the main thread.
+        runtime: dispRuntime,
         config:  config,
         view:    { yaw: orbitYaw, pitch: orbitPitch, dist: ORBIT_DIST },
         requestRebuild: requestRebuild,
@@ -541,11 +628,11 @@
     let rafId = null;
     let lastTime = null;
 
-    // Timing. Each frame advances `speed × dtFrame` of sim-time (speed is
-    // sim-s/real-s); the integrator's own LTE controller sizes the sub-steps.
-    // FRAME_BUDGET_MS on runtime.step is a hard anti-stall cap so a heavy solve
-    // never freezes the frame; when solves can't keep up the frame lands short
-    // and the plot fills less of its fixed window.
+    // Timing. Each frame advances the smooth `simClock` by speed × dtFrame
+    // (speed is sim-s/real-s) and renders the snapshot stream interpolated at
+    // that clock; the solver runs on its own LTE cadence behind the source. When
+    // solves can't keep up, the clock is pulled back to the newest solve and the
+    // plot fills less of its fixed window.
     let effRate = speed;           // smoothed achieved rate, for the header badge
 
     // -----------------------------------------------------------------------
@@ -585,7 +672,9 @@
     //  9. Reset handler
     // -----------------------------------------------------------------------
     btnReset.addEventListener("click", function () {
-      runtime.reset();
+      buffer.clear();
+      simClock = 0;
+      source.post({ type: "reset" });   // ships a fresh seed snapshot at t=0
       history.clear();
     });
 
@@ -734,25 +823,44 @@
       const dtFrame = Math.min((now - lastTime) / 1000, 0.05);
       lastTime = now;
 
-      // Physics — advance speed·dtFrame of sim-time; the integrator's LTE
-      // controller sizes the sub-steps. FRAME_BUDGET_MS is the hard anti-stall
-      // cap (runtime.step bails after the budget, always after ≥1 solve).
-      let solveMs = 0;
-      if (!paused) {
-        const advanceDt = speed * dtFrame;
-        const before = runtime.state.t;
-        const tSolve = nowMs();
-        runtime.step(advanceDt, FRAME_BUDGET_MS);
-        solveMs = nowMs() - tSolve;
-        const advanced = runtime.state.t - before;
-        const frameRate = dtFrame > 0 ? advanced / dtFrame : speed;
-        effRate += (frameRate - effRate) * 0.2;   // smooth for the badge
+      // Nominal per-frame sim-advance at the ordered speed; lead/lag windows
+      // scale off it (WORKER-SPEC §8).
+      const frameAdvance = speed / 60;
+      const maxLag = MAX_LAG_FRAMES * frameAdvance;
 
-        // Plot history — one sample per frame, on the sim-time axis.
-        const st  = runtime.state;
-        const tau = runtime.lastSolve ? runtime.lastSolve.torque : 0;
-        const i0  = st.i.length > 0 ? st.i[0] : 0;
-        history.push(st.t, tau, st.omega, i0);
+      // Pace — advance the smooth clock and tell the source to free-run the
+      // solver a few frames ahead, then reconcile the clock with the newest
+      // solve. `solveMs` is the in-process solve cost (≈0 once the sim runs in a
+      // Worker), shown in the perf badge.
+      let solveMs = 0;
+      if (!paused && curEpoch >= 0) {
+        simClock += speed * dtFrame;
+        const tSolve = nowMs();
+        source.post({ type: "pace", simClock: simClock, leadCap: LEAD_FRAMES * frameAdvance, paused: false });
+        solveMs = nowMs() - tSolve;
+        const latest = buffer.latest();
+        const res = Snap.resolveShowTime(simClock, latest ? latest.t : null, maxLag);
+        simClock = res.simClock;
+        behind = res.behind;
+      }
+
+      // Interpolate the display state at tShow and (when running) push a plot
+      // sample on the same clock so trace and axis scroll together.
+      const prevShow = dispRuntime ? dispRuntime.state.t : 0;
+      if (dispRuntime && buffer.count > 0) {
+        const latest = buffer.latest();
+        const r = Snap.resolveShowTime(simClock, latest.t, maxLag);
+        const br = buffer.bracket(r.tShow);
+        if (br) {
+          Snap.writeInterp(dispRuntime, br.A, br.B, br.f, r.tShow);
+          buffer.prune(r.tShow);
+          if (!paused) {
+            const st0 = dispRuntime.state;
+            history.push(st0.t, dispRuntime.lastSolve.torque, st0.omega, st0.i.length ? st0.i[0] : 0);
+            const frameRate = dtFrame > 0 ? (st0.t - prevShow) / dtFrame : speed;
+            effRate += (frameRate - effRate) * 0.2;   // smooth for the badge
+          }
+        }
       }
 
       // ---- render phase (timed) ----
@@ -778,21 +886,21 @@
           ortho: true,
         });
 
-        const rctx = { runtime: runtime, config: config, expanded: expanded, canvas: viewport3D, W: W3, H: H3 };
-        const mountCtx = buildCtx();
-
         // render3d.js always registers the 3-D rig before the first frame (its
         // <script> tag loads before runTabs), so RENDER3D is the only 3-D path.
-        if (UM.RENDER3D) {
-          UM.RENDER3D.paint(mountCtx, L3, rctx);
+        // Renderers read the interpolated display proxy (dispRuntime), never the
+        // off-thread runtime.
+        if (dispRuntime && UM.RENDER3D) {
+          const rctx = { runtime: dispRuntime, config: config, expanded: expanded, canvas: viewport3D, W: W3, H: H3 };
+          UM.RENDER3D.paint(buildCtx(), L3, rctx);
         }
       }
 
       // Cross-section views — dispatched through the 2-D-render seam. The
       // registrant (cross-section-render.js) decides which slice/view goes in
-      // which canvas. When no renderer is registered, paint a placeholder.
-      if (UM.CROSS_SECTION_2D) {
-        const dummyRctx = { runtime: runtime, config: config, expanded: expanded };
+      // which canvas. When no renderer / no frame yet, paint a placeholder.
+      if (dispRuntime && UM.CROSS_SECTION_2D) {
+        const dummyRctx = { runtime: dispRuntime, config: config, expanded: expanded };
         UM.CROSS_SECTION_2D.paint(buildCtx(), [canvas2DA, canvas2DB], dummyRctx);
       } else {
         paint2DPlaceholder(canvas2DA, "no 2-D renderer");
@@ -810,34 +918,42 @@
       perfBadge.textContent = "solve " + perfSolveMs.toFixed(1) + " · render " + perfRenderMs.toFixed(1) + " ms";
       UM._perf = { solveMs: perfSolveMs, renderMs: perfRenderMs };
 
-      // Readouts
-      const st = runtime.state;
-      const solved = runtime.lastSolve;
-      const tau = solved ? solved.torque : 0;
-      rdTorque.textContent = Number.isFinite(tau)      ? tau.toExponential(3)       : "—";
-      rdOmega.textContent  = Number.isFinite(st.omega) ? st.omega.toFixed(3)        : "—";
-      rdTheta.textContent  = Number.isFinite(st.theta) ? st.theta.toFixed(3)        : "—";
+      // Readouts — from the interpolated display proxy.
+      if (dispRuntime) {
+        const st = dispRuntime.state;
+        const solved = dispRuntime.lastSolve;
+        const tau = solved.torque;
+        rdTorque.textContent = Number.isFinite(tau)      ? tau.toExponential(3)       : "—";
+        rdOmega.textContent  = Number.isFinite(st.omega) ? st.omega.toFixed(3)        : "—";
+        rdTheta.textContent  = Number.isFinite(st.theta) ? st.theta.toFixed(3)        : "—";
 
-      for (let k = 0; k < rdCurrents.length; k++) {
-        const ik = st.i[k];
-        rdCurrents[k].textContent = Number.isFinite(ik) ? ik.toFixed(4) : "—";
-      }
-      if (solved) {
+        for (let k = 0; k < rdCurrents.length; k++) {
+          const ik = st.i[k];
+          rdCurrents[k].textContent = Number.isFinite(ik) ? ik.toFixed(4) : "—";
+        }
         for (let k = 0; k < rdFlux.length; k++) {
           const lk = solved.fluxLinkages[k];
           rdFlux[k].textContent = Number.isFinite(lk) ? lk.toExponential(3) : "—";
         }
       }
 
-      // Below-ordered warning — the machine can't sustain the ordered rate, so
-      // the floor holds playback below it (the plot fills less of the window).
-      if (!paused && effRate < speed * 0.9) {
+      // Below-ordered warning — the solver can't sustain the ordered rate, so
+      // the clock was pulled back to the newest solve (the plot fills less of
+      // the window). `behind` is set when the backlog was dropped this frame.
+      if (!paused && (behind || effRate < speed * 0.9)) {
         warnBadge.style.display = "";
         warnBadge.textContent = "⚠ playing " + (+effRate.toPrecision(2)) + "× · ordered " + (+speed.toPrecision(3)) + "×";
       } else {
         warnBadge.style.display = "none";
       }
     }
+
+    // Boot the sim: build the runtime + ship geometry and the t=0 seed
+    // (onGeometry/onSnapshot handlers above populate the display proxy and
+    // buffer synchronously for the in-process source), then push the current
+    // drive/load settings to the fresh runtime.
+    source.post({ type: "init", config: config });
+    reapplyDrive();
 
     // Start the loop
     rafId = requestAnimationFrame(frame);
@@ -859,6 +975,7 @@
       for (const fn of registeredShelfUnmounts)  fn();
       for (const fn of registeredHeaderUnmounts) fn();
 
+      source.dispose();
       host.removeChild(root);
     }
 

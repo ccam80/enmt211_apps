@@ -39,6 +39,8 @@
 <script src="../../lib/motor-slice.js"></script>
 <script src="../../lib/motor-stack.js"></script>
 <script src="../../lib/motor-run.js"></script>
+<script src="../../lib/snapshot-buffer.js"></script>
+<script src="../../lib/sim-source.js"></script>
 <script src="./mount.js"></script>
 <!-- unified-motor modules: later phases append <script> tags below this line ONLY -->
 <script src="./cross-section-render.js"></script>
@@ -62,6 +64,13 @@
 <script src="./machines/pole-mismatch-demo.js"></script>
 <!-- /unified-motor modules -->
 <script>
+  // Run the numeric solver in a Web Worker (off the render thread) so an atomic
+  // field solve never hitches the animation. The mount falls back to in-process
+  // automatically if the worker can't construct/init (e.g. file://). Set
+  // USE_SIM_WORKER=false to force the in-process path.
+  window.UnifiedMotor.SIM_WORKER_URL = "./sim-worker.js";
+  window.UnifiedMotor.USE_SIM_WORKER = true;
+
   LIB.FeaSolver.init().then(function () {
     LIB.App.runTabs({
       title: "Unified Motor",
