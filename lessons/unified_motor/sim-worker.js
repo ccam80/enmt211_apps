@@ -73,15 +73,26 @@ const engine = LIB.SimSource._createEngine(
 let latestPace = null;
 let running = false;
 
+// Any command failure is reported to the main thread, which self-heals to the
+// in-process source (WorkerSimSource fallback) — so a worker-side throw degrades
+// gracefully instead of silently freezing the display.
+function safeHandle(cmd) {
+  try {
+    engine.handle(cmd);
+  } catch (err) {
+    self.postMessage({ type: "error", message: String((err && err.message) || err) });
+  }
+}
+
 function onCommand(cmd) {
   if (!cmd) return;
   if (cmd.type === "pace") { latestPace = cmd; return; }
-  engine.handle(cmd);
+  safeHandle(cmd);
 }
 
 function loop() {
   if (!running) return;
-  if (latestPace) engine.handle({
+  if (latestPace) safeHandle({
     type: "pace",
     simClock: latestPace.simClock,
     leadCap: latestPace.leadCap,

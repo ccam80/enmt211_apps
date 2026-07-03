@@ -225,6 +225,7 @@
     let geom = null;          // latest static geometry (meshes + counts) per epoch
     let curEpoch = -1;        // epoch of `geom`/`dispRuntime`; snapshots gate on it
     let dispRuntime = null;   // display proxy the renderers read (stable per epoch)
+    let dispReady = false;    // a snapshot has been interpolated into dispRuntime
     let simClock = 0;         // smooth render clock (sim-seconds)
     let behind = false;       // solver can't sustain the ordered rate (badge)
 
@@ -257,6 +258,7 @@
       curEpoch = g.epoch;
       geom = g;
       dispRuntime = buildDispRuntime(g);
+      dispReady = false;      // don't render the proxy until a snapshot fills it
       buffer.clear();
       simClock = 0;
       behind = false;
@@ -854,6 +856,7 @@
         if (br) {
           Snap.writeInterp(dispRuntime, br.A, br.B, br.f, r.tShow);
           buffer.prune(r.tShow);
+          dispReady = true;   // field arrays now populated — safe to render
           if (!paused) {
             const st0 = dispRuntime.state;
             history.push(st0.t, dispRuntime.lastSolve.torque, st0.omega, st0.i.length ? st0.i[0] : 0);
@@ -889,8 +892,10 @@
         // render3d.js always registers the 3-D rig before the first frame (its
         // <script> tag loads before runTabs), so RENDER3D is the only 3-D path.
         // Renderers read the interpolated display proxy (dispRuntime), never the
-        // off-thread runtime.
-        if (dispRuntime && UM.RENDER3D) {
+        // off-thread runtime. Gated on dispReady: the proxy's field arrays are
+        // null until the first snapshot is interpolated (geometry and the first
+        // snapshot are separate async messages on the Worker path).
+        if (dispReady && UM.RENDER3D) {
           const rctx = { runtime: dispRuntime, config: config, expanded: expanded, canvas: viewport3D, W: W3, H: H3 };
           UM.RENDER3D.paint(buildCtx(), L3, rctx);
         }
@@ -899,7 +904,7 @@
       // Cross-section views — dispatched through the 2-D-render seam. The
       // registrant (cross-section-render.js) decides which slice/view goes in
       // which canvas. When no renderer / no frame yet, paint a placeholder.
-      if (dispRuntime && UM.CROSS_SECTION_2D) {
+      if (dispReady && UM.CROSS_SECTION_2D) {
         const dummyRctx = { runtime: dispRuntime, config: config, expanded: expanded };
         UM.CROSS_SECTION_2D.paint(buildCtx(), [canvas2DA, canvas2DB], dummyRctx);
       } else {
@@ -919,7 +924,7 @@
       UM._perf = { solveMs: perfSolveMs, renderMs: perfRenderMs };
 
       // Readouts — from the interpolated display proxy.
-      if (dispRuntime) {
+      if (dispReady) {
         const st = dispRuntime.state;
         const solved = dispRuntime.lastSolve;
         const tau = solved.torque;
