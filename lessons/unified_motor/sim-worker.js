@@ -24,33 +24,47 @@
 
 /* global self, importScripts */
 
-self.window = self;   // numeric libs read window.LIB / window.UnifiedMotor
+// Report a stage-tagged failure to the main thread. WorkerSimSource turns a
+// posted { type:"error" } into its self-healing in-process fallback AND surfaces
+// `message` in a console.warn — so a worker load/init failure names itself
+// instead of leaving a silent blank canvas.
+function reportError(stage, err) {
+  self.postMessage({ type: "error", message: stage + ": " + String((err && err.message) || err) });
+}
 
-self.process = {
-  env: { FEA_SOLVER_MJS_PATH: new URL("../../lib/solver.mjs", self.location.href).href },
-  versions: {},       // no .node → FeaSolver takes the browser fetch/blob path
-};
-
-importScripts(
-  "../../lib/util.js",
-  "../../lib/integrate.js",
-  "../../lib/winding-model.js",
-  "../../lib/excitation.js",
-  "../../lib/motor-circuit.js",
-  "../../lib/motor-mesh.js",
-  "../../lib/motor-mesh-view.js",
-  "../../lib/airgap-mortar.js",
-  "../../lib/fea-solver.js",
-  "../../lib/motor-slice.js",
-  "../../lib/motor-stack.js",
-  "../../lib/bdf-integrator.js",
-  "../../lib/motor-run.js",
-  "./config-schema.js",
-  "../../lib/sim-source.js"
-);
-
-const LIB = self.LIB;
-const UM = self.UnifiedMotor;
+let LIB, UM;
+try {
+  self.window = self;   // numeric libs read window.LIB / window.UnifiedMotor
+  self.process = {
+    env: { FEA_SOLVER_MJS_PATH: new URL("../../lib/solver.mjs", self.location.href).href },
+    versions: {},       // no .node → FeaSolver takes the browser fetch/blob path
+  };
+  importScripts(
+    "../../lib/util.js",
+    "../../lib/integrate.js",
+    "../../lib/winding-model.js",
+    "../../lib/excitation.js",
+    "../../lib/motor-circuit.js",
+    "../../lib/motor-mesh.js",
+    "../../lib/motor-mesh-view.js",
+    "../../lib/airgap-mortar.js",
+    "../../lib/fea-solver.js",
+    "../../lib/motor-slice.js",
+    "../../lib/motor-stack.js",
+    "../../lib/bdf-integrator.js",
+    "../../lib/motor-run.js",
+    "./config-schema.js",
+    "../../lib/sim-source.js"
+  );
+  LIB = self.LIB;
+  UM = self.UnifiedMotor;
+  if (!LIB || !LIB.SimSource || !LIB.MotorRun || !UM || !UM.ConfigSchema) {
+    throw new Error("libs missing after importScripts (LIB.SimSource/MotorRun, UM.ConfigSchema)");
+  }
+} catch (err) {
+  reportError("worker load", err);
+  throw err;   // stop the worker; the main thread has already fallen back
+}
 
 // Per-solve wall budget: a pace command solves toward its target until this many
 // ms elapse, then yields so a newer pace / other command can be processed. Keeps
@@ -114,5 +128,5 @@ LIB.FeaSolver.init().then(function () {
   loop();
   self.postMessage({ type: "ready" });
 }).catch(function (err) {
-  self.postMessage({ type: "error", message: String((err && err.message) || err) });
+  reportError("FeaSolver.init", err);
 });

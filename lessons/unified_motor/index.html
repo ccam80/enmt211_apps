@@ -64,12 +64,14 @@
 <script src="./machines/pole-mismatch-demo.js"></script>
 <!-- /unified-motor modules -->
 <script>
-  // Run the numeric solver in a Web Worker (off the render thread) so an atomic
-  // field solve never hitches the animation. The mount falls back to in-process
-  // automatically if the worker can't construct/init (e.g. file://). Set
-  // USE_SIM_WORKER=false to force the in-process path.
+  // Optional: run the numeric solver in a Web Worker (off the render thread) so
+  // an atomic field solve never hitches the animation. Currently OFF by default
+  // — the in-worker FeaSolver WASM init path is not yet verified in a browser
+  // (see BACKLOG "Worker live-verify"). Set USE_SIM_WORKER=true to try it; on any
+  // worker load/init failure the mount self-heals to the in-process solver and a
+  // console.warn names the reason.
   window.UnifiedMotor.SIM_WORKER_URL = "./sim-worker.js";
-  window.UnifiedMotor.USE_SIM_WORKER = true;
+  window.UnifiedMotor.USE_SIM_WORKER = false;
 
   LIB.FeaSolver.init().then(function () {
     LIB.App.runTabs({

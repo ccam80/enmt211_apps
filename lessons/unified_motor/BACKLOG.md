@@ -31,21 +31,28 @@ handler and/or underlying model input does not yet exist.
 - **Brain:** config-schema circuit shape exists; needs an editor panel + rebuild
   on change. Larger — wants its own design pass.
 
-## Needs live verification
+## Broken / needs diagnosis
 
-### Worker live-verify (solver → Web Worker)
-- The solver now runs in a Web Worker (`sim-worker.js`) via `SimSource.createWorker`;
-  enabled by default (`index.html`: `USE_SIM_WORKER=true`). Glue is unit-tested
-  with a fake worker; the in-process fallback is fully tested. But the real
-  in-worker path — `importScripts` of the numeric libs under `self.window=self`,
-  FeaSolver WASM init via the `process.env.FEA_SOLVER_MJS_PATH` URL trick, first
-  geometry/snapshot over a live HTTP server — CANNOT be checked headless (no
-  Worker+WASM in node).
-- To verify: serve the repo (`python -m http.server 8765`), open the unified
-  motor, confirm the 3-D view renders and spins smoothly and DevTools shows a
-  worker thread with no console error. If blank/erroring: the source self-heals
-  to in-process (a `console.warn` names the reason); to force in-process set
-  `UnifiedMotor.USE_SIM_WORKER=false`. Report the warn reason back.
+### Worker path fails in-browser (solver → Web Worker) — OFF by default
+- `SimSource.createWorker` + `sim-worker.js` run the solver off-thread. Enabling
+  it (`USE_SIM_WORKER=true`) gave a BLANK canvas with NO console message: the
+  worker never produced geometry+snapshots and never errored/timed-out within the
+  window observed. Reverted to OFF; the in-process path (444 tests, mount-smoke
+  renders real frames) is the default and works.
+- Established (not guessed): the `importScripts` list is exactly the set
+  `tests/pipeline/_fixtures.js` loads with only a `window` shim and NO document,
+  and those tests pass — so importScripts is not the failure. The remaining
+  suspect is in-worker `FeaSolver.init()` (loading `solver.mjs`/`solver.wasm`
+  inside a Worker — likely dynamic `import()` of the ES-module glue in a CLASSIC
+  worker, or the wasm fetch path). NOT yet proven to a line.
+- Instrumented: `sim-worker.js` now try/catches its load and posts a stage-tagged
+  `{type:"error"}` (worker load / FeaSolver.init); the fallback timeout dropped to
+  3 s. So flipping `USE_SIM_WORKER=true` now self-heals to in-process within 3 s
+  AND emits a `console.warn` naming the stage + real error message.
+- NEXT: flip it on, capture the warn text + DevTools Network status for the
+  worker's `solver.mjs` / `solver.wasm` requests + Application→Workers. That data
+  pins the exact failure; likely fix is loading solver.mjs in the worker without
+  a classic-worker dynamic import (module worker, or main-thread-fetch + transfer).
 
 ## Bugs / latent
 
