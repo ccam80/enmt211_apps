@@ -226,15 +226,17 @@
     let curEpoch = -1;        // epoch of `geom`/`dispRuntime`; snapshots gate on it
     let dispRuntime = null;   // display proxy the renderers read (stable per epoch)
     let dispReady = false;    // a snapshot has been interpolated into dispRuntime
+    let lastNearest = null;   // nearest snapshot behind the current field arrays
     let simClock = 0;         // smooth render clock (sim-seconds)
     let behind = false;       // solver can't sustain the ordered rate (badge)
 
-    // Build the display-runtime proxy for an epoch's geometry. Stable object
-    // identity across frames (the current-dot animator keys on it); its nested
-    // arrays are written in place each frame by Snap.writeInterp. sliceMesh and
-    // each per-slice field's `.mesh` reference the cached static meshes — the
-    // renderers read exactly the shape a real runtime exposes.
-    function buildDispRuntime(g) {
+    // A fresh lastSolve skeleton for an epoch's geometry. Given a NEW object
+    // identity each time the interpolation's nearest snapshot changes (i.e. the
+    // field data actually changes), because the renderers' overlay-grid cache
+    // keys on the lastSolve object identity — a stable-forever lastSolve would
+    // freeze the resampled |B|/flux overlays while the rotor kept rotating. Each
+    // per-slice `.mesh` references the cached static mesh.
+    function buildLastSolve(g) {
       const perSlice = new Array(g.nSlices);
       for (let k = 0; k < g.nSlices; k++) {
         perSlice[k] = {
@@ -243,10 +245,21 @@
           stator: { mesh: g.slices[k].stator, Anode: null, Belem: { mag: null, Bx: null, By: null } },
         };
       }
+      return { torque: 0, fluxLinkages: new Float64Array(g.nCircuits), perSliceField: perSlice };
+    }
+
+    // Build the display-runtime proxy for an epoch's geometry. Stable object
+    // identity across frames (the current-dot animator keys on it); its nested
+    // arrays are written in place each frame by Snap.writeInterp. sliceMesh
+    // references the cached static meshes — the renderers read exactly the shape
+    // a real runtime exposes. lastSolve is swapped for a fresh object on each
+    // nearest-snapshot change (see buildLastSolve) — dots key on the runtime, not
+    // lastSolve, so its identity is free to change.
+    function buildDispRuntime(g) {
       return {
         stack: { sliceMesh: function (k) { return g.slices[k]; } },
         state: { theta: 0, omega: 0, t: 0, i: new Float64Array(g.nCircuits) },
-        lastSolve: { torque: 0, fluxLinkages: new Float64Array(g.nCircuits), perSliceField: perSlice },
+        lastSolve: buildLastSolve(g),
       };
     }
 
@@ -259,6 +272,7 @@
       geom = g;
       dispRuntime = buildDispRuntime(g);
       dispReady = false;      // don't render the proxy until a snapshot fills it
+      lastNearest = null;
       buffer.clear();
       simClock = 0;
       behind = false;
@@ -854,6 +868,15 @@
         const r = Snap.resolveShowTime(simClock, latest.t, maxLag);
         const br = buffer.bracket(r.tShow);
         if (br) {
+          // When the nearest snapshot (source of the field arrays) changes, give
+          // lastSolve a fresh identity so the renderers' overlay-grid cache
+          // invalidates and |B|/flux recompute; between solves it stays stable so
+          // the rigid-rotation frames reuse the cached grids.
+          const nearest = br.f < 0.5 ? br.A : br.B;
+          if (nearest !== lastNearest) {
+            dispRuntime.lastSolve = buildLastSolve(geom);
+            lastNearest = nearest;
+          }
           Snap.writeInterp(dispRuntime, br.A, br.B, br.f, r.tShow);
           buffer.prune(r.tShow);
           dispReady = true;   // field arrays now populated — safe to render

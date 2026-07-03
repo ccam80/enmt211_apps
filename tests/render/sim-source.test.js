@@ -82,6 +82,7 @@ test("init ships geometry (epoch 0) then a seed snapshot at t=0", () => {
 
   assert.equal(snaps.length, 1);
   const s = snaps[0];
+  assert.equal(s.type, "snapshot");   // Worker→main router dispatches on this
   assert.equal(s.epoch, 0);
   assert.equal(s.t, 0);
   assert.equal(s.i.length, 2);

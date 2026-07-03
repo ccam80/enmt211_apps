@@ -31,28 +31,21 @@ handler and/or underlying model input does not yet exist.
 - **Brain:** config-schema circuit shape exists; needs an editor panel + rebuild
   on change. Larger — wants its own design pass.
 
-## Broken / needs diagnosis
+## Fixed
 
-### Worker path fails in-browser (solver → Web Worker) — OFF by default
-- `SimSource.createWorker` + `sim-worker.js` run the solver off-thread. Enabling
-  it (`USE_SIM_WORKER=true`) gave a BLANK canvas with NO console message: the
-  worker never produced geometry+snapshots and never errored/timed-out within the
-  window observed. Reverted to OFF; the in-process path (444 tests, mount-smoke
-  renders real frames) is the default and works.
-- Established (not guessed): the `importScripts` list is exactly the set
-  `tests/pipeline/_fixtures.js` loads with only a `window` shim and NO document,
-  and those tests pass — so importScripts is not the failure. The remaining
-  suspect is in-worker `FeaSolver.init()` (loading `solver.mjs`/`solver.wasm`
-  inside a Worker — likely dynamic `import()` of the ES-module glue in a CLASSIC
-  worker, or the wasm fetch path). NOT yet proven to a line.
-- Instrumented: `sim-worker.js` now try/catches its load and posts a stage-tagged
-  `{type:"error"}` (worker load / FeaSolver.init); the fallback timeout dropped to
-  3 s. So flipping `USE_SIM_WORKER=true` now self-heals to in-process within 3 s
-  AND emits a `console.warn` naming the stage + real error message.
-- NEXT: flip it on, capture the warn text + DevTools Network status for the
-  worker's `solver.mjs` / `solver.wasm` requests + Application→Workers. That data
-  pins the exact failure; likely fix is loading solver.mjs in the worker without
-  a classic-worker dynamic import (module worker, or main-thread-fetch + transfer).
+### Worker path — snapshots dropped for want of a `type` field (FIXED)
+- Root cause (found via Playwright, not guessed): the worker emits
+  ready → geometry → snapshot, but `makeSnapshot` returned an object with no
+  `type` field, and the WorkerSimSource message router dispatches on
+  `msg.type === "snapshot"`. So geometry routed (it has `type:"geometry"`) but
+  every snapshot was silently dropped → blank, no error. The classic-worker
+  `importScripts`/FeaSolver-init concerns were unfounded — the worker inits fine.
+- Fix: tag snapshots with `type:"snapshot"` in `makeSnapshot`. Contract test
+  asserts it. Worker re-enabled by default; self-heals to in-process on failure.
+- Playwright note: the app does not fully mount under headless Chromium
+  (frame loop idle, `_perf` null) — a headless artifact; it mounts and runs in a
+  real browser. Live-app worker validation relies on the message trace + the
+  user's browser, not a headless screenshot.
 
 ## Bugs / latent
 
